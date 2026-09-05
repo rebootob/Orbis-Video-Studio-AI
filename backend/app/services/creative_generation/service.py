@@ -119,7 +119,12 @@ class StoryGenerationService:
                 "No source context provided for story generation. Provide a project brief, document assets, or custom instructions.",
             )
 
-        # 5. Compose prompt
+        # 5. Build locked project reference context
+        from app.services.reference_library.context_builder import ReferenceContextBuilder
+        ref_context = ReferenceContextBuilder.build_context(self.db, project_id)
+        ref_text = ReferenceContextBuilder.format_prompt_section(ref_context)
+
+        # 6. Compose prompt
         prompt = StoryPromptComposer.compose(
             project_title=project.title,
             project_brief=project.description,
@@ -129,6 +134,7 @@ class StoryGenerationService:
             language=language,
             target_audience=target_audience,
             custom_instructions=custom_instructions,
+            reference_context_text=ref_text,
         )
 
         # 6. Dispatch call to CreativeGenerationProvider

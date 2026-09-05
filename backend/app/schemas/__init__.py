@@ -9,6 +9,13 @@ from app.schemas.story_generation import (
     SceneResponse,
     ShotResponse,
 )
+from app.schemas.reference_library import (
+    ProjectReferenceCreate, ProjectReferenceUpdate, ProjectReferenceResponse,
+    CharacterBibleCreate, CharacterBibleUpdate, CharacterBibleResponse,
+    LocationBibleCreate, LocationBibleUpdate, LocationBibleResponse,
+    StyleBibleCreate, StyleBibleUpdate, StyleBibleResponse,
+    BrandBibleCreate, BrandBibleUpdate, BrandBibleResponse,
+)
 
 __all__ = [
     "HealthCheck",
@@ -22,6 +29,11 @@ __all__ = [
     "StoryResponse",
     "SceneResponse",
     "ShotResponse",
+    "ProjectReferenceCreate", "ProjectReferenceUpdate", "ProjectReferenceResponse",
+    "CharacterBibleCreate", "CharacterBibleUpdate", "CharacterBibleResponse",
+    "LocationBibleCreate", "LocationBibleUpdate", "LocationBibleResponse",
+    "StyleBibleCreate", "StyleBibleUpdate", "StyleBibleResponse",
+    "BrandBibleCreate", "BrandBibleUpdate", "BrandBibleResponse",
 ]
 
 

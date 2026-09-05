@@ -7,18 +7,18 @@
 ## State Flags
 
 ```yaml
-PHASE: P1 — Core Architecture & Data Engine
-ACTIVE WORK PACKAGE: P1-WP005 — Story & Screenplay Script Generator Service
+PHASE: P2 — Multi-Modal Reference, Continuity & Scene Engine
+ACTIVE WORK PACKAGE: P2-WP006 — Reference Library & Character/Location Bibles
 CURRENT GATE: CHATGPT INDEPENDENT REVIEW
 DOCUMENTATION: COMPLETE
 IMPLEMENTATION: IMPLEMENTED / WAITING CHATGPT REVIEW
-HANDOFF_BASE_SHA: d8eba293823734a05b1ed20f78ce9c5bbbd2a48e
+HANDOFF_BASE_SHA: a3cf384bc312eb257ef8b838922debdbc71bdc24
 VIDU: PLANNED / NOT STARTED
 CLOUD INFRASTRUCTURE: PLANNED / NOT STARTED
 ANTIGRAVITY: BOUNDED EXECUTION COMPLETE / AWAITING REVIEW
 CODEX: STOP
 CLAUDE CODE: STOP
-NEXT WP: P2-WP006 — PROPOSED / NOT AUTHORIZED
+NEXT WP: P2-WP007 — PROPOSED / NOT AUTHORIZED
 NEXT ALLOWED ACTION: ChatGPT review only
 ```
 
@@ -32,8 +32,9 @@ NEXT ALLOWED ACTION: ChatGPT review only
 | **Backend Core Framework (P1-WP002)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
 | **Domain Database & Schemas (P1-WP002)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
 | **Object Storage & Asset API (P1-WP003)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
-| **Document Ingestion Engine (P1-WP004)** | **PASS / CLOSED (MERGED)** | Merged into `main` at commit `d8eba293823734a05b1ed20f78ce9c5bbbd2a48e`. |
-| **Story & Script Generator (P1-WP005)** | **IMPLEMENTED / WAITING REVIEW** | OpenAI provider abstraction, prompt composers, Story/Scene/Shot generation & persistence, audit logging. |
+| **Document Ingestion Engine (P1-WP004)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
+| **Story & Script Generator (P1-WP005)** | **PASS / CLOSED (MERGED)** | Merged into `main` at commit `a3cf384bc312eb257ef8b838922debdbc71bdc24`. |
+| **Reference Library & Bibles (P2-WP006)** | **IMPLEMENTED / WAITING REVIEW** | ProjectReference, CharacterBible, LocationBible, StyleBible, BrandBible entities, Alembic migration 005, ReferenceService, ReferenceContextBuilder, REST endpoints. |
 | **Frontend / Web UI** | **NOT STARTED** | Planned for future WP. |
 | **Vidu Provider Adapter** | **PLANNED / NOT STARTED** | Provider interface and Vidu spec documented in P0-WP001. |
 | **Cloud Infrastructure / DB** | **PLANNED / NOT STARTED** | Architecture defined, cloud provisioning unauthorized. |
@@ -43,5 +44,5 @@ NEXT ALLOWED ACTION: ChatGPT review only
 
 ## Gate & Transition Rules
 
-1. **Active Work Package Status:** `P1-WP005` implementation complete, awaiting ChatGPT independent review.
-2. **No Unapproved Work Packages:** Execution engines MUST NOT start P2-WP006 or write code without explicit Project Owner authorization.
+1. **Active Work Package Status:** `P2-WP006` implementation complete, awaiting ChatGPT independent review.
+2. **No Unapproved Work Packages:** Execution engines MUST NOT start P2-WP007 or write code without explicit Project Owner authorization.

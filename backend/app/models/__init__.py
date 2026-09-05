@@ -7,6 +7,13 @@ from app.models.asset import Asset
 from app.models.generation_job import GenerationJob
 from app.models.document_extraction import DocumentExtraction
 from app.models.generation_audit import GenerationAuditLog
+from app.models.reference_library import (
+    ProjectReference,
+    CharacterBible,
+    LocationBible,
+    StyleBible,
+    BrandBible,
+)
 
 __all__ = [
     "Base",
@@ -18,5 +25,10 @@ __all__ = [
     "GenerationJob",
     "DocumentExtraction",
     "GenerationAuditLog",
+    "ProjectReference",
+    "CharacterBible",
+    "LocationBible",
+    "StyleBible",
+    "BrandBible",
 ]
 
