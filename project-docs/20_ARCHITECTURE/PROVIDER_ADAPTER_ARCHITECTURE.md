@@ -1,6 +1,6 @@
 # Provider Adapter Architecture
 
-> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md)
+> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md)
 
 ---
 
@@ -12,9 +12,9 @@ Orbis Video Studio AI enforces strict decoupling between the core domain engine 
 graph TD
     CoreDomain[Core Shot Engine] -->|Invokes Adapter Interface| AdapterInterface["IVideoGenerationProviderAdapter"]
     AdapterInterface --> ViduImpl["Vidu Provider Adapter (V1 Default)"]
-    AdapterInterface -.- VeoImpl["Veo Provider Adapter (Future)"]
-    AdapterInterface -.- RunwayImpl["Runway Provider Adapter (Future)"]
-    AdapterInterface -.- LumaImpl["Luma Provider Adapter (Future)"]
+    AdapterInterface -.- VeoImpl["Veo Provider Adapter (Future Candidate)"]
+    AdapterInterface -.- RunwayImpl["Runway Provider Adapter (Future Candidate)"]
+    AdapterInterface -.- LumaImpl["Luma Provider Adapter (Future Candidate)"]
 
     ViduImpl -->|HTTPS API Payload| ViduAPI["Vidu Cloud API"]
 ```
@@ -23,7 +23,7 @@ graph TD
 
 ## 2. Abstract Provider Adapter Interface Spec
 
-All provider adapters MUST implement the generic interface contract (TypeScript / Python abstraction):
+All provider adapters MUST implement the generic interface contract (Language-agnostic abstraction pattern; TypeScript / Python as candidate implementations):
 
 ```typescript
 export interface VideoGenerationParams {
@@ -72,23 +72,13 @@ export interface IVideoGenerationProviderAdapter {
 
 ### Primary Characteristics
 - **Provider ID:** `vidu`
-- **Default for V1:** YES
+- **Default for V1:** YES (LOCKED requirement)
 - **API Protocol:** Asynchronous HTTP REST API with Webhook notification & polling fallback.
 - **Reference Image Payload:** Supports multi-image reference inputs (Character Bible reference images + Location reference image).
-
-### Mapping Table: Domain -> Vidu Payload
-
-| Domain Parameter | Vidu API Request Field | Conversion / Logic |
-| :--- | :--- | :--- |
-| `visual_prompt` | `prompt` | Enhanced with style prefix and reference tag tokens. |
-| `aspectRatio` | `aspect_ratio` | Maps directly (`16:9`, `9:16`, `1:1`). |
-| `duration_seconds` | `duration` | Clamped to supported Vidu durations (4s / 8s). |
-| `reference_images` | `character_reference`, `style_reference` | Object storage URLs passed as HTTPS array. |
-| `seed` | `seed` | Preserved for reproducible regenerations. |
 
 ---
 
 ## 4. Multi-Provider Fallback & Extensibility
 
-- **Future Providers (Veo, Runway, Luma):** Can be added by implementing `IVideoGenerationProviderAdapter` without altering the shot state machine, timeline engine, or database schemas.
+- **Future Candidate Providers (Veo, Runway, Luma):** Can be added by implementing `IVideoGenerationProviderAdapter` without altering the shot state machine, timeline engine, or database schemas.
 - **No Tight Coupling:** Application backend code MUST NOT import provider-specific SDKs outside the adapter package directory.

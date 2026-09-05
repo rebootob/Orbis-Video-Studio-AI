@@ -1,18 +1,22 @@
 # Chat Session Handoff & Protocol
 
-> **Canonical Document Location:** [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/CHAT_HANDOFF.md)
+> **Canonical Document Location:** [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md)
 
 ---
 
-## 1. Handoff Snapshot
+## 1. Post-PR State & Repository Snapshot
 
-- **Repository:** `https://github.com/rebootob/Orbis-Video-Studio-AI.git`
-- **Canonical Main Branch:** `main`
-- **Active Feature Branch:** `ai/p0-wp001-doc-foundation`
-- **Current Phase:** `P0 — Foundation & Governance`
+- **Repository:** `rebootob/Orbis-Video-Studio-AI`
+- **Canonical Branch:** `main`
+- **Active Branch:** `ai/p0-wp001-doc-foundation`
+- **Pull Request:** `#1` ([https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1))
+- **Phase:** `P0 — Foundation & Governance`
 - **Active Work Package:** `P0-WP001 — Project Governance & Architecture Documentation Foundation`
-- **Next Gate:** `ChatGPT Independent Review & Owner Sign-off`
-- **Current Execution Status:** `DOCUMENTATION COMPLETE — PR PENDING REVIEW`
+- **Current Gate:** `CHATGPT INDEPENDENT CORRECTIVE REVIEW`
+- **Documentation:** `COMPLETE / CORRECTIVE APPLIED`
+- **Implementation:** `NOT AUTHORIZED`
+- **Next WP:** `DO NOT START`
+- **Next Allowed Action:** `ChatGPT review only`
 
 ---
 
@@ -20,44 +24,29 @@
 
 | Engine | Authorized Status | Permitted Scope |
 | :--- | :--- | :--- |
-| **ChatGPT** | **ACTIVE (Control Plane)** | Architect, lead, review, design approval. |
-| **Antigravity** | **BOUNDED EXECUTION** | Authorized ONLY for P0-WP001 documentation creation. Must STOP after opening PR. |
+| **ChatGPT** | **ACTIVE (Control Plane)** | Architect, lead, review, design approval, independent review. |
+| **Antigravity** | **STOP AFTER CORRECTIVE PUSH** | Bounded execution complete for P0-WP001 corrective pass. Must STOP. |
 | **Codex** | **STOP** | Inactive. No authorization. |
 | **Claude Code** | **STOP** | Inactive. No authorization. |
 
 ---
 
-## 3. Completed & Pending Work
+## 3. Completed Corrective Actions
 
-### Completed in P0-WP001
-- Initial repository setup and Git initialization.
-- Creation of control plane files (`00_CONTROL/`).
-- Creation of governance files (`10_GOVERNANCE/`).
-- Creation of technical architecture files (`20_ARCHITECTURE/`).
-- Creation of product model files (`30_PRODUCT/`).
-- Creation of delivery and quality gate files (`40_DELIVERY/`).
-- Creation of root [`README.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/README.md).
-
-### Pending Actions
-- Commit changes on `ai/p0-wp001-doc-foundation`.
-- Push branch `ai/p0-wp001-doc-foundation` to GitHub origin.
-- Open Pull Request into `main`.
-- Receive independent review from ChatGPT and approval from Project Owner.
+- Replaced ALL local machine-specific links (`file:///c:/...`) with repository-relative Markdown links across all 27 documentation files.
+- Updated `CHAT_HANDOFF.md`, `CURRENT_STATE.md`, and `ACTIVE_TASK.md` to reflect actual post-PR state and removed stale pending items.
+- Clarified technology selection parameters across architectural documents by explicitly distinguishing **REQUIRED CAPABILITY**, **RECOMMENDED CANDIDATE**, and **TBD / NOT YET LOCKED**.
+- Re-verified V1 Scope clarity (primary V1 production success path) while preserving architectural readiness for integration APIs and multi-output rendering.
+- Committed corrective changes to `ai/p0-wp001-doc-foundation` and pushed to PR `#1`.
 
 ---
 
-## 4. Prohibited Actions & Next Allowed Step
+## 4. Strict Prohibitions & Next Allowed Step
 
 ### Strictly Prohibited
-- Do NOT merge PR automatically.
+- Do NOT merge PR `#1` automatically.
 - Do NOT start P0-WP002 or any subsequent Work Package.
-- Do NOT write any application code or deploy any cloud infrastructure.
+- Do NOT write any application code, frontend/backend logic, or provision cloud resources.
 
 ### Next Allowed Step
-After PR is opened, return execution summary to Project Owner containing:
-1. Pull Request Number & URL
-2. Branch Name (`ai/p0-wp001-doc-foundation`)
-3. Exact HEAD Git SHA
-4. List of files created
-5. Open / TBD items
-6. Explicit confirmation that NO code implementation or deployment was performed.
+After pushing corrective commit to PR `#1`, execution engine (Antigravity) MUST STOP immediately. The next allowed action is **ChatGPT Independent Corrective Review** and Project Owner approval.

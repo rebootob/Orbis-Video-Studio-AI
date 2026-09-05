@@ -1,6 +1,6 @@
 # User Production Workflow
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/USER_WORKFLOW.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/USER_WORKFLOW.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/USER_WORKFLOW.md`](project-docs/30_PRODUCT/USER_WORKFLOW.md)
 
 ---
 
@@ -56,4 +56,4 @@ flowchart TD
 ### Stage 7: Selective Regeneration & Final Cloud Export
 - If specific shots require improvement, user regenerates ONLY target unlocked shots.
 - User approves final preview and submits job to Cloud Render Engine.
-- Cloud FFmpeg workers encode master MP4 file and multi-platform output variants.
+- Cloud video compositing workers encode master MP4 file and multi-platform output variants.

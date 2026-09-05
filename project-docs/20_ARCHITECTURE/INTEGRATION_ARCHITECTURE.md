@@ -1,6 +1,6 @@
 # External Integration Architecture
 
-> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md)
+> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md)
 
 ---
 
@@ -34,7 +34,14 @@ graph LR
 
 ---
 
-## 2. Supported External Operations
+## 2. Integration Readiness vs V1 Production Scope
+
+- **Integration-Ready Architecture (LOCKED REQUIREMENT):** The system design preserves API schemas, authentication hooks, rate limiters, and idempotency key handling so external agents (Hermes) and automation platforms (n8n) can integrate securely.
+- **V1 Production Priority:** Full end-to-end V1 execution focuses on user browser workflow success. External integration connectors remain architecturally enabled without delaying core V1 release gates.
+
+---
+
+## 3. Supported External Operations
 
 The API Gateway supports the following controlled actions:
 1. `POST /api/v1/projects` — Create new production project.
@@ -48,17 +55,9 @@ The API Gateway supports the following controlled actions:
 
 ---
 
-## 3. Idempotency Safeguard Policy
+## 4. Idempotency Safeguard Policy
 
 To prevent network retries or duplicate automation loops from triggering expensive, duplicate chargeable video generations:
 - All mutation endpoints (`POST /generate`, `POST /render`) REQUIRE an `X-Idempotency-Key` HTTP header.
-- The Integration Gateway logs idempotency keys in Redis/Postgres alongside the corresponding `job_id` and response payload for 72 hours.
+- The Integration Gateway logs idempotency keys in cache/storage alongside the corresponding `job_id` and response payload for 72 hours.
 - Duplicate requests presenting an identical key return the existing job status without initiating new provider calls or incurring charges.
-
----
-
-## 4. Security & Audit Logging
-
-- **Authentication:** Bearer tokens (API Key) or OAuth2 Client Credentials.
-- **Role Permissions:** Granular scopes (`project:create`, `shot:generate`, `render:export`).
-- **Audit Logging:** Every external API invocation logs client IP, agent ID, endpoint, request payload hash, timestamp, and response status to the system audit table.

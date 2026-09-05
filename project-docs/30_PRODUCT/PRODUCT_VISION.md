@@ -1,6 +1,6 @@
 # Product Vision & Core Mission
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/PRODUCT_VISION.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/PRODUCT_VISION.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/PRODUCT_VISION.md`](project-docs/30_PRODUCT/PRODUCT_VISION.md)
 
 ---
 

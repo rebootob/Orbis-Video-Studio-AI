@@ -1,6 +1,6 @@
 # Output Model & Multi-Platform Profiles
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/OUTPUT_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/OUTPUT_MODEL.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/OUTPUT_MODEL.md`](project-docs/30_PRODUCT/OUTPUT_MODEL.md)
 
 ---
 

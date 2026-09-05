@@ -1,6 +1,6 @@
 # Authority & Governance Model
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md`](project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md)
 
 ---
 
@@ -54,7 +54,7 @@ graph TD
 
 | Decision Category | Required Authorization | Protocol |
 | :--- | :--- | :--- |
-| **Architectural Change** | ChatGPT Review + Owner Approval | Formal RFC in [`project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md) |
-| **Scope Expansion / New WP** | Project Owner Approval | Formal WP definition in [`project-docs/40_DELIVERY/WORK_PACKAGES.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/40_DELIVERY/WORK_PACKAGES.md) |
-| **Financial / Provider Cost Gate** | Project Owner Approval | Configurable threshold in [`project-docs/10_GOVERNANCE/APPROVAL_POLICY.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/APPROVAL_POLICY.md) |
-| **PR Merge into `main`** | ChatGPT Review + Owner Merge | PR review checklist in [`project-docs/40_DELIVERY/RELEASE_GATES.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/40_DELIVERY/RELEASE_GATES.md) |
+| **Architectural Change** | ChatGPT Review + Owner Approval | Formal RFC in [`project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md`](project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md) |
+| **Scope Expansion / New WP** | Project Owner Approval | Formal WP definition in [`project-docs/40_DELIVERY/WORK_PACKAGES.md`](project-docs/40_DELIVERY/WORK_PACKAGES.md) |
+| **Financial / Provider Cost Gate** | Project Owner Approval | Configurable threshold in [`project-docs/10_GOVERNANCE/APPROVAL_POLICY.md`](project-docs/10_GOVERNANCE/APPROVAL_POLICY.md) |
+| **PR Merge into `main`** | ChatGPT Review + Owner Merge | PR review checklist in [`project-docs/40_DELIVERY/RELEASE_GATES.md`](project-docs/40_DELIVERY/RELEASE_GATES.md) |

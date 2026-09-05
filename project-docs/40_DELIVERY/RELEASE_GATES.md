@@ -1,6 +1,6 @@
 # Quality, Security & Cost Release Gates
 
-> **Canonical Document Location:** [`project-docs/40_DELIVERY/RELEASE_GATES.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/40_DELIVERY/RELEASE_GATES.md)
+> **Canonical Document Location:** [`project-docs/40_DELIVERY/RELEASE_GATES.md`](project-docs/40_DELIVERY/RELEASE_GATES.md)
 
 ---
 
@@ -27,7 +27,8 @@ graph LR
 ## 2. Release Gate Checklist Specs
 
 ### Gate 1: Architectural & Governance Compliance
-- [ ] Code/docs strictly conform to locked architectural principles in [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/SCOPE_LOCK.md).
+- [ ] Code/docs strictly conform to locked architectural principles in [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](project-docs/10_GOVERNANCE/SCOPE_LOCK.md).
+- [ ] Zero workstation-specific absolute file paths (`file:///c:/...`) exist in documentation.
 - [ ] No unauthorized out-of-scope features introduced.
 - [ ] All new topics or schema modifications updated in canonical documentation files.
 

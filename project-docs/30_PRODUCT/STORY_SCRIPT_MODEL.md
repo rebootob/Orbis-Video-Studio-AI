@@ -1,6 +1,6 @@
 # Story & Script Engine Model
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md`](project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md)
 
 ---
 
@@ -45,7 +45,7 @@ HERO
 (whispering)
 They found us.
 
-Hero sprint into the dark street as the drone fires a blue laser grid.
+Hero sprints into the dark street as the drone fires a blue laser grid.
 ```
 
 ### Automatic Parsing Rules

@@ -1,6 +1,6 @@
 # Centralized Reference Library Model
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md`](project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md)
 
 ---
 

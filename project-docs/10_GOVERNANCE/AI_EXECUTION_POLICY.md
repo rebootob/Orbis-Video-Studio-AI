@@ -1,6 +1,6 @@
 # AI Execution Policy & Guardrails
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md`](project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md)
 
 ---
 
@@ -35,5 +35,5 @@ When an AI agent finishes a Work Package:
 1. Ensure all code/docs compile cleanly and pass verification.
 2. Commit and push the feature branch to `origin`.
 3. Open a Pull Request into `main`.
-4. Update [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/CHAT_HANDOFF.md) with HEAD SHA and PR details.
+4. Update [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md) with HEAD SHA and PR details.
 5. **STOP.** Do not make additional calls or start new tasks. Return final summary to Project Owner.

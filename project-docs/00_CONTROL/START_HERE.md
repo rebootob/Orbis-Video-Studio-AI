@@ -1,6 +1,6 @@
 # Mandatory Session Startup Protocol
 
-> **Canonical Document Location:** [`project-docs/00_CONTROL/START_HERE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/START_HERE.md)
+> **Canonical Document Location:** [`project-docs/00_CONTROL/START_HERE.md`](project-docs/00_CONTROL/START_HERE.md)
 
 ---
 
@@ -8,11 +8,11 @@
 
 EVERY new chat session, AI agent, or execution engine MUST read the following documents in exact order before performing any operations or reading other repository files:
 
-1. **[`project-docs/00_CONTROL/START_HERE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/START_HERE.md)** — Mandatory session startup protocol & governance rules (This document).
-2. **[`project-docs/00_CONTROL/CURRENT_STATE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/CURRENT_STATE.md)** — Real-time project phase, execution status, and authority state flags.
-3. **[`project-docs/00_CONTROL/ACTIVE_TASK.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/ACTIVE_TASK.md)** — Boundaries, requirements, and stop conditions of the current Work Package.
-4. **[`project-docs/00_CONTROL/DOCUMENT_INDEX.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/DOCUMENT_INDEX.md)** — Domain-to-document routing matrix.
-5. **[`project-docs/00_CONTROL/CHAT_HANDOFF.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/00_CONTROL/CHAT_HANDOFF.md)** — Session resume protocol, HEAD SHA snapshot, and handoff state (required when resuming existing work).
+1. **[`project-docs/00_CONTROL/START_HERE.md`](project-docs/00_CONTROL/START_HERE.md)** — Mandatory session startup protocol & governance rules (This document).
+2. **[`project-docs/00_CONTROL/CURRENT_STATE.md`](project-docs/00_CONTROL/CURRENT_STATE.md)** — Real-time project phase, execution status, and authority state flags.
+3. **[`project-docs/00_CONTROL/ACTIVE_TASK.md`](project-docs/00_CONTROL/ACTIVE_TASK.md)** — Boundaries, requirements, and stop conditions of the current Work Package.
+4. **[`project-docs/00_CONTROL/DOCUMENT_INDEX.md`](project-docs/00_CONTROL/DOCUMENT_INDEX.md)** — Domain-to-document routing matrix.
+5. **[`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md)** — Session resume protocol, HEAD SHA snapshot, and handoff state (required when resuming existing work).
 6. **Routed Domain Documents** — Read only specific topic documents routed by `DOCUMENT_INDEX.md` relevant to the active task.
 
 ---
@@ -30,7 +30,7 @@ EVERY new chat session, AI agent, or execution engine MUST read the following do
 
 ### Authority Hierarchy
 - **Project Owner:** Final human authority.
-- **ChatGPT:** Control Plane / Project Lead / Architect / Independent Reviewer.
+- **ChatGPT:** Control Plane / Project Lead / System Architect / Independent Reviewer.
 - **Antigravity:** Low-Credit / Bounded Execution Plane.
 - **Codex / Claude Code:** STOP / Inactive.
 

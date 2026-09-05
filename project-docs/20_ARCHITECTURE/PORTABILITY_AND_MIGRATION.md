@@ -1,6 +1,6 @@
 # Portability, Migration & Disaster Recovery
 
-> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md)
+> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md`](project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md)
 
 ---
 
@@ -10,23 +10,24 @@ To ensure zero machine lock-in and seamless deployment across cloud infrastructu
 
 ```mermaid
 graph TD
-    AppCode["Application Backend & UI"] --> Docker["Docker Containerization (OCI Compliant)"]
-    Docker --> Orchestrator["Kubernetes / AWS ECS / Cloud Run"]
+    AppCode["Application Backend & UI"] --> Docker["Containerization (OCI Compliant)"]
+    Docker --> Orchestrator["Cloud Container Runner / Orchestrator"]
     
-    AppCode --> DBAbstraction["PostgreSQL Adapter"]
-    AppCode --> StorageAbstraction["S3 Object Storage Adapter"]
-    AppCode --> SecretAbstraction["Environment & Secrets Vault"]
+    AppCode --> DBAbstraction["Relational Storage Adapter"]
+    AppCode --> StorageAbstraction["S3-Compatible Storage Adapter"]
+    AppCode --> SecretAbstraction["Environment & Secrets Abstraction"]
     
-    DBAbstraction --> RDS[(Managed Postgres / Aurora / GCP Cloud SQL)]
-    StorageAbstraction --> CloudS3[(AWS S3 / Cloudflare R2 / MinIO)]
-    SecretAbstraction --> Vault[(AWS Secrets Manager / HashiCorp Vault / .env)]
+    DBAbstraction --> RDS[(Managed Relational DB / Cloud DB)]
+    StorageAbstraction --> CloudS3[(S3-Compatible Object Store)]
+    SecretAbstraction --> Vault[(Cloud Secret Manager / .env)]
 ```
 
 ---
 
-## 2. Configuration & Secret Externalization
+## 2. Configuration & Technology Abstraction
 
-- **Zero Hardcoded Secrets:** Provider API keys (Vidu keys), database credentials, and storage tokens MUST be injected via environment variables or secret managers.
+- **Required Capability:** Zero hardcoded secrets, externalized environment variables, managed secret injection.
+- **Recommended Candidates (TBD):** Docker / Podman container images; HashiCorp Vault / AWS Secrets Manager / GCP Secret Manager for secret injection.
 - **Environment Parity:** Identical container images are used across Local Development, Staging, and Production environments.
 
 ---
@@ -57,6 +58,6 @@ project_export_12345.orbis (ZIP Archive)
 
 ## 4. Disaster Recovery & Backup Strategy
 
-1. **Database Backups:** Daily automated PostgreSQL snapshot backups with point-in-time recovery (PITR) retention for 30 days.
-2. **Object Storage Replication:** Cross-region versioned S3 buckets to prevent data loss.
-3. **Restoration Protocol:** Standardized automated recovery script re-populates PostgreSQL schema and re-attaches Object Storage assets within 15 minutes.
+1. **Database Backups:** Daily automated relational database snapshot backups with point-in-time recovery (PITR) retention.
+2. **Object Storage Replication:** Versioned object storage buckets to prevent data loss.
+3. **Restoration Protocol:** Standardized automated recovery script re-populates relational database schema and re-attaches Object Storage assets within 15 minutes.

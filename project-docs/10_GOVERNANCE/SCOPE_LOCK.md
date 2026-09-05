@@ -1,6 +1,6 @@
 # Scope Lock & Boundaries
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/SCOPE_LOCK.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](project-docs/10_GOVERNANCE/SCOPE_LOCK.md)
 
 ---
 
@@ -30,7 +30,7 @@ The following core principles are **LOCKED** by Project Owner directive and MUST
 
 | Category | Features / Elements | Status |
 | :--- | :--- | :--- |
-| **V1 Scope (Authorized Target)** | Web UI, Document Ingestion (PDF/Word/PPT/Brief), Story/Script Engine, Scene/Shot Pipeline, Vidu Adapter, Hybrid Shot Import, Asset Locking, Reference Library, Audio Subtitle & Ducking, Timeline Preview, Cloud Render, Selective Regeneration, Usage Tracking, Multi-Output Presets, Idempotent Integration Gateway. | **LOCKED (V1 Target)** |
+| **V1 Scope (Authorized Target)** | Web UI Workspace, Document Ingestion (PDF/Word/PPT/Brief), Story/Script Engine, Scene/Shot Pipeline, Vidu Adapter, Hybrid Shot Import, Asset Locking, Reference Library, Audio Subtitle & Ducking, Simplified Timeline Preview, Selective Regeneration, Usage Tracking, Cloud Master Render, Multi-Output Presets, Idempotent Integration Gateway. | **LOCKED (V1 Target)** |
 | **Future Planned Scope** | Secondary provider adapters (Veo, Runway, Luma), advanced agent workflows, extended multi-language dubbing. | **PLANNED** |
 | **Under Evaluation** | Automated AI QC visual scoring algorithms, automated social publishing connectors. | **TBD** |
 | **Out of Scope for V1** | Enterprise multi-user administration, native mobile apps, real-time multi-user collaborative editing, Premiere-class NLE timeline, training proprietary video foundation models, local GPU execution dependencies, custom model fine-tuning. | **OUT OF V1** |

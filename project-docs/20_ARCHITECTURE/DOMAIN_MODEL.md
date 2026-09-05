@@ -1,6 +1,6 @@
 # Core Domain Model & Schemas
 
-> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md)
+> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md`](project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md)
 
 ---
 
@@ -42,7 +42,7 @@ Uploaded source files (Brief, Word, PDF, PowerPoint).
 - `project_id` (UUID): FK to Project.
 - `file_name` (String): Original file name.
 - `file_type` (Enum): `PDF`, `DOCX`, `PPTX`, `TXT`, `MD`.
-- `storage_path` (String): S3 object key.
+- `storage_path` (String): Object storage key.
 - `extracted_text` (Text): Parsed text payload.
 
 ### `Story`
@@ -75,7 +75,7 @@ Centralized character, location, prop, or style reference item.
 - `name` (String): Character/location name.
 - `description` (Text): Text description.
 - `media_urls` (Array of Strings): Reference image/audio storage paths.
-- `embedding_data` (JSON): Model feature vectors for consistency.
+- `embedding_data` (JSON): Feature vector metadata for visual consistency.
 
 ### `AssetLock`
 Lock state tracker protecting approved entities from accidental regeneration.

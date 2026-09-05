@@ -1,6 +1,6 @@
 # Change Governance & RFC Protocol
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md`](project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md)
 
 ---
 

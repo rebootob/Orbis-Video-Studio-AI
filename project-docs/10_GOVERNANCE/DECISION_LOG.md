@@ -1,6 +1,6 @@
 # Decision Log & Architectural Decision Records (ADRs)
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/DECISION_LOG.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/DECISION_LOG.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/DECISION_LOG.md`](project-docs/10_GOVERNANCE/DECISION_LOG.md)
 
 ---
 
@@ -47,5 +47,5 @@ This log records all baseline architectural decisions governing Orbis Video Stud
 
 ### ADR-014: External Integration Gateway & Idempotency
 - **Context:** External AI agents (Hermes) and automation platforms (n8n) need to create projects and trigger rendering.
-- **Decision:** Expose a secure REST/Webhook integration gateway enforcing API keys, role permissions, and mandatory `idempotency_key` headers. Direct DB or provider access is strictly forbidden.
+- **Decision:** Expose a secure REST/Webhook integration gateway enforcing API keys, role permissions, and mandatory `X-Idempotency-Key` headers. Direct DB or provider access is strictly forbidden.
 - **Consequences:** Duplicate external API retries will not cause duplicate chargeable video generations.

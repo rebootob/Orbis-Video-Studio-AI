@@ -1,6 +1,6 @@
 # Scene/Shot Pipeline, Hybrid Shots & Asset Locking
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md`](project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md)
 
 ---
 
@@ -28,7 +28,7 @@ Every shot in a project is classified under the **Hybrid Shot Workflow**, allowi
 | **`IMPORTED_VIDEO`** | Raw MP4/MOV clip uploaded by user. | Directly placed on timeline (bypasses AI gen). |
 | **`IMPORTED_IMAGE`** | Static image (PNG/JPG) uploaded by user. | Rendered with subtle pan/zoom motion. |
 | **`RECORDED_FOOTAGE`** | Camera or screen recording uploaded by user. | Directly placed on timeline. |
-| **`STOCK_ASSET`** | Sourced from stock media provider. | Downloaded to S3 and attached to shot. |
+| **`STOCK_ASSET`** | Sourced from stock media provider. | Downloaded to object storage and attached to shot. |
 | **`MIXED`** | Combination (e.g. AI foreground + imported background). | Composited during timeline pre-render. |
 
 ---

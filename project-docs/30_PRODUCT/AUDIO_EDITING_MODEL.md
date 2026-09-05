@@ -1,6 +1,6 @@
 # Audio Production, Subtitles & Auto-Ducking
 
-> **Canonical Document Location:** [`project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md)
+> **Canonical Document Location:** [`project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md`](project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md)
 
 ---
 

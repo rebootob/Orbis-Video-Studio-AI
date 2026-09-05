@@ -1,6 +1,6 @@
 # Approval Policy & Cost Control
 
-> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/APPROVAL_POLICY.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/10_GOVERNANCE/APPROVAL_POLICY.md)
+> **Canonical Document Location:** [`project-docs/10_GOVERNANCE/APPROVAL_POLICY.md`](project-docs/10_GOVERNANCE/APPROVAL_POLICY.md)
 
 ---
 

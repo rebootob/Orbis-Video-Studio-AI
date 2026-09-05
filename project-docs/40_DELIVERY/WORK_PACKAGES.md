@@ -1,6 +1,6 @@
 # Work Package Roadmap
 
-> **Canonical Document Location:** [`project-docs/40_DELIVERY/WORK_PACKAGES.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/40_DELIVERY/WORK_PACKAGES.md)
+> **Canonical Document Location:** [`project-docs/40_DELIVERY/WORK_PACKAGES.md`](project-docs/40_DELIVERY/WORK_PACKAGES.md)
 
 ---
 
@@ -11,7 +11,7 @@ The delivery of Orbis Video Studio AI is structured into discrete, sequential **
 > [!IMPORTANT]
 > **PROPOSAL STATUS NOTICE**
 > 
-> Work Packages beyond **P0-WP001** are PROPOSED roadmap items. Execution engines MUST NOT begin work on any future Work Package without explicit authorization from the Project Owner.
+> Work Packages beyond **P0-WP001** are PROPOSED roadmap items. Technology selections and frameworks listed in proposed WPs are **candidate tech stacks (TBD)** and MUST be formally authorized by the Project Owner prior to execution.
 
 ---
 
@@ -31,14 +31,14 @@ graph TD
 
 ### Phase 0 — Foundation & Governance
 - **`P0-WP001` — Project Governance & Architecture Documentation Foundation**
-  - **Status:** **ACTIVE / IN PROGRESS**
+  - **Status:** **ACTIVE / CORRECTIVE REVIEW**
   - **Scope:** Establish canonical governance, system architecture, product specs, and delivery docs. Zero application code.
 
 ### Phase 1 — Core Architecture & Data Engine
 - **`P1-WP002` — Backend Core Framework & Domain Database Setup**
-  - **Scope:** Initialize Node.js/Python backend framework, PostgreSQL database migrations, domain schemas, Docker environment setup.
+  - **Scope:** Backend API framework setup, persistent relational database migrations, domain schemas, container environment setup. *(Tech choice: TBD)*
 - **`P1-WP003` — S3 Object Storage & Asset Management API**
-  - **Scope:** S3 storage adapter, file upload pipeline, media asset metadata service.
+  - **Scope:** S3-compatible storage adapter, file upload pipeline, media asset metadata service.
 - **`P1-WP004` — Document Ingestion & Text Extraction Engine**
   - **Scope:** Implement PDF, Word (.docx), PowerPoint (.pptx), and brief text parsers.
 - **`P1-WP005` — Story & Screenplay Script Generator Service**
@@ -48,13 +48,13 @@ graph TD
 - **`P2-WP006` — Reference Library & Character/Location Bibles**
   - **Scope:** Reference asset CRUD service, visual similarity tagging, prompt reference injector.
 - **`P2-WP007` — Vidu Provider Adapter & Job Dispatch Queue**
-  - **Scope:** Implement `IVideoGenerationProviderAdapter` for Vidu, async Redis/BullMQ worker queue, retry handler.
+  - **Scope:** Implement `IVideoGenerationProviderAdapter` for Vidu (V1 default), durable async worker queue, retry handler.
 - **`P2-WP008` — Hybrid Shot Engine & Asset Lock Machine**
   - **Scope:** Hybrid shot import (video, image, recorded, stock), granular entity locking state machine.
 - **`P2-WP009` — Cost Control & Granular Usage Audit Ledger**
   - **Scope:** Budget cap guards, provider job usage logging, cost audit API.
 - **`P2-WP010` — Web Workspace UI: Storyboard & Shot Grid**
-  - **Scope:** Browser UI for project creation, document upload, script editor, and shot grid.
+  - **Scope:** Browser UI workspace for project creation, document upload, script editor, and shot grid. *(Tech choice: TBD)*
 - **`P2-WP011` — Selective Shot Regeneration Service**
   - **Scope:** Target shot selection, lock validation guard, selective provider dispatch.
 

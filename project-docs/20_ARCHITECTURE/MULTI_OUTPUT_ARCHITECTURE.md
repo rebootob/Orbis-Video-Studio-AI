@@ -1,6 +1,6 @@
 # Multi-Output & Multi-Platform Architecture
 
-> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md`](file:///c:/Users/allda/Desktop/Dev/git/Orbis%20Video%20Studio%20AI/project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md)
+> **Canonical Document Location:** [`project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md)
 
 ---
 
@@ -20,7 +20,14 @@ graph TD
 
 ---
 
-## 2. Platform Presets & Parameter Matrix
+## 2. Multi-Output Readiness vs V1 Scope
+
+- **Multi-Output Readiness (LOCKED REQUIREMENT):** The core domain model and edit timeline preserve aspect ratio metadata, audio stem tags, and subtitle tracks to support multi-platform rendering without re-generating raw video shots.
+- **V1 Implementation Scope:** V1 delivers standard master presets (16:9 YouTube, 9:16 TikTok/Reels, 1:1 Instagram) as part of the primary cloud render pipeline.
+
+---
+
+## 3. Platform Presets & Parameter Matrix
 
 | Preset ID | Target Platform | Aspect Ratio | Resolution | Framing Mode | Subtitle Mode | Bitrate Profile |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -31,7 +38,7 @@ graph TD
 
 ---
 
-## 3. Intelligent Re-framing & Rendering Rules
+## 4. Intelligent Re-framing & Rendering Rules
 
 1. **Smart Subject Focus Cropping:** When rendering a 16:9 master video shot into a 9:16 vertical output preset, the render engine utilizes object tracking data (character bounding boxes) to dynamically pan/crop, ensuring key characters remain centered.
 2. **Audio & Subtitle Swapping:** Multi-language VO audio tracks (e.g. Thai dub vs English VO) and subtitle files (SRT/VTT) are swapped dynamically at render time.
