@@ -11,7 +11,7 @@ The delivery of Orbis Video Studio AI is structured into discrete, sequential **
 > [!IMPORTANT]
 > **PROPOSAL STATUS NOTICE**
 > 
-> Work Packages beyond **P0-WP001** are PROPOSED roadmap items. Technology selections and frameworks listed in proposed WPs are **candidate tech stacks (TBD)** and MUST be formally authorized by the Project Owner prior to execution.
+> Work Packages beyond **P1-WP002** are PROPOSED roadmap items. Technology selections and frameworks listed in proposed WPs are **candidate tech stacks (TBD)** and MUST be formally authorized by the Project Owner prior to execution.
 
 ---
 
@@ -19,7 +19,7 @@ The delivery of Orbis Video Studio AI is structured into discrete, sequential **
 
 ```mermaid
 graph TD
-    P0["P0: Foundation & Governance (P0-WP001) [PASS / CLOSED]"] --> P1["P1: Core Architecture & Data Engine (P1-WP002 to P1-WP005) [PROPOSED]"]
+    P0["P0: Foundation & Governance (P0-WP001) [PASS / CLOSED]"] --> P1["P1: Core Architecture & Data Engine (P1-WP002 [IMPLEMENTED] -> P1-WP003 to P1-WP005 [PROPOSED])"]
     P1 --> P2["P2: Generation & Production Pipeline (P2-WP006 to P2-WP011) [PROPOSED]"]
     P2 --> P3["P3: Audio, Editing & Cloud Render (P3-WP012 to P3-WP016) [PROPOSED]"]
     P3 --> P4["P4: Multi-Output, Export & Core V1 Release (P4-WP018 to P4-WP020) [PROPOSED]"]
@@ -37,8 +37,8 @@ graph TD
 
 ### Phase 1 — Core Architecture & Data Engine
 - **`P1-WP002` — Backend Core Framework & Domain Database Setup**
-  - **Status:** **PROPOSED / NOT AUTHORIZED**
-  - **Scope:** Backend API framework setup, persistent relational database migrations, domain schemas, container environment setup. *(Tech choice: TBD)*
+  - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
+  - **Scope:** FastAPI application bootstrap, PostgreSQL configuration, SQLAlchemy 2.x ORM models, Alembic migrations, Docker Compose environment, unit tests.
 - **`P1-WP003` — S3 Object Storage & Asset Management API**
   - **Status:** **PROPOSED / NOT AUTHORIZED**
   - **Scope:** S3-compatible storage adapter, file upload pipeline, media asset metadata service.
