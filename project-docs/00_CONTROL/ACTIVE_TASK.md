@@ -6,39 +6,44 @@
 
 ## Active Work Package Details
 
-- **Active Work Package:** `NONE`
-- **Current Gate:** `WAITING OWNER APPROVAL FOR NEXT WP`
-- **P0-WP001 Status:** **PASS / CLOSED (PR #1 MERGED)**
-- **P1-WP002 Status:** **PROPOSED / NOT AUTHORIZED**
-- **Application Implementation:** **NOT STARTED**
+- **Active Work Package:** `P1-WP002 — Backend Core Framework & Domain Database Foundation`
+- **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
+- **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
+- **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
+- **Authority / Oversight:** ChatGPT (Control Plane / Architect), Project Owner (Final Human Authority)
 
 ---
 
-## Current System State Summary
+## Task Objectives
 
-Work Package **P0-WP001 — Project Governance & Architecture Documentation Foundation** has been successfully completed, reviewed by ChatGPT independent review, approved by the Project Owner, and merged into `main` via PR #1.
-
-There is currently **NO ACTIVE WORK PACKAGE**.
+Implement the backend core framework and relational domain database foundation:
+1. **FastAPI Application:** App bootstrap, `/health` and `/api/v1/health` endpoints returning HTTP 200 `{"status": "ok"}`.
+2. **Configuration & Secrets:** Environment configuration via Pydantic Settings and `.env.example`.
+3. **Database Foundation:** PostgreSQL connectivity, SQLAlchemy 2.x ORM declarative models, and Alembic migrations.
+4. **Domain Entities:** `Project`, `Story`, `Scene`, `Shot`, `Asset`, `GenerationJob` with clean relationships.
+5. **Developer Environment:** Docker Compose (`backend` + `db` PostgreSQL services).
+6. **Automated Testing:** `pytest` suite covering health endpoints, domain models, and Alembic migration lifecycle (`upgrade head` -> `downgrade base` -> `upgrade head`).
 
 ---
 
 ## Strictly Enforced Constraints
 
 > [!CAUTION]
-> **NO ACTIVE WORK PACKAGE / IMPLEMENTATION NOT AUTHORIZED**
+> **BOUNDED EXECUTION & SCOPE PROTECTION**
 > 
-> The following actions are STRICTLY PROHIBITED until a new Work Package is authorized by the Project Owner:
-> - Starting P1-WP002 or any subsequent Work Package
-> - Writing application code (frontend, backend, scripts, tools)
-> - Implementing UI components or backend API endpoints
-> - Provisioning cloud resources or databases
-> - Making API calls to Vidu or any AI generation provider
-> - Adding API keys, secrets, or cloud credentials
-> - Deploying any services or infrastructure
+> The following actions are STRICTLY PROHIBITED in P1-WP002:
+> - Starting P1-WP003 or any subsequent Work Package
+> - Implementing Vidu, OpenAI, Gemini, or third-party AI provider API integrations
+> - Implementing S3 object storage or file/media upload pipelines
+> - Implementing PDF, Word, or PPTX document parsers
+> - Implementing frontend or web UI components
+> - Implementing authentication, user management, or permission systems
+> - Implementing audio, TTS, subtitles, or FFmpeg rendering pipelines
+> - Adding Redis, Celery, or BullMQ infrastructure
 
 ---
 
 ## Next Allowed Actions
 
-1. ChatGPT Control Plane planning and formulation of proposed specifications for P1-WP002.
-2. Project Owner review and explicit authorization of P1-WP002 before any execution agent begins work.
+1. ChatGPT Independent Review of P1-WP002 PR.
+2. Project Owner review and sign-off.
