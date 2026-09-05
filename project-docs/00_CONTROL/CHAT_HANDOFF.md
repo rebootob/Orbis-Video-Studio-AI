@@ -8,30 +8,31 @@
 
 - **Repository:** `rebootob/Orbis-Video-Studio-AI`
 - **Canonical Branch:** `main`
-- **Active Branch:** `ai/p0-wp001-closure-sync`
+- **Operational Active Branch:** `NONE`
+- **Closure Sync Branch:** `ai/p0-wp001-closure-sync` *(Historical / PR #2 only)*
+- **Pull Request:** `#2` ([https://github.com/rebootob/Orbis-Video-Studio-AI/pull/2](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/2))
+- **HANDOFF_BASE_SHA:** `def4a9ba4a5fb0f4238597a59d31a128cd2ca05a` *(Repository commit SHA immediately preceding this handoff update)*
 - **P0-WP001 Status:** `PASS / CLOSED`
-- **PR #1 Status:** `MERGED` ([https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1))
-- **Approved Feature HEAD:** `cd34ae01536c61cae628660cc814946ebc7596fe`
-- **Main HEAD After Merge:** `4eddc44f0733f6d8e6e9772090183b3b3f4c3194`
-- **HANDOFF_BASE_SHA:** `4eddc44f0733f6d8e6e9772090183b3b3f4c3194` *(Repository commit SHA immediately preceding this handoff update)*
 - **Phase:** `P0 — Foundation & Governance`
 - **Active Work Package:** `NONE`
 - **Implementation Status:** `NOT STARTED`
 - **Next Work Package:** `P1-WP002 — PROPOSED / NOT AUTHORIZED`
 - **Current Gate:** `WAITING OWNER APPROVAL FOR NEXT WP`
-- **Next Allowed Action:** `ChatGPT planning / Owner approval for P1-WP002 only`
+- **Next Allowed Action:** `ChatGPT review / Owner decision only`
 
 ---
 
-## 2. Mandatory Handoff & SHA Rules
+## 2. Mandatory Handoff & Branch Rules
 
 > [!IMPORTANT]
-> **LIVE HEAD AUTHORITATIVE RULE & HANDOFF_BASE_SHA SEMANTICS**
+> **LIVE HEAD AUTHORITATIVE RULE & BRANCH SEMANTICS**
 > 
 > 1. **Live Branch HEAD is Authoritative:** Every new or resumed AI chat session MUST fresh-fetch the live branch HEAD from Git/GitHub (`git rev-parse HEAD`) before taking action.
-> 2. **Historical Baseline Context:** `HANDOFF_BASE_SHA` records the base repository SHA that was current immediately BEFORE the handoff/status document update commit was created.
-> 3. **Expected Mismatch:** A mismatch between live branch HEAD and `HANDOFF_BASE_SHA` is expected and normal whenever the handoff document itself was committed after `HANDOFF_BASE_SHA`.
-> 4. **No Recursive Commits:** Execution agents MUST NEVER create an additional commit solely to make a handoff SHA field match its own commit SHA.
+> 2. **Session Base Branch:** When no Work Package is active (`ACTIVE WORK PACKAGE: NONE`), new AI sessions MUST start from fresh-fetched `main`.
+> 3. **Historical Closure Branches:** A historical closure/review branch (such as `ai/p0-wp001-closure-sync`) MUST NEVER be treated as an operationally active execution branch.
+> 4. **Feature Branch Creation:** A new feature branch is created ONLY after the Project Owner explicitly authorizes a new Work Package.
+> 5. **Historical Baseline Context:** `HANDOFF_BASE_SHA` records the base repository SHA that was current immediately BEFORE the handoff/status document update commit was created. Mismatch between live branch HEAD and `HANDOFF_BASE_SHA` after handoff commits is expected and normal.
+> 6. **No Recursive Commits:** Execution agents MUST NEVER create an additional commit solely to make a handoff SHA field match its own commit SHA.
 
 ---
 
@@ -40,7 +41,7 @@
 | Engine | Authorized Status | Permitted Scope |
 | :--- | :--- | :--- |
 | **ChatGPT** | **ACTIVE (Control Plane)** | Architect, lead, review, design approval, WP planning. |
-| **Antigravity** | **STOP** | Execution stopped upon P0-WP001 closure sync PR push. Must STOP. |
+| **Antigravity** | **STOP AFTER THIS CORRECTIVE PUSH** | Execution stopped upon pushing PR #2 correction. Must STOP. |
 | **Codex** | **STOP** | Inactive. No authorization. |
 | **Claude Code** | **STOP** | Inactive. No authorization. |
 
@@ -49,7 +50,7 @@
 ## 4. Completed Milestones & Current State
 
 - **P0-WP001 Completed & Closed:** Initial project governance, system architecture, product models, and delivery roadmap established and merged into `main` via PR #1 (`4eddc44f0733f6d8e6e9772090183b3b3f4c3194`).
-- **Post-Merge Closure Sync:** Control plane documentation updated to reflect PR #1 merge state and active WP status as `NONE`.
+- **Post-Merge Closure Sync:** Control plane documentation updated via PR #2 to reflect PR #1 merge state, active WP status as `NONE`, and operational active branch as `NONE`.
 - **Application Code:** 0% implemented; zero cloud resources provisioned.
 
 ---
@@ -62,4 +63,4 @@
 - Do NOT make API calls to Vidu or any AI generation provider.
 
 ### Next Allowed Step
-The next allowed action is **ChatGPT planning** and **Project Owner review/approval** for P1-WP002. Execution agents MUST STOP until P1-WP002 is formally authorized by the Project Owner.
+The next allowed action is **ChatGPT review** and **Project Owner decision** for P1-WP002. Execution agents MUST STOP until P1-WP002 is formally authorized by the Project Owner.
