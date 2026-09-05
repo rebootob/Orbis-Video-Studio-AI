@@ -53,8 +53,11 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
                     else:
                         self.client.create_bucket(Bucket=bucket)
                 except ClientError as create_err:
-                    # Bucket might have been created concurrently
-                    pass
+                    create_code = str(create_err.response.get("Error", {}).get("Code", ""))
+                    if create_code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                        pass
+                    else:
+                        raise
             else:
                 raise
 
@@ -102,10 +105,11 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
             self.client.head_object(Bucket=bucket, Key=key)
             return True
         except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code")
-            if error_code in ("404", "NoSuchKey"):
+            error_code = str(e.response.get("Error", {}).get("Code", ""))
+            status_code = str(e.response.get("ResponseMetadata", {}).get("HTTPStatusCode", ""))
+            if error_code in ("404", "NoSuchKey", "NotFound") or status_code == "404":
                 return False
-            return False
+            raise
 
     def generate_presigned_url(
         self,

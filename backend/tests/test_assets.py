@@ -212,3 +212,88 @@ def test_path_traversal_sanitization(client, db_session):
     assert ".." not in data["storage_key"]
     assert "passwd" in data["storage_key"]
     assert data["original_filename"] == "passwd"
+
+
+def test_upload_db_failure_cleans_up_storage(client, db_session, mock_storage, monkeypatch):
+    project = Project(title="DB Failure Cleanup Test", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Monkeypatch db.commit to simulate DB failure
+    def mock_commit_fail():
+        raise Exception("Database transaction error during commit")
+
+    monkeypatch.setattr(db_session, "commit", mock_commit_fail)
+
+    resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("orphan_test.txt", io.BytesIO(b"data to be cleaned up"), "text/plain")},
+    )
+
+    assert resp.status_code == 500
+    assert "database persistence failed" in resp.json()["detail"].lower()
+
+    # Verify storage payload was cleaned up (no orphaned objects left)
+    assert len(mock_storage._store) == 0
+
+
+from botocore.exceptions import ClientError
+from app.services.storage.s3 import S3CompatibleObjectStorageProvider
+
+
+def test_s3_provider_error_semantics(monkeypatch):
+    provider = S3CompatibleObjectStorageProvider(endpoint_url="http://localhost:9000")
+
+    # 1. Genuine 404 -> object_exists returns False
+    def mock_head_object_404(Bucket, Key):
+        raise ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist."}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+            "HeadObject",
+        )
+
+    monkeypatch.setattr(provider.client, "head_object", mock_head_object_404)
+    assert provider.object_exists("bucket", "key") is False
+
+    # 2. Permission error (403) -> object_exists propagates exception
+    def mock_head_object_403(Bucket, Key):
+        raise ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Access Denied."}, "ResponseMetadata": {"HTTPStatusCode": 403}},
+            "HeadObject",
+        )
+
+    monkeypatch.setattr(provider.client, "head_object", mock_head_object_403)
+    with pytest.raises(ClientError) as exc_info:
+        provider.object_exists("bucket", "key")
+    assert exc_info.value.response["Error"]["Code"] == "AccessDenied"
+
+    # 3. ensure_bucket_exists concurrent creation race -> ignores BucketAlreadyOwnedByYou
+    def mock_head_bucket_404(Bucket):
+        raise ClientError(
+            {"Error": {"Code": "NoSuchBucket", "Message": "Not found."}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+            "HeadBucket",
+        )
+
+    def mock_create_bucket_race(Bucket, **kwargs):
+        raise ClientError(
+            {"Error": {"Code": "BucketAlreadyOwnedByYou", "Message": "Your bucket."}, "ResponseMetadata": {"HTTPStatusCode": 409}},
+            "CreateBucket",
+        )
+
+    monkeypatch.setattr(provider.client, "head_bucket", mock_head_bucket_404)
+    monkeypatch.setattr(provider.client, "create_bucket", mock_create_bucket_race)
+    # Should not raise exception
+    provider.ensure_bucket_exists("bucket")
+
+    # 4. ensure_bucket_exists non-race error -> propagates exception
+    def mock_create_bucket_access_denied(Bucket, **kwargs):
+        raise ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Forbidden."}, "ResponseMetadata": {"HTTPStatusCode": 403}},
+            "CreateBucket",
+        )
+
+    monkeypatch.setattr(provider.client, "create_bucket", mock_create_bucket_access_denied)
+    with pytest.raises(ClientError) as exc_info:
+        provider.ensure_bucket_exists("bucket")
+    assert exc_info.value.response["Error"]["Code"] == "AccessDenied"
+

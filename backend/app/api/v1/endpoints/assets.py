@@ -88,7 +88,7 @@ async def upload_asset(
             detail=f"Failed to store object in storage provider: {str(e)}",
         )
 
-    # 6. Save Asset record in PostgreSQL
+    # 6. Save Asset record in PostgreSQL (with rollback and storage cleanup on failure)
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -102,9 +102,22 @@ async def upload_asset(
         storage_key=storage_key,
         is_locked=False,
     )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
+
+    try:
+        db.add(asset)
+        db.commit()
+        db.refresh(asset)
+    except Exception as db_err:
+        db.rollback()
+        # Attempt cleanup of orphaned storage object
+        try:
+            storage.delete_object(storage_bucket, storage_key)
+        except Exception:
+            pass  # Best-effort cleanup
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database persistence failed, uploaded object cleaned up: {str(db_err)}",
+        )
 
     # 7. Generate presigned download URL
     download_url = storage.generate_presigned_url(storage_bucket, storage_key)
