@@ -6,7 +6,7 @@
 
 ## Active Work Package Details
 
-- **Active Work Package:** `P2-WP006 — Reference Library & Character/Location Bibles`
+- **Active Work Package:** `P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue`
 - **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
 - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
 - **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)

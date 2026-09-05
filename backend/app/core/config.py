@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # Reference Library Context Limit
     MAX_REFERENCE_CONTEXT_CHARACTERS: int = 50000
 
+    # Vidu Video Generation Provider Settings
+    VIDU_API_KEY: str = ""
+    VIDU_BASE_URL: str = "https://api.vidu.com/v1"
+    VIDU_TIMEOUT_SECONDS: float = 30.0
+    VIDU_MAX_RETRIES: int = 3
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(
