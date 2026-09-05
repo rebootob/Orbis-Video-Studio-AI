@@ -232,10 +232,62 @@ def test_upload_db_failure_cleans_up_storage(client, db_session, mock_storage, m
     )
 
     assert resp.status_code == 500
-    assert "database persistence failed" in resp.json()["detail"].lower()
+    assert "database persistence failed, uploaded object cleaned up" in resp.json()["detail"].lower()
 
     # Verify storage payload was cleaned up (no orphaned objects left)
     assert len(mock_storage._store) == 0
+
+
+def test_upload_db_failure_and_cleanup_failure_reports_truthfully(client, db_session, mock_storage, monkeypatch):
+    project = Project(title="Cleanup Failure Test", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Simulate DB commit failure
+    def mock_commit_fail():
+        raise Exception("Database transaction error during commit")
+
+    # Simulate storage deletion failure during cleanup
+    mock_storage.simulate_deletion_failure = True
+    monkeypatch.setattr(db_session, "commit", mock_commit_fail)
+
+    resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("cleanup_fail_test.txt", io.BytesIO(b"payload"), "text/plain")},
+    )
+
+    assert resp.status_code == 500
+    detail = resp.json()["detail"].lower()
+    assert "database persistence failed and storage cleanup failed" in detail
+    assert "cleaned up" not in detail or "cleanup failed" in detail
+
+
+def test_upload_post_commit_refresh_failure_preserves_storage(client, db_session, mock_storage, monkeypatch):
+    project = Project(title="Post-Commit Refresh Failure Test", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Monkeypatch db.refresh to simulate failure AFTER db.commit succeeded
+    def mock_refresh_fail(instance):
+        raise Exception("Connection reset during refresh")
+
+    monkeypatch.setattr(db_session, "refresh", mock_refresh_fail)
+
+    resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("post_commit.txt", io.BytesIO(b"durable storage data"), "text/plain")},
+    )
+
+    # Response should still succeed (or at minimum storage object MUST NOT be deleted)
+    assert resp.status_code == 201
+
+    # Verify storage object MUST NOT be deleted
+    assert len(mock_storage._store) == 1
+    key = list(mock_storage._store.keys())[0]
+    assert mock_storage.get_object(key[0], key[1]) == b"durable storage data"
+
 
 
 from botocore.exceptions import ClientError

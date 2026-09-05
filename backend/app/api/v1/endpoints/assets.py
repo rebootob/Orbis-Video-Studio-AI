@@ -103,21 +103,35 @@ async def upload_asset(
         is_locked=False,
     )
 
+    # 6. Save Asset record in PostgreSQL (storage cleanup ONLY if db.commit fails)
+    db.add(asset)
     try:
-        db.add(asset)
         db.commit()
-        db.refresh(asset)
     except Exception as db_err:
         db.rollback()
-        # Attempt cleanup of orphaned storage object
+        cleanup_success = False
+        cleanup_err_msg = ""
         try:
             storage.delete_object(storage_bucket, storage_key)
-        except Exception:
-            pass  # Best-effort cleanup
+            cleanup_success = True
+        except Exception as c_err:
+            cleanup_err_msg = str(c_err)
+
+        if cleanup_success:
+            detail = f"Database persistence failed, uploaded object cleaned up: {str(db_err)}"
+        else:
+            detail = f"Database persistence failed and storage cleanup failed ({cleanup_err_msg}): {str(db_err)}"
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database persistence failed, uploaded object cleaned up: {str(db_err)}",
+            detail=detail,
         )
+
+    # Post-commit operations (DB commit succeeded; storage object MUST NOT be deleted)
+    try:
+        db.refresh(asset)
+    except Exception:
+        pass  # Asset attributes are already set on instance
 
     # 7. Generate presigned download URL
     download_url = storage.generate_presigned_url(storage_bucket, storage_key)
