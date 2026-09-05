@@ -74,9 +74,13 @@ def test_domain_models_creation_and_relationships(db_session):
     asset = Asset(
         project_id=project.id,
         name="Hero Pilot Character Turnaround",
+        original_filename="hero_pilot.png",
         asset_type="CHARACTER",
-        storage_path="references/hero_pilot.png",
-        media_url="https://storage.orbis.ai/references/hero_pilot.png",
+        content_type="image/png",
+        file_size_bytes=1024,
+        checksum_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        storage_bucket="orbis-assets",
+        storage_key="projects/123/assets/hero_pilot.png",
         is_locked=True,
     )
     db_session.add(asset)
@@ -86,6 +90,7 @@ def test_domain_models_creation_and_relationships(db_session):
     assert asset.project_id == project.id
     assert len(project.assets) == 1
     assert project.assets[0].is_locked is True
+    assert project.assets[0].original_filename == "hero_pilot.png"
 
     # 6. Create GenerationJob for Shot
     job = GenerationJob(
