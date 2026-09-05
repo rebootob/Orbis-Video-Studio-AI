@@ -10,7 +10,8 @@
 PHASE: P0 — Foundation & Governance
 ACTIVE WORK PACKAGE: P0-WP001 — Project Governance & Architecture Documentation Foundation
 CURRENT GATE: CHATGPT INDEPENDENT CORRECTIVE REVIEW
-DOCUMENTATION: COMPLETE / CORRECTIVE APPLIED
+DOCUMENTATION: COMPLETE / FINAL CORRECTIVE APPLIED
+HANDOFF_BASE_SHA: 7969fa1e34787814bd6ff80fbb90e9011d62e994
 IMPLEMENTATION: NOT AUTHORIZED
 VIDU: PLANNED / NOT STARTED
 CLOUD INFRASTRUCTURE: PLANNED / NOT STARTED
@@ -28,13 +29,13 @@ NEXT ALLOWED ACTION: CHATGPT REVIEW ONLY
 
 | Component / Layer | Status | Notes |
 | :--- | :--- | :--- |
-| **Governance & Documentation** | **COMPLETE / CORRECTIVE APPLIED** | Baseline governance and architecture documentation updated per corrective review. |
+| **Governance & Documentation** | **COMPLETE / CORRECTIVE APPLIED** | Baseline governance, handoff SHA semantics, and V1 integration scope distinction updated per corrective review. |
 | **Core Application Code** | **NOT AUTHORIZED** | No application code allowed in P0-WP001. |
 | **Frontend / Web UI** | **NOT STARTED** | Planned for future WP. |
 | **Backend / API Gateway** | **NOT STARTED** | Planned for future WP. |
 | **Vidu Provider Adapter** | **PLANNED / NOT STARTED** | Provider interface and Vidu spec documented in P0-WP001. |
 | **Cloud Infrastructure / DB** | **PLANNED / NOT STARTED** | Architecture defined, provisioning unauthorized. |
-| **External Integration API** | **PLANNED / NOT STARTED** | Integration architecture documented in P0-WP001. |
+| **External Integration API** | **PLANNED / NOT STARTED** | Integration architecture documented in P0-WP001; operational gateway is post-core V1. |
 
 ---
 

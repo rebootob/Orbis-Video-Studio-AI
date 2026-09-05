@@ -7,7 +7,7 @@
 ## Active Work Package Details
 
 - **Work Package ID:** P0-WP001
-- **Title:** Project Governance & Architecture Documentation Foundation (Corrective Iteration)
+- **Title:** Project Governance & Architecture Documentation Foundation (Final Corrective Iteration)
 - **Target Phase:** P0 — Foundation & Governance
 - **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
 - **Authority / Oversight:** ChatGPT (Control Plane / Architect), Project Owner (Final Human Authority)
@@ -16,11 +16,9 @@
 
 ## Task Objectives
 
-Correct and refine the initial project governance, architecture, product, and delivery documentation for **Orbis Video Studio AI** based on ChatGPT independent review findings:
-1. Replace all local machine-specific links (`file:///c:/...`) with repository-relative Markdown links.
-2. Update `CHAT_HANDOFF.md` to reflect actual post-PR state and remove stale pending action items.
-3. Avoid premature technology lock-in by distinguishing REQUIRED CAPABILITY vs RECOMMENDED CANDIDATE vs TBD / NOT YET LOCKED.
-4. Ensure V1 scope clarity while preserving integration-ready and multi-output-ready architectural design.
+Correct and refine the initial project governance, architecture, product, and delivery documentation for **Orbis Video Studio AI** based on final ChatGPT review findings:
+1. **Fix Handoff HEAD Semantics:** Replace self-invalidating "Current HEAD SHA" concept with `HANDOFF_BASE_SHA` (the repository SHA current immediately before handoff update commit) and establish explicit live HEAD authority rules.
+2. **Fix V1 Integration Scope Contradiction:** Maintain Integration Architecture (REST/API boundary, webhooks, auth, permissions, audit, idempotency) as a LOCKED architectural requirement for V1 design, while explicitly clarifying that full operational Hermes/n8n Integration Gateway implementation is POST-CORE V1 / V1.x.
 
 ---
 
@@ -56,5 +54,5 @@ Correct and refine the initial project governance, architecture, product, and de
 Upon completing all documentation corrections:
 1. Commit changes to branch `ai/p0-wp001-doc-foundation`.
 2. Push branch to origin PR `#1`.
-3. **STOP.** Do NOT merge PR `#1`. Do NOT start P0-WP002.
-4. Return PR details, branch name, exact new HEAD SHA, files changed summary, and confirmation to Project Owner for ChatGPT review.
+3. **STOP.** Do NOT merge PR `#1`. Do NOT start P0-WP002. Do NOT attempt to create recursive commits to embed the new commit's own SHA into itself.
+4. Report PR details, branch name, exact new HEAD SHA externally to Project Owner for ChatGPT review.

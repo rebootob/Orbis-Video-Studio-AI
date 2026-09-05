@@ -22,7 +22,8 @@ graph TD
     P0["P0: Foundation & Governance (P0-WP001)"] --> P1["P1: Core Architecture & Data Engine (P1-WP002 to P1-WP005)"]
     P1 --> P2["P2: Generation & Production Pipeline (P2-WP006 to P2-WP011)"]
     P2 --> P3["P3: Audio, Editing & Cloud Render (P3-WP012 to P3-WP016)"]
-    P3 --> P4["P4: Integration, Multi-Output & V1 Release (P4-WP017 to P4-WP020)"]
+    P3 --> P4["P4: Multi-Output, Export & Core V1 Release (P4-WP018 to P4-WP020)"]
+    P4 -.-> P1x["POST-CORE V1 / V1.x: Integration Gateway Expansion (P4-WP017)"]
 ```
 
 ---
@@ -52,7 +53,7 @@ graph TD
 - **`P2-WP008` — Hybrid Shot Engine & Asset Lock Machine**
   - **Scope:** Hybrid shot import (video, image, recorded, stock), granular entity locking state machine.
 - **`P2-WP009` — Cost Control & Granular Usage Audit Ledger**
-  - **Scope:** Budget cap guards, provider job usage logging, cost audit API.
+  - **Scope:** Budget cap guards, provider job usage logging, cost audit API needed for generation safety.
 - **`P2-WP010` — Web Workspace UI: Storyboard & Shot Grid**
   - **Scope:** Browser UI workspace for project creation, document upload, script editor, and shot grid. *(Tech choice: TBD)*
 - **`P2-WP011` — Selective Shot Regeneration Service**
@@ -70,12 +71,15 @@ graph TD
 - **`P3-WP016` — Human Approval Gates & QC Review Pipeline**
   - **Scope:** Cost threshold approval gates, preview watermark player, human sign-off state machine.
 
-### Phase 4 — Integration, Multi-Output & V1 Release
-- **`P4-WP017` — Integration API Gateway & Idempotency Engine**
-  - **Scope:** REST/Webhook gateway for Hermes/n8n, API key auth, idempotency header processor.
+### Phase 4 — Multi-Output, Export & Core V1 Release
 - **`P4-WP018` — Multi-Output & Platform Export Presets**
   - **Scope:** Presets for 16:9, 9:16, 1:1, smart subject cropping, subtitle burning profiles.
 - **`P4-WP019` — Project Export/Import Archive Package (.orbis)**
   - **Scope:** ZIP package exporter/importer, metadata validation, disaster recovery scripts.
-- **`P4-WP020` — End-to-End System Integration, UAT & V1 Release**
-  - **Scope:** Complete V1 PASS checklist validation, end-to-end UAT sign-off, production release tag.
+- **`P4-WP020` — End-to-End System Integration, UAT & Core V1 Release**
+  - **Scope:** Complete Core V1 PASS checklist validation, end-to-end UAT sign-off, production release tag.
+
+### Post-Core V1 / V1.x — Integration Expansion
+- **`P4-WP017` — Full Operational Integration Gateway (Hermes / n8n)**
+  - **Status:** **POST-CORE V1 / V1.x (Architecture Ready in V1)**
+  - **Scope:** Full operational integration gateway connectors, external agent automation hooks, webhook dispatchers. Architecture readiness (REST boundaries, auth, permissions, audit, idempotency) is maintained in V1.
