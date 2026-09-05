@@ -103,7 +103,7 @@ class OpenAICreativeGenerationProvider(CreativeGenerationProvider):
                         continue
                     raise CreativeGenerationError(
                         "PROVIDER_UNAVAILABLE",
-                        "OpenAI rate limit exceeded (HTTP 429).",
+                        f"OpenAI rate limit exceeded (HTTP {resp.status_code}).",
                     )
                 elif resp.status_code >= 500:
                     if attempt < max_retries:
@@ -111,12 +111,12 @@ class OpenAICreativeGenerationProvider(CreativeGenerationProvider):
                         continue
                     raise CreativeGenerationError(
                         "PROVIDER_UNAVAILABLE",
-                        f"OpenAI provider server error (HTTP {resp.status_code}).",
+                        f"OpenAI server error (HTTP {resp.status_code}).",
                     )
                 else:
                     raise CreativeGenerationError(
                         "GENERATION_FAILED",
-                        f"OpenAI returned HTTP error {resp.status_code}: {resp.text[:200]}",
+                        f"OpenAI provider returned HTTP error {resp.status_code}.",
                     )
 
             except httpx.TimeoutException as e:
@@ -135,13 +135,13 @@ class OpenAICreativeGenerationProvider(CreativeGenerationProvider):
                     continue
                 raise CreativeGenerationError(
                     "PROVIDER_UNAVAILABLE",
-                    f"Failed to connect to OpenAI API: {type(e).__name__}",
+                    f"Failed to connect to OpenAI API (HTTP Connection Error).",
                 )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         raise CreativeGenerationError(
             "GENERATION_FAILED",
-            f"OpenAI generation failed after {max_retries} retries: {str(last_exception)}",
+            f"OpenAI generation failed after {max_retries} retries.",
         )
 
     def generate_story(

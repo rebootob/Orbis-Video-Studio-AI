@@ -190,7 +190,7 @@ def test_provider_error_status_mappings(client, db_session):
     timeout_provider = FakeCreativeGenerationProvider(should_fail=True, error_code="PROVIDER_TIMEOUT", error_message="Request timed out")
     client.app.dependency_overrides[get_creative_provider] = lambda: timeout_provider
 
-    project = Project(title="Timeout Project", status="DRAFT")
+    project = Project(title="Timeout Project", description="Valid story brief context", status="DRAFT")
     db_session.add(project)
     db_session.commit()
 
@@ -217,3 +217,92 @@ def test_non_existent_project_returns_404(client):
     fake_project_id = str(uuid.uuid4())
     resp = client.post(f"/api/v1/projects/{fake_project_id}/story/generate", json={})
     assert resp.status_code == 404
+
+
+def test_no_source_context_guard_prevents_provider_call(client, db_session):
+    from unittest.mock import MagicMock
+
+    mock_provider = MagicMock()
+    client.app.dependency_overrides[get_creative_provider] = lambda: mock_provider
+
+    # Project with no description/brief and no documents
+    project = Project(title="Empty Context Project", description=None, status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/projects/{project.id}/story/generate", json={})
+    assert resp.status_code == 400
+    assert "no source context provided" in resp.json()["detail"].lower()
+    mock_provider.generate_story.assert_not_called()
+
+
+def test_success_audit_transaction_rollback_on_persistence_failure(db_session, monkeypatch):
+    from app.services.creative_generation.service import StoryGenerationService
+
+    project = Project(title="Rollback Test Project", description="Valid story brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+    proj_id = project.id
+
+    fake_provider = FakeCreativeGenerationProvider()
+    service = StoryGenerationService(db=db_session, provider=fake_provider)
+
+    # Monkeypatch db_session.flush to simulate persistence failure during domain persistence
+    def failing_flush():
+        raise RuntimeError("Simulated DB Persistence Flush Error")
+
+    # Let project setup flush normally, then fail on generation flush
+    monkeypatch.setattr(db_session, "flush", failing_flush)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        service.generate_project_story(proj_id)
+
+    assert "Simulated DB Persistence Flush Error" in str(exc_info.value)
+
+    # Verify no durable SUCCESS audit log remains in DB
+    audits = db_session.query(GenerationAuditLog).filter(
+        GenerationAuditLog.project_id == proj_id,
+        GenerationAuditLog.status == "SUCCESS",
+    ).all()
+    assert len(audits) == 0
+
+
+def test_sanitized_provider_error_response_no_raw_body_leak(monkeypatch):
+    import httpx
+    from app.services.creative_generation.openai_provider import OpenAICreativeGenerationProvider
+    from app.services.creative_generation.base import CreativeGenerationError
+
+    provider = OpenAICreativeGenerationProvider(api_key="sk-test-key-12345")
+
+    # Mock httpx.Client.post to return a 400 error containing sensitive diagnostics
+    class MockResponse:
+        status_code = 400
+        text = '{"error": {"code": "invalid_prompt", "secret_diagnostic": "token_abc123secret_leak"}}'
+
+        def json(self):
+            return {"error": "diagnostic"}
+
+    class MockClient:
+        def __init__(self, timeout=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        def post(self, url, headers=None, json=None):
+            return MockResponse()
+
+    monkeypatch.setattr(httpx, "Client", MockClient)
+
+    with pytest.raises(CreativeGenerationError) as exc_info:
+        provider.generate_story("Test prompt")
+
+    assert exc_info.value.code == "GENERATION_FAILED"
+    # Ensure raw secret diagnostics and headers are NOT present in error message
+    assert "token_abc123secret_leak" not in exc_info.value.message
+    assert "sk-test-key-12345" not in exc_info.value.message
+    assert exc_info.value.message == "OpenAI provider returned HTTP error 400."
+
