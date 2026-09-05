@@ -29,6 +29,8 @@ def extract_asset_document(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
         elif e.code in ("UNSUPPORTED_DOCUMENT_TYPE", "DOCUMENT_TOO_LARGE"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message)
+        elif e.code == "STORAGE_ACCESS_FAILED":
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message)
         else:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e.message)
 

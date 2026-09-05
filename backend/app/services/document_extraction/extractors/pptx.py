@@ -59,19 +59,37 @@ class PptxDocumentExtractor(DocumentExtractor):
 
             slide_text = "\n".join(shape_texts).strip()
             if slide_text:
-                slide_texts.append(f"--- Slide {slide_idx + 1} ---\n{slide_text}")
-                segments.append({
-                    "index": slide_idx + 1,
-                    "type": "slide",
-                    "text": slide_text,
-                })
-                total_chars += len(slide_text)
-
-                if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
-                    warnings.append(f"Character extraction limit ({settings.MAX_EXTRACTED_CHARACTERS}) reached.")
+                remaining_space = settings.MAX_EXTRACTED_CHARACTERS - total_chars
+                if remaining_space <= 0:
                     break
 
+                if len(slide_text) > remaining_space:
+                    slide_text = slide_text[:remaining_space]
+                    slide_texts.append(f"--- Slide {slide_idx + 1} ---\n{slide_text}")
+                    segments.append({
+                        "index": slide_idx + 1,
+                        "type": "slide",
+                        "text": slide_text,
+                    })
+                    total_chars += len(slide_text)
+                    warnings.append(f"Character extraction limit ({settings.MAX_EXTRACTED_CHARACTERS}) reached.")
+                    break
+                else:
+                    slide_texts.append(f"--- Slide {slide_idx + 1} ---\n{slide_text}")
+                    segments.append({
+                        "index": slide_idx + 1,
+                        "type": "slide",
+                        "text": slide_text,
+                    })
+                    total_chars += len(slide_text)
+
+                    if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                        warnings.append(f"Character extraction limit ({settings.MAX_EXTRACTED_CHARACTERS}) reached.")
+                        break
+
         combined_text = "\n\n".join(slide_texts)
+        if len(combined_text) > settings.MAX_EXTRACTED_CHARACTERS:
+            combined_text = combined_text[: settings.MAX_EXTRACTED_CHARACTERS]
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         status = "SUCCESS" if combined_text.strip() else "NO_TEXT_LAYER"
 

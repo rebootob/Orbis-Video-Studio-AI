@@ -265,3 +265,152 @@ def test_document_size_limit_validation(client, db_session, monkeypatch):
     ext_resp = client.post(f"/api/v1/assets/{asset_id}/extract")
     assert ext_resp.status_code == 400
     assert "exceeds maximum limit" in ext_resp.json()["detail"].lower()
+
+
+def test_pre_download_size_guard_prevents_storage_get_object(client, db_session, monkeypatch):
+    from unittest.mock import MagicMock
+    from app.services.document_extraction.service import DocumentExtractionService, DocumentExtractionError
+
+    project = Project(title="Pre-download Guard Project", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    asset = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Pre-download Guard Asset",
+        asset_type="DOCUMENT",
+        original_filename="large.txt",
+        content_type="text/plain",
+        file_size_bytes=settings.MAX_DOCUMENT_BYTES + 1000,
+        checksum_sha256="dummychecksum1234567890",
+        storage_bucket="test-bucket",
+        storage_key="test-key",
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    mock_storage = MagicMock()
+    service = DocumentExtractionService(db=db_session, storage=mock_storage)
+
+    with pytest.raises(DocumentExtractionError) as exc_info:
+        service.extract_asset_document(asset.id)
+
+    assert exc_info.value.code == "DOCUMENT_TOO_LARGE"
+    mock_storage.get_object.assert_not_called()
+
+
+def test_pdf_hard_character_limit(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_EXTRACTED_CHARACTERS", 30)
+
+    project = Project(title="PDF Limit Project", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    pdf_bytes = create_sample_pdf_bytes("This is a long PDF text that exceeds 30 characters easily.")
+
+    upload_resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("limit.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+    )
+    asset_id = upload_resp.json()["id"]
+
+    ext_resp = client.post(f"/api/v1/assets/{asset_id}/extract")
+    assert ext_resp.status_code == 200
+    data = ext_resp.json()
+
+    assert data["character_count"] <= 30
+    assert len(data["extracted_text"]) <= 30
+
+
+def test_docx_hard_character_limit_and_table_loop_termination(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_EXTRACTED_CHARACTERS", 25)
+
+    project = Project(title="DOCX Limit Project", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    doc = docx.Document()
+    doc.add_paragraph("Paragraph 1 with long text exceeding limit.")
+    t1 = doc.add_table(rows=2, cols=2)
+    t1.rows[0].cells[0].text = "Cell 1 text"
+    t1.rows[0].cells[1].text = "Cell 2 text"
+    t2 = doc.add_table(rows=2, cols=2)
+    t2.rows[0].cells[0].text = "Cell 3 text"
+    t2.rows[0].cells[1].text = "Cell 4 text"
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    docx_bytes = buf.getvalue()
+
+    upload_resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("table_limit.docx", io.BytesIO(docx_bytes), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    asset_id = upload_resp.json()["id"]
+
+    ext_resp = client.post(f"/api/v1/assets/{asset_id}/extract")
+    assert ext_resp.status_code == 200
+    data = ext_resp.json()
+
+    assert data["character_count"] <= 25
+    assert len(data["extracted_text"]) <= 25
+
+
+def test_pptx_hard_character_limit(client, db_session, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_EXTRACTED_CHARACTERS", 20)
+
+    project = Project(title="PPTX Limit Project", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    pptx_bytes = create_sample_pptx_bytes([
+        "Slide 1 long text content exceeding max limit",
+        "Slide 2 text content"
+    ])
+
+    upload_resp = client.post(
+        "/api/v1/assets/upload",
+        data={"project_id": str(project.id)},
+        files={"file": ("limit.pptx", io.BytesIO(pptx_bytes), "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+    )
+    asset_id = upload_resp.json()["id"]
+
+    ext_resp = client.post(f"/api/v1/assets/{asset_id}/extract")
+    assert ext_resp.status_code == 200
+    data = ext_resp.json()
+
+    assert data["character_count"] <= 20
+    assert len(data["extracted_text"]) <= 20
+
+
+def test_storage_access_failed_error_semantics(client, db_session, mock_storage):
+    from unittest.mock import MagicMock
+
+    project = Project(title="Storage Failure Project", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    asset = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Failed Storage Asset",
+        asset_type="DOCUMENT",
+        original_filename="test.txt",
+        content_type="text/plain",
+        file_size_bytes=100,
+        checksum_sha256="dummychecksum1234567890",
+        storage_bucket="test-bucket",
+        storage_key="test-key",
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    mock_storage.get_object = MagicMock(side_effect=RuntimeError("S3 Connection Refused / Provider Failure"))
+
+    ext_resp = client.post(f"/api/v1/assets/{asset.id}/extract")
+    assert ext_resp.status_code == 500
+    assert "Failed to access object storage payload" in ext_resp.json()["detail"]
+

@@ -38,42 +38,90 @@ class DocxDocumentExtractor(DocumentExtractor):
         seg_idx = 1
         total_chars = 0
 
+        limit_reached = False
+
         # Extract document paragraphs
         for p in doc.paragraphs:
             text = p.text.strip()
             if text:
                 text_clean = text.replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "")
-                paragraphs_text.append(text_clean)
-                segments.append({
-                    "index": seg_idx,
-                    "type": "paragraph",
-                    "text": text_clean,
-                })
-                seg_idx += 1
-                total_chars += len(text_clean)
-
-                if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
-                    warnings.append(f"Text extraction limit ({settings.MAX_EXTRACTED_CHARACTERS} chars) reached.")
+                remaining_space = settings.MAX_EXTRACTED_CHARACTERS - total_chars
+                if remaining_space <= 0:
+                    limit_reached = True
                     break
 
+                if len(text_clean) > remaining_space:
+                    text_clean = text_clean[:remaining_space]
+                    paragraphs_text.append(text_clean)
+                    segments.append({
+                        "index": seg_idx,
+                        "type": "paragraph",
+                        "text": text_clean,
+                    })
+                    seg_idx += 1
+                    total_chars += len(text_clean)
+                    limit_reached = True
+                    warnings.append(f"Text extraction limit ({settings.MAX_EXTRACTED_CHARACTERS} chars) reached.")
+                    break
+                else:
+                    paragraphs_text.append(text_clean)
+                    segments.append({
+                        "index": seg_idx,
+                        "type": "paragraph",
+                        "text": text_clean,
+                    })
+                    seg_idx += 1
+                    total_chars += len(text_clean)
+
+                    if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                        limit_reached = True
+                        warnings.append(f"Text extraction limit ({settings.MAX_EXTRACTED_CHARACTERS} chars) reached.")
+                        break
+
         # Extract document table cell text if character limit not exceeded
-        if total_chars < settings.MAX_EXTRACTED_CHARACTERS:
+        if not limit_reached and total_chars < settings.MAX_EXTRACTED_CHARACTERS:
             for table in doc.tables:
+                if limit_reached:
+                    break
                 for row in table.rows:
                     row_text = " | ".join([cell.text.strip() for cell in row.cells if cell.text.strip()])
                     if row_text:
-                        paragraphs_text.append(row_text)
-                        segments.append({
-                            "index": seg_idx,
-                            "type": "table_row",
-                            "text": row_text,
-                        })
-                        seg_idx += 1
-                        total_chars += len(row_text)
-                        if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                        remaining_space = settings.MAX_EXTRACTED_CHARACTERS - total_chars
+                        if remaining_space <= 0:
+                            limit_reached = True
                             break
 
+                        if len(row_text) > remaining_space:
+                            row_text = row_text[:remaining_space]
+                            paragraphs_text.append(row_text)
+                            segments.append({
+                                "index": seg_idx,
+                                "type": "table_row",
+                                "text": row_text,
+                            })
+                            seg_idx += 1
+                            total_chars += len(row_text)
+                            limit_reached = True
+                            warnings.append(f"Text extraction limit ({settings.MAX_EXTRACTED_CHARACTERS} chars) reached.")
+                            break
+                        else:
+                            paragraphs_text.append(row_text)
+                            segments.append({
+                                "index": seg_idx,
+                                "type": "table_row",
+                                "text": row_text,
+                            })
+                            seg_idx += 1
+                            total_chars += len(row_text)
+
+                            if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                                limit_reached = True
+                                warnings.append(f"Text extraction limit ({settings.MAX_EXTRACTED_CHARACTERS} chars) reached.")
+                                break
+
         combined_text = "\n\n".join(paragraphs_text)
+        if len(combined_text) > settings.MAX_EXTRACTED_CHARACTERS:
+            combined_text = combined_text[: settings.MAX_EXTRACTED_CHARACTERS]
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         status = "SUCCESS" if combined_text.strip() else "NO_TEXT_LAYER"
 

@@ -36,16 +36,35 @@ class DocumentExtractionService:
         if existing and not force:
             return existing
 
-        # 2. Verify object storage existence and payload
-        if not self.storage.object_exists(asset.storage_bucket, asset.storage_key):
-            raise DocumentExtractionError("STORAGE_OBJECT_MISSING", f"Object storage payload missing for Asset '{asset_id}'.")
+        # Check Asset file_size_bytes metadata before downloading object payload
+        if asset.file_size_bytes and asset.file_size_bytes > settings.MAX_DOCUMENT_BYTES:
+            raise DocumentExtractionError(
+                "DOCUMENT_TOO_LARGE",
+                f"Document metadata size ({asset.file_size_bytes} bytes) exceeds maximum limit ({settings.MAX_DOCUMENT_BYTES} bytes).",
+            )
 
+        # 2. Verify object storage payload existence
         try:
             content = self.storage.get_object(asset.storage_bucket, asset.storage_key)
+        except KeyError:
+            raise DocumentExtractionError(
+                "STORAGE_OBJECT_MISSING",
+                f"Object storage payload missing for Asset '{asset_id}'.",
+            )
         except Exception as e:
-            raise DocumentExtractionError("STORAGE_OBJECT_MISSING", f"Failed to retrieve object from storage: {str(e)}")
+            err_code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+            status_code = str(getattr(e, "response", {}).get("ResponseMetadata", {}).get("HTTPStatusCode", ""))
+            if err_code in ("404", "NoSuchKey", "NotFound") or status_code == "404":
+                raise DocumentExtractionError(
+                    "STORAGE_OBJECT_MISSING",
+                    f"Object storage payload missing for Asset '{asset_id}'.",
+                )
+            raise DocumentExtractionError(
+                "STORAGE_ACCESS_FAILED",
+                f"Failed to access object storage payload: {type(e).__name__}",
+            )
 
-        # 3. Check document size limit
+        # 3. Defensive check on retrieved payload length
         if len(content) > settings.MAX_DOCUMENT_BYTES:
             raise DocumentExtractionError(
                 "DOCUMENT_TOO_LARGE",

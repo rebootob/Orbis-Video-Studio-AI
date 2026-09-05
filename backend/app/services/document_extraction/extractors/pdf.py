@@ -51,21 +51,40 @@ class PdfDocumentExtractor(DocumentExtractor):
             page_text_trimmed = page_text.strip()
 
             if page_text_trimmed:
-                page_texts.append(page_text_trimmed)
-                segments.append({
-                    "index": page_num + 1,
-                    "type": "page",
-                    "text": page_text_trimmed,
-                })
-                total_chars += len(page_text_trimmed)
+                remaining_space = settings.MAX_EXTRACTED_CHARACTERS - total_chars
+                if remaining_space <= 0:
+                    break
 
-                if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                if len(page_text_trimmed) > remaining_space:
+                    page_text_trimmed = page_text_trimmed[:remaining_space]
+                    page_texts.append(page_text_trimmed)
+                    segments.append({
+                        "index": page_num + 1,
+                        "type": "page",
+                        "text": page_text_trimmed,
+                    })
+                    total_chars += len(page_text_trimmed)
                     warnings.append(f"Text extraction aborted at character limit ({settings.MAX_EXTRACTED_CHARACTERS}).")
                     break
+                else:
+                    page_texts.append(page_text_trimmed)
+                    segments.append({
+                        "index": page_num + 1,
+                        "type": "page",
+                        "text": page_text_trimmed,
+                    })
+                    total_chars += len(page_text_trimmed)
+
+                    if total_chars >= settings.MAX_EXTRACTED_CHARACTERS:
+                        warnings.append(f"Text extraction aborted at character limit ({settings.MAX_EXTRACTED_CHARACTERS}).")
+                        break
 
         doc.close()
 
         combined_text = "\n\n".join(page_texts)
+        if len(combined_text) > settings.MAX_EXTRACTED_CHARACTERS:
+            combined_text = combined_text[: settings.MAX_EXTRACTED_CHARACTERS]
+
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         # Check if PDF contains no extractable text layer (e.g. scanned image PDF)
