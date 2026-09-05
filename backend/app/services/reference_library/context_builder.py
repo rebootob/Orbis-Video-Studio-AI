@@ -146,23 +146,28 @@ class ReferenceContextBuilder:
         }
 
         # Truncate if total text output exceeds max_characters
-        formatted_str = ReferenceContextBuilder.format_prompt_section(context_payload)
-        if len(formatted_str) > max_chars:
-            # Simple safe character bound truncation
-            pass
+        formatted_str = ReferenceContextBuilder.format_prompt_section(context_payload, max_chars)
 
         return context_payload
 
     @staticmethod
-    def format_prompt_section(context: Dict[str, Any]) -> str:
-        """Formats Reference Context dictionary into a clean prompt section for LLMs."""
+    def format_prompt_section(context: Dict[str, Any], max_characters: Optional[int] = None) -> str:
+        """Formats Reference Context dictionary into a clean prompt section for LLMs with deterministic length bounding."""
+        max_chars = max_characters or settings.MAX_REFERENCE_CONTEXT_CHARACTERS
         lines = []
 
+        facts = context.get("facts", [])
         characters = context.get("characters", [])
         locations = context.get("locations", [])
         style = context.get("style")
         brand = context.get("brand")
         other_refs = context.get("other_references", [])
+
+        if facts:
+            lines.append("=== FACTUAL DOCUMENTS ===")
+            for f in facts:
+                fname = f.get("filename", "Document")
+                lines.append(f"[{fname}] {f.get('content', '')}")
 
         if characters or locations or style or brand or other_refs:
             lines.append("=== LOCKED PROJECT REFERENCES ===")
@@ -218,4 +223,11 @@ class ReferenceContextBuilder:
                 for ref in other_refs:
                     lines.append(f"  * [{ref['category']}] {ref['name']}: {ref.get('description', '')}")
 
-        return "\n".join(lines)
+        full_text = "\n".join(lines)
+        if len(full_text) > max_chars:
+            full_text = full_text[:max_chars]
+
+        return full_text
+
+    format_reference_context = format_prompt_section
+

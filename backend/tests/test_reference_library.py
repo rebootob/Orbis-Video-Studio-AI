@@ -93,16 +93,30 @@ def test_reference_library_crud_and_lock_protection(client, db_session):
     assert resp_lock_del.status_code == 409
     assert "is locked" in resp_lock_del.json()["detail"]
 
-    # 7. Unlock and update
-    resp_unlock = client.patch(
+    # 7. Attempt unlock + modify in same request -> 409
+    resp_unlock_mod = client.patch(
         f"/api/v1/references/{ref_id}",
         json={"is_locked": False, "name": "Unlocked World Lore"},
     )
+    assert resp_unlock_mod.status_code == 409
+
+    # 8. Unlock-only -> 200
+    resp_unlock = client.patch(
+        f"/api/v1/references/{ref_id}",
+        json={"is_locked": False},
+    )
     assert resp_unlock.status_code == 200
-    assert resp_unlock.json()["name"] == "Unlocked World Lore"
     assert resp_unlock.json()["is_locked"] is False
 
-    # 8. Delete unlocked reference -> 204, underlying asset must remain intact
+    # 9. Subsequent modification after unlock -> 200
+    resp_mod = client.patch(
+        f"/api/v1/references/{ref_id}",
+        json={"name": "Unlocked World Lore"},
+    )
+    assert resp_mod.status_code == 200
+    assert resp_mod.json()["name"] == "Unlocked World Lore"
+
+    # 10. Delete unlocked reference -> 204, underlying asset must remain intact
     resp_del = client.delete(f"/api/v1/references/{ref_id}")
     assert resp_del.status_code == 204
 
@@ -292,3 +306,75 @@ def test_story_generation_includes_reference_context(client, db_session):
     assert gen_resp.status_code == 200
     data = gen_resp.json()
     assert data["status"] == "GENERATED"
+
+
+def test_locked_entity_unlock_only_transitions_all_types(client, db_session):
+    project = Project(title="Lock Contract Test", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # 1. Character Bible lock transitions
+    c_resp = client.post(f"/api/v1/projects/{project.id}/characters", json={"name": "LockChar", "is_locked": True})
+    c_id = c_resp.json()["id"]
+
+    # Unlock + Modify in same request -> 409
+    assert client.patch(f"/api/v1/characters/{c_id}", json={"is_locked": False, "role": "Hero"}).status_code == 409
+    # Modify while locked -> 409
+    assert client.patch(f"/api/v1/characters/{c_id}", json={"role": "Hero"}).status_code == 409
+    # Unlock-only -> 200
+    res_u = client.patch(f"/api/v1/characters/{c_id}", json={"is_locked": False})
+    assert res_u.status_code == 200
+    assert res_u.json()["is_locked"] is False
+    # Subsequent modification after unlock -> 200
+    res_m = client.patch(f"/api/v1/characters/{c_id}", json={"role": "Hero"})
+    assert res_m.status_code == 200
+    assert res_m.json()["role"] == "Hero"
+
+    # 2. Location Bible lock transitions
+    l_resp = client.post(f"/api/v1/projects/{project.id}/locations", json={"name": "LockLoc", "is_locked": True})
+    l_id = l_resp.json()["id"]
+    assert client.patch(f"/api/v1/locations/{l_id}", json={"is_locked": False, "environment": "Forest"}).status_code == 409
+    assert client.patch(f"/api/v1/locations/{l_id}", json={"is_locked": False}).status_code == 200
+    assert client.patch(f"/api/v1/locations/{l_id}", json={"environment": "Forest"}).status_code == 200
+
+    # 3. Style Bible lock transitions
+    s_resp = client.post(f"/api/v1/projects/{project.id}/styles", json={"name": "LockStyle", "is_locked": True})
+    s_id = s_resp.json()["id"]
+    assert client.patch(f"/api/v1/styles/{s_id}", json={"is_locked": False, "visual_style": "8K"}).status_code == 409
+    assert client.patch(f"/api/v1/styles/{s_id}", json={"is_locked": False}).status_code == 200
+    assert client.patch(f"/api/v1/styles/{s_id}", json={"visual_style": "8K"}).status_code == 200
+
+    # 4. Brand Bible lock transitions
+    b_resp = client.post(f"/api/v1/projects/{project.id}/brands", json={"brand_name": "LockBrand", "is_locked": True})
+    b_id = b_resp.json()["id"]
+    assert client.patch(f"/api/v1/brands/{b_id}", json={"is_locked": False, "tone": "Bold"}).status_code == 409
+    assert client.patch(f"/api/v1/brands/{b_id}", json={"is_locked": False}).status_code == 200
+    assert client.patch(f"/api/v1/brands/{b_id}", json={"tone": "Bold"}).status_code == 200
+
+
+def test_oversized_context_truncation_and_factual_priority():
+    # 1. Test factual document priority
+    context_payload = {
+        "facts": [{"filename": "critical_facts.pdf", "content": "IMPORTANT_FACT: The secret code is 42."}],
+        "characters": [{"name": "Protagonist", "role": "Lead hero"}],
+        "style": {"name": "Cinematic", "visual_style": "Photorealistic"},
+    }
+    formatted = ReferenceContextBuilder.format_prompt_section(context_payload, max_characters=500)
+
+    # Factual document content appears before lower-priority reference content
+    fact_pos = formatted.find("IMPORTANT_FACT: The secret code is 42.")
+    char_pos = formatted.find("Protagonist")
+    assert fact_pos != -1
+    assert char_pos != -1
+    assert fact_pos < char_pos
+
+    # 2. Test genuinely oversized context truncation
+    huge_facts = [{"filename": "huge_doc.pdf", "content": "X" * 10000}]
+    huge_context = {
+        "facts": huge_facts,
+        "characters": [{"name": "C" * 1000}],
+    }
+    custom_limit = 150
+    bounded_text = ReferenceContextBuilder.format_prompt_section(huge_context, max_characters=custom_limit)
+    assert len(bounded_text) <= custom_limit
+

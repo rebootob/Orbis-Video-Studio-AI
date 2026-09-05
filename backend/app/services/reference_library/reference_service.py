@@ -104,9 +104,16 @@ class ReferenceService:
     ) -> ProjectReference:
         ref = self.get_reference(reference_id)
 
-        # Check lock safety: if locked and update is not unlocking it
-        if ref.is_locked and (is_locked is None or is_locked is True):
-            raise ReferenceError("REFERENCE_LOCKED", f"ProjectReference '{reference_id}' is locked. Explicit unlock required before modification.")
+        if ref.is_locked:
+            other_fields = [name, description, reference_asset_id, metadata_json]
+            has_other_modifications = any(f is not None for f in other_fields)
+            if is_locked is False and not has_other_modifications:
+                ref.is_locked = False
+                self.db.commit()
+                self.db.refresh(ref)
+                return ref
+            else:
+                raise ReferenceError("REFERENCE_LOCKED", f"ProjectReference '{reference_id}' is locked. Explicit unlock-only request (is_locked=false with no other fields) required before modification.")
 
         if reference_asset_id is not None:
             self._validate_asset_link(ref.project_id, reference_asset_id)
@@ -203,8 +210,20 @@ class ReferenceService:
         is_locked: Optional[bool] = None,
     ) -> CharacterBible:
         char = self.get_character(character_id)
-        if char.is_locked and (is_locked is None or is_locked is True):
-            raise ReferenceError("REFERENCE_LOCKED", f"CharacterBible '{character_id}' is locked. Explicit unlock required.")
+        if char.is_locked:
+            other_fields = [
+                name, role, description, appearance, wardrobe, age_range,
+                gender_presentation, nationality_cultural_context, personality,
+                speaking_style, continuity_notes, reference_asset_id,
+            ]
+            has_other_modifications = any(f is not None for f in other_fields)
+            if is_locked is False and not has_other_modifications:
+                char.is_locked = False
+                self.db.commit()
+                self.db.refresh(char)
+                return char
+            else:
+                raise ReferenceError("REFERENCE_LOCKED", f"CharacterBible '{character_id}' is locked. Explicit unlock-only request (is_locked=false with no other fields) required before modification.")
 
         if reference_asset_id is not None:
             self._validate_asset_link(char.project_id, reference_asset_id)
@@ -305,8 +324,19 @@ class ReferenceService:
         is_locked: Optional[bool] = None,
     ) -> LocationBible:
         loc = self.get_location(location_id)
-        if loc.is_locked and (is_locked is None or is_locked is True):
-            raise ReferenceError("REFERENCE_LOCKED", f"LocationBible '{location_id}' is locked. Explicit unlock required.")
+        if loc.is_locked:
+            other_fields = [
+                name, description, environment, visual_features, lighting,
+                time_of_day_default, continuity_notes, reference_asset_id,
+            ]
+            has_other_modifications = any(f is not None for f in other_fields)
+            if is_locked is False and not has_other_modifications:
+                loc.is_locked = False
+                self.db.commit()
+                self.db.refresh(loc)
+                return loc
+            else:
+                raise ReferenceError("REFERENCE_LOCKED", f"LocationBible '{location_id}' is locked. Explicit unlock-only request (is_locked=false with no other fields) required before modification.")
 
         if reference_asset_id is not None:
             self._validate_asset_link(loc.project_id, reference_asset_id)
@@ -402,8 +432,19 @@ class ReferenceService:
         is_locked: Optional[bool] = None,
     ) -> StyleBible:
         style = self.get_style(style_id)
-        if style.is_locked and (is_locked is None or is_locked is True):
-            raise ReferenceError("REFERENCE_LOCKED", f"StyleBible '{style_id}' is locked. Explicit unlock required.")
+        if style.is_locked:
+            other_fields = [
+                name, visual_style, camera_style, color_direction, lighting_style,
+                composition_rules, realism_level, negative_constraints, reference_asset_id,
+            ]
+            has_other_modifications = any(f is not None for f in other_fields)
+            if is_locked is False and not has_other_modifications:
+                style.is_locked = False
+                self.db.commit()
+                self.db.refresh(style)
+                return style
+            else:
+                raise ReferenceError("REFERENCE_LOCKED", f"StyleBible '{style_id}' is locked. Explicit unlock-only request (is_locked=false with no other fields) required before modification.")
 
         if reference_asset_id is not None:
             self._validate_asset_link(style.project_id, reference_asset_id)
@@ -498,8 +539,19 @@ class ReferenceService:
         is_locked: Optional[bool] = None,
     ) -> BrandBible:
         brand = self.get_brand(brand_id)
-        if brand.is_locked and (is_locked is None or is_locked is True):
-            raise ReferenceError("REFERENCE_LOCKED", f"BrandBible '{brand_id}' is locked. Explicit unlock required.")
+        if brand.is_locked:
+            other_fields = [
+                brand_name, brand_colors, typography_notes, do_and_dont_rules, tone,
+                mandatory_wording, continuity_notes, logo_asset_id,
+            ]
+            has_other_modifications = any(f is not None for f in other_fields)
+            if is_locked is False and not has_other_modifications:
+                brand.is_locked = False
+                self.db.commit()
+                self.db.refresh(brand)
+                return brand
+            else:
+                raise ReferenceError("REFERENCE_LOCKED", f"BrandBible '{brand_id}' is locked. Explicit unlock-only request (is_locked=false with no other fields) required before modification.")
 
         if logo_asset_id is not None:
             self._validate_asset_link(brand.project_id, logo_asset_id)
@@ -532,3 +584,4 @@ class ReferenceService:
             raise ReferenceError("REFERENCE_LOCKED", f"BrandBible '{brand_id}' is locked and cannot be deleted.")
         self.db.delete(brand)
         self.db.commit()
+
