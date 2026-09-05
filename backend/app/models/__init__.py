@@ -6,6 +6,7 @@ from app.models.shot import Shot
 from app.models.asset import Asset
 from app.models.generation_job import GenerationJob
 from app.models.document_extraction import DocumentExtraction
+from app.models.generation_audit import GenerationAuditLog
 
 __all__ = [
     "Base",
@@ -16,5 +17,6 @@ __all__ = [
     "Asset",
     "GenerationJob",
     "DocumentExtraction",
+    "GenerationAuditLog",
 ]
 

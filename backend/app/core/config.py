@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     MAX_DOCUMENT_PAGES: int = 500  # 500 pages/slides
     MAX_EXTRACTED_CHARACTERS: int = 2000000  # 2M characters
 
+    # OpenAI Creative Generation Settings
+    OPENAI_API_KEY: str = ""
+    OPENAI_CREATIVE_MODEL: str = "gpt-4o"
+    OPENAI_TIMEOUT_SECONDS: float = 30.0
+    OPENAI_MAX_RETRIES: int = 2
+    DEFAULT_CREATIVE_PROFILE: str = "BALANCED"
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(
