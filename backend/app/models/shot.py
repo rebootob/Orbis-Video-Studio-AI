@@ -27,9 +27,7 @@ class Shot(Base):
         nullable=False,
     )
     shot_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    shot_type: Mapped[str] = mapped_column(
-        String(50), default="AI_GENERATED", nullable=False
-    )
+    shot_type: Mapped[str] = mapped_column(String(50), nullable=False)
     visual_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     duration_seconds: Mapped[float] = mapped_column(Float, default=4.0, nullable=False)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

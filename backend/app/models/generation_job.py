@@ -25,9 +25,7 @@ class GenerationJob(Base):
         ForeignKey("shots.id", ondelete="CASCADE"),
         nullable=False,
     )
-    provider_name: Mapped[str] = mapped_column(
-        String(50), default="vidu", nullable=False
-    )
+    provider_name: Mapped[str] = mapped_column(String(50), nullable=False)
     provider_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(
         String(50), default="PENDING", nullable=False

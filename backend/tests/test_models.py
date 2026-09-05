@@ -104,3 +104,40 @@ def test_domain_models_creation_and_relationships(db_session):
     assert len(shot.generation_jobs) == 1
     assert shot.generation_jobs[0].provider_name == "vidu"
     assert shot.generation_jobs[0].cost_usd == 0.50
+
+
+def test_shot_and_provider_neutrality(db_session):
+    project = Project(title="Neutrality Test", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    story = Story(project_id=project.id, logline="Test neutrality", status="DRAFT")
+    db_session.add(story)
+    db_session.commit()
+
+    scene = Scene(story_id=story.id, scene_number=1, heading="EXT. FIELD - DAY")
+    db_session.add(scene)
+    db_session.commit()
+
+    # Test imported and hybrid shot types (not defaulting to AI_GENERATED)
+    imported_shot = Shot(scene_id=scene.id, shot_number=1, shot_type="IMPORTED", duration_seconds=3.0)
+    hybrid_shot = Shot(scene_id=scene.id, shot_number=2, shot_type="HYBRID", duration_seconds=4.0)
+    db_session.add_all([imported_shot, hybrid_shot])
+    db_session.commit()
+    db_session.refresh(imported_shot)
+    db_session.refresh(hybrid_shot)
+
+    assert imported_shot.shot_type == "IMPORTED"
+    assert hybrid_shot.shot_type == "HYBRID"
+
+    # Test provider-neutral generation jobs (e.g. luma, runway, custom_adapter)
+    job_luma = GenerationJob(shot_id=imported_shot.id, provider_name="luma", status="PENDING")
+    job_runway = GenerationJob(shot_id=hybrid_shot.id, provider_name="runway", status="COMPLETED")
+    db_session.add_all([job_luma, job_runway])
+    db_session.commit()
+    db_session.refresh(job_luma)
+    db_session.refresh(job_runway)
+
+    assert job_luma.provider_name == "luma"
+    assert job_runway.provider_name == "runway"
+

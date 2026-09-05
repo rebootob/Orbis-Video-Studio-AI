@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "orbis_user"
-    POSTGRES_PASSWORD: str = "orbis_password"
+    POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "orbis_db"
 
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
