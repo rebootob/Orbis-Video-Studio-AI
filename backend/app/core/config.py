@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     OBJECT_STORAGE_SECURE: bool = False
     MAX_UPLOAD_SIZE_BYTES: int = 524288000  # 500 MB
 
+    # Document Extraction Limits
+    MAX_DOCUMENT_BYTES: int = 52428800  # 50 MB
+    MAX_DOCUMENT_PAGES: int = 500  # 500 pages/slides
+    MAX_EXTRACTED_CHARACTERS: int = 2000000  # 2M characters
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(
