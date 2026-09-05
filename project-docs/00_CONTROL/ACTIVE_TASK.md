@@ -6,7 +6,7 @@
 
 ## Active Work Package Details
 
-- **Active Work Package:** `P1-WP003 — S3-Compatible Object Storage & Asset Management API`
+- **Active Work Package:** `P1-WP004 — Document Ingestion & Text Extraction Engine`
 - **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
 - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
 - **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
@@ -16,14 +16,15 @@
 
 ## Task Objectives
 
-Implement the S3-compatible object storage and Asset Management API foundation:
-1. **Provider-Neutral Storage Architecture:** Abstract `ObjectStorageProvider` interface with S3-compatible adapter (`S3CompatibleObjectStorageProvider`).
-2. **Asset Management API:** `/api/v1/assets/upload`, `/api/v1/assets/{asset_id}`, `/api/v1/assets/{asset_id}/download`, `/api/v1/assets/{asset_id}`, `/api/v1/projects/{project_id}/assets`.
-3. **Asset Metadata & Database Schema:** Alembic migration `002_asset_object_storage_metadata` supporting `original_filename`, `content_type`, `file_size_bytes`, `checksum_sha256`, `storage_bucket`, `storage_key`.
-4. **Server-Generated Safe Keys & Safety:** Key pattern `projects/{project_id}/assets/{asset_id}/{sanitized_filename}`, SHA-256 checksums, non-empty file and size validation.
-5. **Presigned Private Access:** Presigned access URLs for download without public bucket exposure.
-6. **Developer Environment & MinIO:** Local MinIO service in Docker Compose for integration testing.
-7. **Automated Testing:** Pytest suite covering storage providers, upload/download/delete lifecycle, validation, and migration lifecycle.
+Implement the fast, native document ingestion and text extraction engine:
+1. **Lightweight Fast Native Extractors:** Provider-neutral `DocumentExtractor` interface with PyMuPDF (PDF), python-docx (DOCX), python-pptx (PPTX), and text-decoder (TXT, Markdown).
+2. **Document Type Detector:** Conservative format detection combining magic headers, file extensions, and content-type metadata.
+3. **No-OCR & Performance Principles:** Native text-layer extraction without local/cloud AI dependencies, OCR runtimes, or subprocess conversions.
+4. **Normalized Result & Persistence:** `DocumentExtraction` database entity storing extracted text, segment structures, character counts, warnings, and `extraction_duration_ms`.
+5. **Unicode & Safety:** Full preservation of Thai, English, Japanese, and mixed Unicode text; configurable document size, page count, and character limits.
+6. **API Endpoints:** `/api/v1/assets/{asset_id}/extract` and `/api/v1/assets/{asset_id}/extraction`.
+7. **Database Migration:** Alembic migration `003_add_document_extraction` supporting `upgrade head` -> `downgrade -1` -> `upgrade head`.
+8. **Automated Testing:** Pytest suite covering all supported formats, Thai/Japanese Unicode, size/page limits, missing objects, and migration lifecycle.
 
 ---
 
@@ -32,10 +33,11 @@ Implement the S3-compatible object storage and Asset Management API foundation:
 > [!CAUTION]
 > **BOUNDED EXECUTION & SCOPE PROTECTION**
 > 
-> The following actions are STRICTLY PROHIBITED in P1-WP003:
-> - Starting P1-WP004 or any subsequent Work Package
-> - Implementing Vidu, OpenAI, Gemini, or third-party AI provider API integrations
-> - Implementing PDF, Word, or PPTX document parsers or OCR
+> The following actions are STRICTLY PROHIBITED in P1-WP004:
+> - Starting P1-WP005 or any subsequent Work Package
+> - Implementing local AI (Ollama, local LLM, local vision/OCR models)
+> - Implementing cloud AI API integrations (OpenAI, Gemini, Vidu, Veo)
+> - Implementing Story generation, script writing, translation, or summarization
 > - Implementing frontend or web UI components
 > - Implementing authentication, user management, or permission systems
 > - Implementing audio, TTS, subtitles, FFmpeg, or media transcoding pipelines
@@ -45,5 +47,5 @@ Implement the S3-compatible object storage and Asset Management API foundation:
 
 ## Next Allowed Actions
 
-1. ChatGPT Independent Review of P1-WP003 PR.
+1. ChatGPT Independent Review of P1-WP004 PR.
 2. Project Owner review and sign-off.

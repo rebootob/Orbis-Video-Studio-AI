@@ -8,6 +8,7 @@ from app.db.base_class import Base
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.document_extraction import DocumentExtraction
 
 
 def utc_now() -> datetime:
@@ -44,3 +45,6 @@ class Asset(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="assets")
+    document_extraction: Mapped[Optional["DocumentExtraction"]] = relationship(
+        "DocumentExtraction", back_populates="asset", uselist=False, cascade="all, delete-orphan"
+    )
