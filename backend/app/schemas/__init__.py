@@ -1,6 +1,14 @@
 from app.schemas.health import HealthCheck
 from app.schemas.asset import AssetResponse, AssetDownloadResponse, AssetCreate
 from app.schemas.document_extraction import DocumentExtractionResponse
+from app.schemas.story_generation import (
+    StoryGenerateRequest,
+    SceneGenerateRequest,
+    ShotGenerateRequest,
+    StoryResponse,
+    SceneResponse,
+    ShotResponse,
+)
 
 __all__ = [
     "HealthCheck",
@@ -8,6 +16,12 @@ __all__ = [
     "AssetDownloadResponse",
     "AssetCreate",
     "DocumentExtractionResponse",
+    "StoryGenerateRequest",
+    "SceneGenerateRequest",
+    "ShotGenerateRequest",
+    "StoryResponse",
+    "SceneResponse",
+    "ShotResponse",
 ]
 
 
