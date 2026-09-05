@@ -2,7 +2,7 @@ from typing import Optional, List, Dict, Any
 
 
 class StoryPromptComposer:
-    """Composes prompts for full Story generation separating Factual Source vs Creative Direction."""
+    """Composes prompts for full Story generation separating Factual Source vs Creative Direction vs Locked Project References."""
 
     @staticmethod
     def compose(
@@ -14,6 +14,7 @@ class StoryPromptComposer:
         language: str = "th",
         target_audience: Optional[str] = None,
         custom_instructions: Optional[str] = None,
+        reference_context_text: Optional[str] = None,
     ) -> str:
         prompt_parts = []
 
@@ -32,6 +33,9 @@ class StoryPromptComposer:
         else:
             prompt_parts.append("[No uploaded reference documents provided. Rely on project brief below.]")
 
+        if reference_context_text and reference_context_text.strip():
+            prompt_parts.append(f"\n{reference_context_text.strip()}")
+
         prompt_parts.append("\n=== CREATIVE DIRECTION & OBJECTIVES ===")
         prompt_parts.append(f"Project Title: {project_title}")
         if project_brief:
@@ -46,7 +50,7 @@ class StoryPromptComposer:
 
         prompt_parts.append("\n=== CRITICAL GUIDELINES ===")
         prompt_parts.append(
-            "1. FACTUAL GROUNDING: Do NOT invent factual claims or specs that contradict the FACTUAL SOURCE MATERIAL.\n"
+            "1. FACTUAL GROUNDING: Do NOT invent factual claims or specs that contradict the FACTUAL SOURCE MATERIAL or LOCKED PROJECT REFERENCES.\n"
             "2. STRUCTURED OUTPUT: Return ONLY valid JSON matching the requested Story schema.\n"
             "3. PROMPTS FOR MEDIA: Every shot MUST include explicit `image_prompt` (detailed visual scene setup for static image AI) "
             "and `video_prompt` (motion, camera movement, subject action for video AI like Vidu).\n"
@@ -69,6 +73,7 @@ class ScenePromptComposer:
         tone: str = "cinematic",
         language: str = "th",
         custom_instructions: Optional[str] = None,
+        reference_context_text: Optional[str] = None,
     ) -> str:
         prompt_parts = []
 
@@ -92,6 +97,9 @@ class ScenePromptComposer:
         else:
             prompt_parts.append("[No uploaded reference documents.]")
 
+        if reference_context_text and reference_context_text.strip():
+            prompt_parts.append(f"\n{reference_context_text.strip()}")
+
         if custom_instructions:
             prompt_parts.append(f"\n=== CUSTOM INSTRUCTIONS ===\n{custom_instructions}")
 
@@ -111,6 +119,7 @@ class ShotPromptComposer:
         extracted_documents: List[Dict[str, str]],
         target_scene_duration_seconds: float = 15.0,
         custom_instructions: Optional[str] = None,
+        reference_context_text: Optional[str] = None,
     ) -> str:
         prompt_parts = []
 
@@ -135,6 +144,9 @@ class ShotPromptComposer:
                 filename = doc.get("filename", f"document_{idx}")
                 content = doc.get("content", "").strip()
                 prompt_parts.append(f"--- Document #{idx}: {filename} ---\n{content}\n")
+
+        if reference_context_text and reference_context_text.strip():
+            prompt_parts.append(f"\n{reference_context_text.strip()}")
 
         if custom_instructions:
             prompt_parts.append(f"\n=== CUSTOM INSTRUCTIONS ===\n{custom_instructions}")

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     OPENAI_MAX_RETRIES: int = 2
     DEFAULT_CREATIVE_PROFILE: str = "BALANCED"
 
+    # Reference Library Context Limit
+    MAX_REFERENCE_CONTEXT_CHARACTERS: int = 50000
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(

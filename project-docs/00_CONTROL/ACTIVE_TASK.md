@@ -6,7 +6,7 @@
 
 ## Active Work Package Details
 
-- **Active Work Package:** `P1-WP005 — Story & Screenplay Script Generator Service`
+- **Active Work Package:** `P2-WP006 — Reference Library & Character/Location Bibles`
 - **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
 - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
 - **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
@@ -16,15 +16,14 @@
 
 ## Task Objectives
 
-Implement the Story and Screenplay Script Generator Service:
-1. **Provider Isolation Architecture:** Provider-neutral `CreativeGenerationProvider` interface with OpenAI `OpenAICreativeGenerationProvider` implementation and `FakeCreativeGenerationProvider` test double.
-2. **Deterministic Prompt Composers:** Reusable `StoryPromptComposer`, `ScenePromptComposer`, and `ShotPromptComposer` modules separating factual source material from creative direction.
-3. **Structured JSON Output:** Structured story, scene, and shot generation with Thai and English script support.
-4. **WP004 Ingestion Integration:** Feed extracted document text into prompt factual context.
-5. **Lock Protection:** Respect `is_locked` flags on `Story`, `Scene`, and `Shot` entities to reject accidental overwrites.
-6. **Schema Extensions & Audit Logging:** Extended Story/Scene/Shot fields and Alembic migration `004_add_story_script_fields` plus `GenerationAuditLog` table.
-7. **API Endpoints:** `/projects/{project_id}/story/generate`, `/stories/{story_id}/scenes/generate`, `/scenes/{scene_id}/shots/generate`, `/projects/{project_id}/story`.
-8. **Automated Testing:** Pytest suite (37 passing tests) covering story generation, lock safety, Unicode, error status mappings, and Alembic migration lifecycle.
+Implement the Reference Library and Character/Location Bibles:
+1. **Domain Models & Schemas:** Defined `ProjectReference`, `CharacterBible`, `LocationBible`, `StyleBible`, and `BrandBible` ORM models and Pydantic schemas.
+2. **Alembic Migration:** `005_add_reference_library_tables.py` creating all 5 reference tables.
+3. **Reference Service:** `ReferenceService` enforcing CRUD operations, cross-project asset link validation (raising `INVALID_ASSET_LINK` 400), and `is_locked` enforcement (raising `REFERENCE_LOCKED` 409).
+4. **Deterministic Reference Context Builder:** `ReferenceContextBuilder` assembling compact prioritized reference contexts (Factual Docs -> Locked Bibles -> Brand/Style -> Project References) bounded by `MAX_REFERENCE_CONTEXT_CHARACTERS = 50000`.
+5. **Prompt Composer Integration:** Integrated locked reference context into WP005 prompt composers (`StoryPromptComposer`, `ScenePromptComposer`, `ShotPromptComposer`) under `=== LOCKED PROJECT REFERENCES ===`.
+6. **API Endpoints:** REST endpoints for project references, characters, locations, styles, and brands under `/api/v1/projects/{project_id}/...` and `/api/v1/...`.
+7. **Automated Testing:** Pytest suite (45 total passing tests) covering CRUD, lock protection, asset link validation, context prioritization/bounding, and Unicode preservation.
 
 ---
 
@@ -33,11 +32,10 @@ Implement the Story and Screenplay Script Generator Service:
 > [!CAUTION]
 > **BOUNDED EXECUTION & SCOPE PROTECTION**
 > 
-> The following actions are STRICTLY PROHIBITED in P1-WP005:
-> - Starting P2-WP006 or any subsequent Work Package
-> - Implementing local AI (Ollama, local LLM, local vision models)
-> - Implementing Gemini creative LLM or Gemini media generation
-> - Implementing Vidu, Veo, image generation, video generation, or audio/TTS rendering
+> The following actions are STRICTLY PROHIBITED in P2-WP006:
+> - Starting P2-WP007 or any subsequent Work Package
+> - Implementing local AI or vector DB/embeddings
+> - Implementing media generation (Gemini, Vidu, Veo rendering)
 > - Implementing frontend or web UI components
 > - Merging PR automatically
 
@@ -45,5 +43,5 @@ Implement the Story and Screenplay Script Generator Service:
 
 ## Next Allowed Actions
 
-1. ChatGPT Independent Review of P1-WP005 PR.
+1. ChatGPT Independent Review of P2-WP006 PR.
 2. Project Owner review and sign-off.
