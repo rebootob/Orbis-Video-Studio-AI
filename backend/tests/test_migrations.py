@@ -21,13 +21,20 @@ def test_alembic_migration_lifecycle(tmp_path):
     settings.SQLALCHEMY_DATABASE_URI_OVERRIDE = sqlite_url
 
     try:
-        # 1. Upgrade to head
+        # 1. Upgrade to head (001 -> 002)
+        command.upgrade(alembic_cfg, "head")
+
+        # 2. Downgrade one revision (002 -> 001)
+        command.downgrade(alembic_cfg, "-1")
+
+        # 3. Upgrade to head again (001 -> 002)
         command.upgrade(alembic_cfg, "head")
         
-        # 2. Downgrade to base
+        # 4. Downgrade to base
         command.downgrade(alembic_cfg, "base")
         
-        # 3. Upgrade to head again (verifies idempotency and clean migration path)
+        # 5. Upgrade to head again
         command.upgrade(alembic_cfg, "head")
     finally:
         settings.SQLALCHEMY_DATABASE_URI_OVERRIDE = original_uri
+

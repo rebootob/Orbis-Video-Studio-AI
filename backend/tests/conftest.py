@@ -47,15 +47,31 @@ def db_session() -> Generator[Session, None, None]:
     connection.close()
 
 
+from app.services.storage.mock import InMemoryObjectStorageProvider
+from app.services.storage.factory import get_storage_provider
+
+
 @pytest.fixture
-def client(db_session: Session) -> Generator[TestClient, None, None]:
+def mock_storage() -> InMemoryObjectStorageProvider:
+    return InMemoryObjectStorageProvider()
+
+
+@pytest.fixture
+def client(db_session: Session, mock_storage: InMemoryObjectStorageProvider) -> Generator[TestClient, None, None]:
     def override_get_db():
         try:
             yield db_session
         finally:
             pass
 
+    def override_get_storage():
+        return mock_storage
+
     fastapi_app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_storage_provider] = override_get_storage
+
     with TestClient(fastapi_app) as test_client:
         yield test_client
+
     fastapi_app.dependency_overrides.clear()
+

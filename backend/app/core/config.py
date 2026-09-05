@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "orbis_db"
 
+    # Object Storage Settings (S3-compatible)
+    OBJECT_STORAGE_ENDPOINT: Optional[str] = None
+    OBJECT_STORAGE_REGION: str = "us-east-1"
+    OBJECT_STORAGE_BUCKET: str = "orbis-assets"
+    OBJECT_STORAGE_ACCESS_KEY: str = ""
+    OBJECT_STORAGE_SECRET_KEY: str = ""
+    OBJECT_STORAGE_SECURE: bool = False
+    MAX_UPLOAD_SIZE_BYTES: int = 524288000  # 500 MB
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(
