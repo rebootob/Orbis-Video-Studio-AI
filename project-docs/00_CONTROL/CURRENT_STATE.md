@@ -8,19 +8,21 @@
 
 ```yaml
 PHASE: P0 — Foundation & Governance
-ACTIVE WORK PACKAGE: P0-WP001 — Project Governance & Architecture Documentation Foundation
-CURRENT GATE: CHATGPT INDEPENDENT CORRECTIVE REVIEW
-DOCUMENTATION: COMPLETE / FINAL CORRECTIVE APPLIED
-HANDOFF_BASE_SHA: 7969fa1e34787814bd6ff80fbb90e9011d62e994
-IMPLEMENTATION: NOT AUTHORIZED
+ACTIVE WORK PACKAGE: NONE
+P0-WP001: PASS / CLOSED
+PR #1: MERGED
+APPROVED FEATURE HEAD: cd34ae01536c61cae628660cc814946ebc7596fe
+MAIN HEAD AFTER MERGE: 4eddc44f0733f6d8e6e9772090183b3b3f4c3194
+HANDOFF_BASE_SHA: 4eddc44f0733f6d8e6e9772090183b3b3f4c3194
+IMPLEMENTATION: NOT STARTED
 VIDU: PLANNED / NOT STARTED
 CLOUD INFRASTRUCTURE: PLANNED / NOT STARTED
-ANTIGRAVITY: STOP AFTER CORRECTIVE PUSH
+ANTIGRAVITY: STOP
 CODEX: STOP
 CLAUDE CODE: STOP
-NEXT GATE: CHATGPT INDEPENDENT REVIEW
-NEXT WP: DO NOT START
-NEXT ALLOWED ACTION: CHATGPT REVIEW ONLY
+NEXT WP: P1-WP002 — PROPOSED / NOT AUTHORIZED
+CURRENT GATE: WAITING OWNER APPROVAL FOR NEXT WP
+NEXT ALLOWED ACTION: ChatGPT planning / Owner approval for P1-WP002 only
 ```
 
 ---
@@ -29,8 +31,8 @@ NEXT ALLOWED ACTION: CHATGPT REVIEW ONLY
 
 | Component / Layer | Status | Notes |
 | :--- | :--- | :--- |
-| **Governance & Documentation** | **COMPLETE / CORRECTIVE APPLIED** | Baseline governance, handoff SHA semantics, and V1 integration scope distinction updated per corrective review. |
-| **Core Application Code** | **NOT AUTHORIZED** | No application code allowed in P0-WP001. |
+| **Governance & Documentation (P0-WP001)** | **PASS / CLOSED (MERGED)** | PR #1 merged into `main` at commit `4eddc44f0733f6d8e6e9772090183b3b3f4c3194`. |
+| **Core Application Code** | **NOT STARTED** | No application code authorized yet. |
 | **Frontend / Web UI** | **NOT STARTED** | Planned for future WP. |
 | **Backend / API Gateway** | **NOT STARTED** | Planned for future WP. |
 | **Vidu Provider Adapter** | **PLANNED / NOT STARTED** | Provider interface and Vidu spec documented in P0-WP001. |
@@ -41,6 +43,6 @@ NEXT ALLOWED ACTION: CHATGPT REVIEW ONLY
 
 ## Gate & Transition Rules
 
-1. **Completion of P0-WP001:** Requires git commit on `ai/p0-wp001-doc-foundation`, push to origin PR `#1`.
-2. **Review Requirement:** Must await ChatGPT independent review and Project Owner approval before merging PR or advancing to P0-WP002.
-3. **No Unapproved Work Packages:** Execution engines must stop upon completing P0-WP001 deliverables and returning status to the Owner.
+1. **Closure of P0-WP001:** PR #1 merged into `main`. P0-WP001 is formally CLOSED.
+2. **Active Work Package Status:** `NONE`.
+3. **No Unapproved Work Packages:** Execution engines MUST NOT start P1-WP002 or write code without explicit Project Owner authorization.
