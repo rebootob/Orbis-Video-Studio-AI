@@ -10,6 +10,7 @@
 - **Canonical Branch:** `main`
 - **Active Branch:** `ai/p0-wp001-doc-foundation`
 - **Pull Request:** `#1` ([https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/1))
+- **Current HEAD SHA:** `d80e5431d2aefbd6e3f2221faf39943706edfd36`
 - **Phase:** `P0 — Foundation & Governance`
 - **Active Work Package:** `P0-WP001 — Project Governance & Architecture Documentation Foundation`
 - **Current Gate:** `CHATGPT INDEPENDENT CORRECTIVE REVIEW`
