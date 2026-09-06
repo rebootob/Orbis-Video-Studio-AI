@@ -43,6 +43,15 @@ class GenerationJob(Base):
 
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_retries: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    poll_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_polls: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    claimed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    claim_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    claim_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    next_poll_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    submission_attempt_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     output_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(

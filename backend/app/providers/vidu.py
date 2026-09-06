@@ -1,277 +1,144 @@
-import logging
-import re
-import httpx
-from typing import Dict, Any, Optional, List
-from app.providers.base import (
-    IVideoGenerationProviderAdapter,
-    VideoGenerationParams,
-    ProviderJobResult,
-)
-from app.core.config import settings
+"""Vidu v2 HTTP adapter; all provider failures leave this boundary as safe metadata.
 
-logger = logging.getLogger(__name__)
+Contract: https://platform.vidu.com/docs/text-to-video
+          https://platform.vidu.com/docs/reference-to-video
+Transport failures after a possible POST are ambiguous, never blind-retried.
+"""
+import math
+import re
+from urllib.parse import urlsplit, quote
+
+import httpx
+from app.core.config import settings
+from app.providers.base import IVideoGenerationProviderAdapter, ProviderJobResult
+from app.providers.safety import contains_secret, safe_url
 
 
 class ViduProviderAdapter(IVideoGenerationProviderAdapter):
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
-        timeout_seconds: Optional[float] = None,
-    ):
-        self._api_key = api_key if api_key is not None else settings.VIDU_API_KEY
+    def __init__(self, api_key=None, base_url=None, model=None, timeout_seconds=None):
+        self._api_key = settings.VIDU_API_KEY if api_key is None else api_key
         self._base_url = (base_url or settings.VIDU_BASE_URL).rstrip("/")
-        self._model = model or getattr(settings, "VIDU_DEFAULT_MODEL", "viduq2-pro")
-        self._timeout_seconds = timeout_seconds or settings.VIDU_TIMEOUT_SECONDS
+        self._model = model or settings.VIDU_DEFAULT_MODEL
+        self._timeout_seconds = settings.VIDU_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
 
     @property
-    def provider_id(self) -> str:
+    def provider_id(self):
         return "vidu"
 
     @property
-    def model(self) -> str:
+    def model(self):
         return self._model
 
-    def validate_config(self, config: Dict[str, Any]) -> bool:
-        api_key = config.get("api_key") or self._api_key
-        return bool(api_key and isinstance(api_key, str) and len(api_key.strip()) > 0)
-
-    def _get_headers(self) -> Dict[str, str]:
-        # Official Vidu API uses Token {api_key}
-        return {
-            "Authorization": f"Token {self._api_key}",
-            "Content-Type": "application/json",
-        }
-
-    def _sanitize_error(self, text: str) -> str:
-        if not text:
-            return ""
-        # Redact any authorization tokens or API keys
-        sanitized = re.sub(
-            r'(Token|Bearer|key|api_key|secret|password)\s*[:=]?\s*[A-Za-z0-9_\-\.]+',
-            r'\1 [REDACTED]',
-            text,
-            flags=re.IGNORECASE,
-        )
-        if self._api_key and len(self._api_key) > 4 and self._api_key in sanitized:
-            sanitized = sanitized.replace(self._api_key, "[REDACTED]")
-        return sanitized
-
-    def _sanitize_response_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Safely extract provider response fields without persisting raw auth or unverified blobs."""
-        safe_keys = ["id", "task_id", "state", "status", "progress", "err_code", "error_message"]
-        out = {k: data[k] for k in safe_keys if k in data}
-        if "creations" in data and isinstance(data["creations"], list):
-            out["creations"] = [
-                {
-                    "id": c.get("id"),
-                    "url": c.get("url"),
-                    "cover_url": c.get("cover_url"),
-                }
-                for c in data["creations"]
-                if isinstance(c, dict)
-            ]
-        if "video_url" in data:
-            out["video_url"] = data["video_url"]
-        if "thumbnail_url" in data:
-            out["thumbnail_url"] = data["thumbnail_url"]
-        return out
-
-    async def submit_generation_job(self, params: VideoGenerationParams) -> ProviderJobResult:
-        if not self.validate_config({}):
-            return ProviderJobResult(
-                provider_job_id="",
-                status="FAILED",
-                error_message="Vidu API key missing or invalid configuration",
-            )
-
-        has_references = bool(params.reference_images and len(params.reference_images) > 0)
-        endpoint = f"{self._base_url}/reference2video" if has_references else f"{self._base_url}/text2video"
-
-        # Explicit mapping according to Vidu API
-        payload: Dict[str, Any] = {
-            "model": self._model,
-            "prompt": params.prompt,
-            "duration": int(params.duration_seconds),
-            "aspect_ratio": params.aspect_ratio,
-        }
-
-        if has_references and params.reference_images:
-            payload["images"] = [img.url for img in params.reference_images]
-
-        if params.seed is not None:
-            payload["seed"] = params.seed
-
-        if params.camera_motion:
-            payload["movement_amplitude"] = params.camera_motion.type
-
-        if params.provider_specific_params:
-            for k, v in params.provider_specific_params.items():
-                if k not in ("api_key", "authorization", "token", "headers"):
-                    payload[k] = v
-
-        headers = self._get_headers()
-
+    def validate_config(self, config):
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
-                    endpoint,
-                    json=payload,
-                    headers=headers,
-                )
-
-                if response.status_code not in (200, 201, 202):
-                    sanitized_err = self._sanitize_error(response.text)
-                    return ProviderJobResult(
-                        provider_job_id="",
-                        status="FAILED",
-                        error_message=f"Vidu API HTTP {response.status_code}: {sanitized_err}",
-                        raw_response={"status_code": response.status_code, "error": sanitized_err[:500]},
-                    )
-
-                data = response.json()
-                job_id = str(data.get("task_id") or data.get("id") or "")
-                raw_status = str(data.get("state") or data.get("status") or "QUEUED").upper()
-
-                status_map = {
-                    "CREATED": "QUEUED",
-                    "QUEUEING": "QUEUED",
-                    "QUEUED": "QUEUED",
-                    "PENDING": "QUEUED",
-                    "PROCESSING": "PROCESSING",
-                    "RUNNING": "PROCESSING",
-                    "SUCCESS": "COMPLETED",
-                    "COMPLETED": "COMPLETED",
-                    "FAILED": "FAILED",
-                }
-                mapped_status = status_map.get(raw_status, "QUEUED")
-
-                video_url = None
-                thumbnail_url = None
-                creations = data.get("creations")
-                if creations and isinstance(creations, list) and len(creations) > 0:
-                    video_url = creations[0].get("url")
-                    thumbnail_url = creations[0].get("cover_url")
-                if not video_url:
-                    video_url = data.get("video_url") or data.get("url")
-                if not thumbnail_url:
-                    thumbnail_url = data.get("thumbnail_url")
-
-                return ProviderJobResult(
-                    provider_job_id=job_id,
-                    status=mapped_status,
-                    progress_percentage=float(data.get("progress", 0.0)),
-                    video_url=video_url,
-                    thumbnail_url=thumbnail_url,
-                    cost_usd=data.get("cost_usd"),
-                    raw_response=self._sanitize_response_data(data),
-                )
-        except Exception as exc:
-            sanitized_exc = self._sanitize_error(str(exc))
-            logger.error(f"Vidu submit_generation_job exception: {sanitized_exc}")
-            return ProviderJobResult(
-                provider_job_id="",
-                status="FAILED",
-                error_message=f"Vidu client request failed: {sanitized_exc}",
-            )
-
-    async def check_job_status(self, provider_job_id: str) -> ProviderJobResult:
-        if not self.validate_config({}):
-            return ProviderJobResult(
-                provider_job_id=provider_job_id,
-                status="FAILED",
-                error_message="Vidu API key missing or invalid configuration",
-            )
-
-        headers = self._get_headers()
-        endpoint = f"{self._base_url}/tasks/{provider_job_id}/creations"
-
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.get(
-                    endpoint,
-                    headers=headers,
-                )
-
-                if response.status_code != 200:
-                    sanitized_err = self._sanitize_error(response.text)
-                    return ProviderJobResult(
-                        provider_job_id=provider_job_id,
-                        status="FAILED",
-                        error_message=f"Vidu API HTTP {response.status_code}: {sanitized_err}",
-                        raw_response={"status_code": response.status_code, "error": sanitized_err[:500]},
-                    )
-
-                data = response.json()
-                raw_status = str(data.get("state") or data.get("status") or "PROCESSING").upper()
-
-                status_map = {
-                    "CREATED": "QUEUED",
-                    "QUEUEING": "QUEUED",
-                    "QUEUED": "QUEUED",
-                    "PENDING": "QUEUED",
-                    "PROCESSING": "PROCESSING",
-                    "RUNNING": "PROCESSING",
-                    "SUCCESS": "COMPLETED",
-                    "COMPLETED": "COMPLETED",
-                    "FAILED": "FAILED",
-                }
-                mapped_status = status_map.get(raw_status, "PROCESSING")
-
-                video_url = None
-                thumbnail_url = None
-                creations = data.get("creations")
-                if creations and isinstance(creations, list) and len(creations) > 0:
-                    video_url = creations[0].get("url")
-                    thumbnail_url = creations[0].get("cover_url")
-                if not video_url:
-                    video_url = data.get("video_url") or data.get("url")
-                if not thumbnail_url:
-                    thumbnail_url = data.get("thumbnail_url")
-
-                err_msg = (
-                    data.get("error_message")
-                    or data.get("err")
-                    or (str(data.get("err_code")) if data.get("err_code") else None)
-                )
-                if err_msg:
-                    err_msg = self._sanitize_error(str(err_msg))
-
-                return ProviderJobResult(
-                    provider_job_id=provider_job_id,
-                    status=mapped_status,
-                    progress_percentage=float(data.get("progress", 0.0)),
-                    video_url=video_url,
-                    thumbnail_url=thumbnail_url,
-                    cost_usd=data.get("cost_usd"),
-                    error_message=err_msg,
-                    raw_response=self._sanitize_response_data(data),
-                )
-        except Exception as exc:
-            sanitized_exc = self._sanitize_error(str(exc))
-            logger.error(f"Vidu check_job_status exception: {sanitized_exc}")
-            return ProviderJobResult(
-                provider_job_id=provider_job_id,
-                status="FAILED",
-                error_message=f"Vidu client check status failed: {sanitized_exc}",
-            )
-
-    async def cancel_job(self, provider_job_id: str) -> bool:
-        if not self.validate_config({}):
+            url = urlsplit(self._base_url)
+            key = config.get("api_key", self._api_key)
+            return bool(isinstance(key, str) and key.strip() and "\n" not in key and "\r" not in key
+                        and url.scheme == "https" and url.hostname and not url.username
+                        and not url.password and not url.query and not url.fragment
+                        and isinstance(self._model, str) and self._model
+                        and math.isfinite(self._timeout_seconds) and 0 < self._timeout_seconds <= 60)
+        except (ValueError, TypeError):
             return False
 
-        headers = self._get_headers()
-        endpoint = f"{self._base_url}/tasks/{provider_job_id}/cancel"
+    def _get_headers(self):
+        return {"Authorization": f"Token {self._api_key}", "Content-Type": "application/json"}
 
+    def _failure(self, code, *, status_code=None, retryable=False, uncertain=False, job_id=""):
+        return ProviderJobResult(provider_job_id=job_id, status="FAILED", error_code=code,
+                                 error_message=code, status_code=status_code,
+                                 retryable=retryable, submission_uncertain=uncertain)
+
+    def _output_url(self, value):
+        if isinstance(value, str) and self._api_key and self._api_key in value:
+            return None
+        return safe_url(value)
+
+    def _result(self, data, job_id="", submitting=False):
+        if not isinstance(data, dict):
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+        state = str(data.get("state") or data.get("status") or "").lower()
+        if state == "failed":
+            return self._failure("PROVIDER_REJECTED", job_id=job_id)
+        identity = data.get("task_id") or data.get("id") or job_id
+        if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", identity):
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+        if self._api_key and self._api_key in identity:
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+        state = str(data.get("state") or data.get("status") or "").lower()
+        states = {"created": "QUEUED", "queueing": "QUEUED", "queued": "QUEUED", "pending": "QUEUED",
+                  "processing": "PROCESSING", "running": "PROCESSING", "success": "COMPLETED",
+                  "completed": "COMPLETED", "failed": "FAILED", "cancelled": "CANCELLED", "canceled": "CANCELLED"}
+        if state not in states:
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=identity)
+        creations = data.get("creations")
+        creation = creations[0] if isinstance(creations, list) and creations and isinstance(creations[0], dict) else {}
+        # Never copy error text, nested data, or raw bodies into results/logs.
+        return ProviderJobResult(provider_job_id=identity, status=states[state],
+            video_url=self._output_url(creation.get("url")), thumbnail_url=self._output_url(creation.get("cover_url")),
+            error_code="PROVIDER_REJECTED" if state == "failed" else None,
+            error_message="PROVIDER_REJECTED" if state == "failed" else None)
+
+    async def _request(self, method, path, *, payload=None, job_id="", submitting=False):
+        if not self.validate_config({}):
+            return self._failure("INVALID_CONFIG", job_id=job_id)
         try:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
-                    endpoint,
-                    headers=headers,
-                )
-                return response.status_code in (200, 202, 204)
-        except Exception as exc:
-            sanitized_exc = self._sanitize_error(str(exc))
-            logger.error(f"Vidu cancel_job exception: {sanitized_exc}")
+                response = await client.request(method, self._base_url + path,
+                                                json=payload, headers=self._get_headers())
+            if response.status_code not in (200, 201, 202):
+                retryable = response.status_code == 429 or response.status_code in (500, 502, 503, 504)
+                return self._failure("HTTP_ERROR", status_code=response.status_code, retryable=retryable,
+                    uncertain=submitting and response.status_code >= 500, job_id=job_id)
+            return self._result(response.json(), job_id=job_id, submitting=submitting)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+            return self._failure("CONNECTION_ERROR", retryable=True, job_id=job_id)
+        except (httpx.TimeoutException, httpx.NetworkError):
+            return self._failure("TRANSPORT_ERROR", retryable=True, uncertain=submitting, job_id=job_id)
+        except Exception:
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+
+    async def submit_generation_job(self, params):
+        if not self.validate_config({}):
+            return self._failure("INVALID_CONFIG")
+        references = bool(params.reference_images)
+        allowed_models = {"viduq2", "viduq1", "viduq3-turbo", "viduq3" if references else "viduq3-pro"}
+        duration = params.duration_seconds
+        extras = params.provider_specific_params or {}
+        allowed_extras = {"resolution", "style", "movement_amplitude", "off_peak"}
+        if (self._model not in allowed_models or not math.isfinite(duration) or not duration.is_integer()
+                or not 1 <= duration <= (16 if "q3" in self._model else 10)
+                or (self._model == "viduq1" and duration != 5)
+                or not params.prompt.strip() or len(params.prompt) > 5000
+                or contains_secret(params.model_dump()) or set(extras) - allowed_extras
+                or any(not isinstance(v, (str, bool)) for v in extras.values())):
+            return self._failure("INVALID_PARAMETERS")
+        if references and (len(params.reference_images) > 7 or any(not safe_url(i.url) for i in params.reference_images)):
+            return self._failure("INVALID_PARAMETERS")
+        payload = {"model": self._model, "prompt": params.prompt, "duration": int(duration),
+                   "aspect_ratio": params.aspect_ratio, **extras}
+        if references:
+            payload["images"] = [image.url for image in params.reference_images]
+        if params.seed is not None:
+            payload["seed"] = params.seed
+        if params.camera_motion:
+            if params.camera_motion.type not in ("auto", "small", "medium", "large"):
+                return self._failure("INVALID_PARAMETERS")
+            payload["movement_amplitude"] = params.camera_motion.type
+        return await self._request("POST", "/reference2video" if references else "/text2video",
+                                   payload=payload, submitting=True)
+
+    async def check_job_status(self, provider_job_id):
+        return await self._request("GET", f"/tasks/{quote(provider_job_id, safe='')}/creations", job_id=provider_job_id)
+
+    async def cancel_job(self, provider_job_id):
+        if not self.validate_config({}):
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                response = await client.post(self._base_url + f"/tasks/{quote(provider_job_id, safe='')}/cancel",
+                                             headers=self._get_headers(), json={"id": provider_job_id})
+            return response.status_code in (200, 202, 204)
+        except Exception:
+            # Bool contract deliberately drops provider exceptions and response bodies.
             return False

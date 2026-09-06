@@ -1,491 +1,393 @@
-import pytest
+"""WP007 contract tests: mocked HTTP only; real independent DB sessions for races."""
+import asyncio
+import json
 import uuid
-import httpx
-from unittest.mock import AsyncMock, patch, MagicMock
-from fastapi.testclient import TestClient
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from threading import Barrier
+from unittest.mock import AsyncMock, patch
 
+import httpx
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db.base_class import Base
 from app.models.project import Project
 from app.models.story import Story
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.asset import Asset
-from app.models.generation_job import GenerationJob
-from app.providers.base import (
-    VideoGenerationParams,
-    ProviderJobResult,
-    ReferenceImageInput,
-)
+from app.models.generation_job import GenerationJob as Job
+from app.providers.base import ProviderJobResult, VideoGenerationParams, ReferenceImageInput
 from app.providers.vidu import ViduProviderAdapter
 from app.providers.factory import ProviderFactory
-from app.services.job_dispatch import (
-    JobDispatchService,
-    is_retryable_error,
-    sanitize_secret_text,
-)
+from app.services.job_dispatch import JobDispatchService as Queue, LEASE_SECONDS, POLL_SECONDS
+from app.services.generation_worker import run_once
+
+NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def deny_live_http(monkeypatch):
+    async def denied(*args, **kwargs):
+        raise AssertionError("Unmocked HTTP is forbidden in WP007 tests")
+    monkeypatch.setattr(httpx.AsyncClient, "send", denied)
+
+
+def make_shot(db):
+    project = Project(id=uuid.uuid4(), title="Queue test")
+    story = Story(id=uuid.uuid4(), project_id=project.id, logline="Test")
+    scene = Scene(id=uuid.uuid4(), story_id=story.id, scene_number=1, heading="EXT. PARK")
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="AI_GENERATED",
+                video_prompt="A tree in the wind", duration_seconds=5)
+    db.add_all([project, story, scene, shot])
+    db.commit()
+    return shot
 
 
 @pytest.fixture
 def sample_shot(db_session):
-    project = Project(id=uuid.uuid4(), title="Test Project Queue")
-    db_session.add(project)
-    db_session.commit()
-
-    story = Story(id=uuid.uuid4(), project_id=project.id, logline="Test logline")
-    db_session.add(story)
-    db_session.commit()
-
-    scene = Scene(id=uuid.uuid4(), story_id=story.id, scene_number=1, heading="INT. LAB - DAY")
-    db_session.add(scene)
-    db_session.commit()
-
-    shot = Shot(
-        id=uuid.uuid4(),
-        scene_id=scene.id,
-        shot_number=1,
-        shot_type="MEDIUM_SHOT",
-        video_prompt="A futuristic robot typing on a glowing cybernetic console.",
-        duration_seconds=5.0,
-    )
-    db_session.add(shot)
-    db_session.commit()
-    db_session.refresh(shot)
-    return shot
+    return make_shot(db_session)
 
 
-# 1. VIDU API CONTRACT & AUTH / HEADERS
-def test_vidu_adapter_validate_config():
-    adapter = ViduProviderAdapter(api_key="test_key")
-    assert adapter.provider_id == "vidu"
-    assert adapter.validate_config({}) is True
-
-    adapter_invalid = ViduProviderAdapter(api_key="")
-    assert adapter_invalid.validate_config({}) is False
-
-
-def test_vidu_auth_header_and_secret_masking():
-    adapter = ViduProviderAdapter(api_key="secret_vidu_key_123")
-    headers = adapter._get_headers()
-    # Must use Token {api_key} per official Vidu API contract
-    assert headers["Authorization"] == "Token secret_vidu_key_123"
-    assert "Bearer" not in headers["Authorization"]
-
-    # Secret masking verification
-    leaked_str = "Error with Authorization: Token secret_vidu_key_123 in request"
-    sanitized = adapter._sanitize_error(leaked_str)
-    assert "secret_vidu_key_123" not in sanitized
-    assert "[REDACTED]" in sanitized
+@pytest.fixture
+def durable_db(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'queue.db'}", connect_args={"timeout": 30})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as db:
+        shot_id = make_shot(db).id
+    yield factory, shot_id
+    engine.dispose()
 
 
-def test_provider_factory():
-    provider = ProviderFactory.get_provider("vidu", api_key="test")
-    assert isinstance(provider, ViduProviderAdapter)
-    assert provider.provider_id == "vidu"
+@pytest.fixture
+def provider():
+    adapter = AsyncMock()
+    adapter.validate_config = lambda config: True
+    adapter.submit_generation_job.return_value = ProviderJobResult(provider_job_id="task-1", status="QUEUED")
+    adapter.check_job_status.return_value = ProviderJobResult(provider_job_id="task-1", status="PROCESSING")
+    adapter.cancel_job.return_value = True
+    with patch.object(ProviderFactory, "get_provider", return_value=adapter):
+        yield adapter
 
-    with pytest.raises(ValueError, match="Unsupported provider"):
-        ProviderFactory.get_provider("unknown_provider")
+
+def create(db, shot, **kwargs):
+    return Queue.create_and_dispatch_job(db, shot.id, **kwargs)
 
 
-# 2. EXPLICIT TEXT-TO-VIDEO MAPPING
+def claim(db, job, now=NOW):
+    return Queue.claim_next_job(db, "test-worker", now=now, job_id=job.id)
+
+
+def transport_response(data=None, status=200):
+    return httpx.Response(status, json=data or {}, request=httpx.Request("POST", "https://mock.invalid"))
+
+
 @pytest.mark.anyio
-async def test_vidu_text_to_video_mapping():
-    adapter = ViduProviderAdapter(
-        api_key="mock_key",
-        base_url="https://api.vidu.com/ent/v2",
-        model="viduq2-pro",
-    )
-    params = VideoGenerationParams(
-        shot_id=str(uuid.uuid4()),
-        prompt="A neon cyber city in the rain",
-        aspect_ratio="16:9",
-        duration_seconds=4.0,
-        seed=42,
-    )
-
-    mock_resp_data = {
-        "task_id": "vidu_t2v_999",
-        "state": "created",
-    }
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = mock_resp_data
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-
-        res = await adapter.submit_generation_job(params)
-
-        assert mock_post.call_count == 1
-        call_url = mock_post.call_args[0][0]
-        assert call_url == "https://api.vidu.com/ent/v2/text2video"
-
-        sent_payload = mock_post.call_args[1]["json"]
-        assert sent_payload["model"] == "viduq2-pro"
-        assert sent_payload["prompt"] == "A neon cyber city in the rain"
-        assert sent_payload["duration"] == 4
-        assert sent_payload["aspect_ratio"] == "16:9"
-        assert sent_payload["seed"] == 42
-        assert "images" not in sent_payload
-
-        assert res.provider_job_id == "vidu_t2v_999"
-        assert res.status == "QUEUED"
+@pytest.mark.parametrize("references", [False, True])
+async def test_official_submit_mapping(references):
+    adapter = ViduProviderAdapter(api_key="fake-provider-key", model="viduq2")
+    params = VideoGenerationParams(shot_id="shot", prompt="Tree", duration_seconds=5, seed=42,
+        reference_images=[ReferenceImageInput(type="character", url="https://example.com/ref.png")] if references else None)
+    with patch.object(httpx.AsyncClient, "request", new_callable=AsyncMock) as request:
+        request.return_value = transport_response({"task_id": "task-42", "state": "created"})
+        result = await adapter.submit_generation_job(params)
+        assert result.status == "QUEUED"
+        assert result.provider_job_id == "task-42"
+        args, kwargs = request.call_args
+        assert args == ("POST", "https://api.vidu.com/ent/v2/" + ("reference2video" if references else "text2video"))
+        assert kwargs["headers"]["Authorization"] == "Token fake-provider-key"
+        assert kwargs["json"]["model"] == "viduq2"
+        assert kwargs["json"]["duration"] == 5
+        assert kwargs["json"]["seed"] == 42
+        assert kwargs["json"]["aspect_ratio"] == "16:9"
+        assert ("images" in kwargs["json"]) == references
+        assert result.raw_response is None
 
 
-# 3. EXPLICIT REFERENCE-TO-VIDEO MAPPING
 @pytest.mark.anyio
-async def test_vidu_reference_to_video_mapping():
-    adapter = ViduProviderAdapter(
-        api_key="mock_key",
-        base_url="https://api.vidu.com/ent/v2",
-        model="viduq2-pro",
-    )
-    params = VideoGenerationParams(
-        shot_id=str(uuid.uuid4()),
-        prompt="Character walking through neon market",
-        aspect_ratio="16:9",
-        duration_seconds=5.0,
-        reference_images=[
-            ReferenceImageInput(type="character", url="https://example.com/hero.png")
-        ],
-    )
-
-    mock_resp_data = {
-        "task_id": "vidu_r2v_888",
-        "state": "queueing",
-    }
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = mock_resp_data
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_response
-
-        res = await adapter.submit_generation_job(params)
-
-        assert mock_post.call_count == 1
-        call_url = mock_post.call_args[0][0]
-        assert call_url == "https://api.vidu.com/ent/v2/reference2video"
-
-        sent_payload = mock_post.call_args[1]["json"]
-        assert sent_payload["model"] == "viduq2-pro"
-        assert sent_payload["images"] == ["https://example.com/hero.png"]
-
-        assert res.provider_job_id == "vidu_r2v_888"
-        assert res.status == "QUEUED"
+async def test_status_cancel_and_nested_response_safety(caplog):
+    adapter = ViduProviderAdapter(api_key="fake-provider-key")
+    data = {"id": "task-1", "state": "success", "error_message": {"secret": "LEAK"},
+            "raw": {"authorization": "LEAK"}, "creations": [{"url": "https://example.com/movie.mp4", "token": "LEAK"}]}
+    with patch.object(httpx.AsyncClient, "request", new_callable=AsyncMock, return_value=transport_response(data)) as request:
+        result = await adapter.check_job_status("task-1")
+        assert request.call_args.args == ("GET", "https://api.vidu.com/ent/v2/tasks/task-1/creations")
+        assert result.video_url == "https://example.com/movie.mp4"
+        assert "LEAK" not in result.model_dump_json()
+    with patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock, return_value=transport_response()) as post:
+        assert await adapter.cancel_job("task-1")
+        assert post.call_args.args[0].endswith("/tasks/task-1/cancel")
+    with patch.object(httpx.AsyncClient, "post", side_effect=RuntimeError("password=LEAK")):
+        assert not await adapter.cancel_job("task-1")
+    assert "LEAK" not in caplog.text
 
 
-# 4. SUBMIT / STATUS / CANCEL MOCKED
 @pytest.mark.anyio
-async def test_vidu_status_and_cancel_mocked():
-    adapter = ViduProviderAdapter(api_key="mock_key", base_url="https://api.vidu.com/ent/v2")
-
-    mock_status_data = {
-        "id": "vidu_task_12345",
-        "state": "success",
-        "creations": [
-            {
-                "id": "creation_1",
-                "url": "https://cdn.vidu.com/output.mp4",
-                "cover_url": "https://cdn.vidu.com/cover.jpg",
-            }
-        ],
-    }
-    mock_get_response = MagicMock()
-    mock_get_response.status_code = 200
-    mock_get_response.json.return_value = mock_status_data
-
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = mock_get_response
-        res = await adapter.check_job_status("vidu_task_12345")
-
-        assert mock_get.call_args[0][0] == "https://api.vidu.com/ent/v2/tasks/vidu_task_12345/creations"
-        assert res.status == "COMPLETED"
-        assert res.video_url == "https://cdn.vidu.com/output.mp4"
-        assert res.thumbnail_url == "https://cdn.vidu.com/cover.jpg"
-
-    # Test cancel
-    mock_cancel_resp = MagicMock()
-    mock_cancel_resp.status_code = 200
-    mock_cancel_resp.json.return_value = {"state": "cancelled"}
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_cancel_resp
-        cancelled = await adapter.cancel_job("vidu_task_12345")
-        assert cancelled is True
-        assert mock_post.call_args[0][0] == "https://api.vidu.com/ent/v2/tasks/vidu_task_12345/cancel"
+@pytest.mark.parametrize("code,transient,ambiguous", [(400,False,False),(401,False,False),(403,False,False),
+    (429,True,False),(500,True,True),(502,True,True),(503,True,True),(504,True,True),(501,False,True)])
+async def test_http_failure_classification(code, transient, ambiguous):
+    adapter = ViduProviderAdapter(api_key="fake-provider-key")
+    with patch.object(httpx.AsyncClient, "request", new_callable=AsyncMock, return_value=transport_response({"error": {"password": "LEAK"}}, code)):
+        params = VideoGenerationParams(shot_id="shot", prompt="Tree", duration_seconds=5)
+        submit = await adapter.submit_generation_job(params)
+        poll = await adapter.check_job_status("task-1")
+        assert submit.retryable is transient
+        assert submit.submission_uncertain is ambiguous
+        assert poll.retryable is transient
+        assert not poll.submission_uncertain
+        assert "LEAK" not in submit.model_dump_json()
 
 
-# 5. RETRY CLASSIFICATION TESTS
-def test_retry_classification_rules():
-    # Retryable: network, timeout, 429, 5xx
-    assert is_retryable_error(exc=httpx.ConnectTimeout("Connection timed out")) is True
-    assert is_retryable_error(exc=httpx.NetworkError("Network reset")) is True
-    assert is_retryable_error(status_code=429) is True
-    assert is_retryable_error(status_code=500) is True
-    assert is_retryable_error(status_code=503) is True
-    assert is_retryable_error(error_message="Vidu API HTTP 504: Gateway Timeout") is True
-    assert is_retryable_error(error_message="Rate limit 429 exceeded") is True
-
-    # Non-retryable: 400, 401, 403, config, provider rejection, unsupported
-    assert is_retryable_error(status_code=400) is False
-    assert is_retryable_error(status_code=401) is False
-    assert is_retryable_error(status_code=403) is False
-    assert is_retryable_error(exc=ValueError("Invalid config")) is False
-    assert is_retryable_error(error_message="Vidu API HTTP 401: Unauthorized") is False
-    assert is_retryable_error(error_message="Content moderation rejected prompt") is False
-    assert is_retryable_error(error_message="Policy violation: NSFW") is False
-    assert is_retryable_error(error_message="Unsupported provider: xyz") is False
-
-
-# 6. NO RETRY ON 400/401/403 & REJECTION
-def test_no_retry_on_client_errors_and_rejection(client: TestClient, sample_shot):
-    create_resp = client.post(
-        "/api/v1/jobs",
-        json={"shot_id": str(sample_shot.id), "provider_name": "vidu", "max_retries": 3},
-    )
-    job_id = create_resp.json()["id"]
-
-    # 401 Unauthorized -> immediate FAILED without retrying
-    fail_401 = ProviderJobResult(
-        provider_job_id="",
-        status="FAILED",
-        error_message="Vidu API HTTP 401: Invalid Token",
-        raw_response={"status_code": 401, "error": "Invalid Token"},
-    )
-    with patch.object(ViduProviderAdapter, "submit_generation_job", new_callable=AsyncMock) as mock_submit:
-        mock_submit.return_value = fail_401
-        res = client.post(f"/api/v1/jobs/{job_id}/dispatch")
-        assert res.status_code == 200
-        assert res.json()["status"] == "FAILED"
-        assert res.json()["retry_count"] == 0  # No retry incremented
-
-    # Provider moderation rejection -> immediate FAILED without retrying
-    job_rejection = client.post(
-        "/api/v1/jobs",
-        json={"shot_id": str(sample_shot.id), "provider_name": "vidu", "max_retries": 3},
-    ).json()["id"]
-
-    rejection_result = ProviderJobResult(
-        provider_job_id="",
-        status="FAILED",
-        error_message="Prompt rejected: content moderation policy violation",
-        raw_response={"status_code": 400, "error": "Prompt rejected"},
-    )
-    with patch.object(ViduProviderAdapter, "submit_generation_job", new_callable=AsyncMock) as mock_submit:
-        mock_submit.return_value = rejection_result
-        res = client.post(f"/api/v1/jobs/{job_rejection}/dispatch")
-        assert res.status_code == 200
-        assert res.json()["status"] == "FAILED"
-        assert res.json()["retry_count"] == 0
-
-
-# 7. BOUNDED RETRY (TIMEOUT / 429 / 5XX)
-def test_bounded_retry_behavior(client: TestClient, sample_shot):
-    create_resp = client.post(
-        "/api/v1/jobs",
-        json={"shot_id": str(sample_shot.id), "provider_name": "vidu", "max_retries": 2},
-    )
-    job_id = create_resp.json()["id"]
-
-    timeout_fail = ProviderJobResult(
-        provider_job_id="",
-        status="FAILED",
-        error_message="Vidu API HTTP 504: Gateway Timeout",
-        raw_response={"status_code": 504, "error": "Gateway Timeout"},
-    )
-
-    # 1st failure -> retry_count = 1, status reset to PENDING
-    with patch.object(ViduProviderAdapter, "submit_generation_job", new_callable=AsyncMock) as mock_submit:
-        mock_submit.return_value = timeout_fail
-        res1 = client.post(f"/api/v1/jobs/{job_id}/dispatch")
-        assert res1.json()["retry_count"] == 1
-        assert res1.json()["status"] == "PENDING"
-
-    # 2nd failure -> retry_count = 2 reaches max_retries=2 -> FAILED
-    with patch.object(ViduProviderAdapter, "submit_generation_job", new_callable=AsyncMock) as mock_submit:
-        mock_submit.return_value = timeout_fail
-        res2 = client.post(f"/api/v1/jobs/{job_id}/dispatch")
-        assert res2.json()["retry_count"] == 2
-        assert res2.json()["status"] == "FAILED"
-
-
-# 8. BOUNDED POLLING
 @pytest.mark.anyio
-async def test_bounded_polling(db_session, sample_shot):
-    job = JobDispatchService.create_and_dispatch_job(
-        db=db_session,
-        shot_id=sample_shot.id,
-        provider_name="vidu",
-    )
-    job.provider_job_id = "task_poll_limit_123"
+@pytest.mark.parametrize("exc,ambiguous", [(httpx.ConnectTimeout("LEAK"),False), (httpx.ConnectError("LEAK"),False),
+    (httpx.ReadTimeout("LEAK"),True), (httpx.WriteError("LEAK"),True)])
+async def test_transport_failure_classification(exc, ambiguous):
+    adapter = ViduProviderAdapter(api_key="fake-provider-key")
+    with patch.object(httpx.AsyncClient, "request", side_effect=exc):
+        res = await adapter.submit_generation_job(VideoGenerationParams(shot_id="shot", prompt="Tree"))
+        assert res.retryable
+        assert res.submission_uncertain is ambiguous
+        assert "LEAK" not in res.model_dump_json()
+
+
+@pytest.mark.anyio
+async def test_configuration_validation_and_rejection():
+    for kwargs in ({"api_key":""}, {"base_url":"http://insecure.invalid"}, {"timeout_seconds":0}, {"timeout_seconds":121}):
+        adapter = ViduProviderAdapter(**({"api_key":"fake-provider-key"} | kwargs))
+        assert not adapter.validate_config({})
+    adapter = ViduProviderAdapter(api_key="fake-provider-key", model="unsupported")
+    res = await adapter.submit_generation_job(VideoGenerationParams(shot_id="shot", prompt="Tree"))
+    assert res.status == "FAILED" and not res.retryable
+    adapter = ViduProviderAdapter(api_key="fake-provider-key")
+    with patch.object(httpx.AsyncClient, "request", new_callable=AsyncMock,
+                      return_value=transport_response({"state":"failed", "error_message":{"secret":"LEAK"}})):
+        res = await adapter.submit_generation_job(VideoGenerationParams(shot_id="shot", prompt="Tree"))
+        assert res.error_code == "PROVIDER_REJECTED" and not res.retryable and not res.submission_uncertain
+
+
+@pytest.mark.anyio
+async def test_claim_required_and_wrong_expired_tokens(db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    with pytest.raises(HTTPException):
+        await Queue.process_job(db_session, job.id, now=NOW)
+    claimed = claim(db_session, job)
+    token = claimed.claim_token
+    with pytest.raises(HTTPException):
+        await Queue.process_job(db_session, job.id, claim_token="wrong", now=NOW)
+    with pytest.raises(HTTPException):
+        await Queue.process_job(db_session, job.id, claim_token=token, now=NOW+timedelta(seconds=LEASE_SECONDS))
+    assert provider.submit_generation_job.await_count == 0
+    assert Queue.recover_pending_jobs(db_session, now=NOW) == 0
+    assert Queue.recover_pending_jobs(db_session, now=NOW+timedelta(seconds=LEASE_SECONDS)) == 1
+    fresh = claim(db_session, job, NOW+timedelta(seconds=LEASE_SECONDS))
+    assert fresh.claim_token != token
+
+
+def test_real_concurrent_claim_and_dispatch(durable_db, provider):
+    factory, shot_id = durable_db
+    with factory() as db:
+        job_id = Queue.create_and_dispatch_job(db, shot_id).id
+    barrier = Barrier(2)
+    def compete():
+        with factory() as db:
+            barrier.wait()
+            job = Queue.claim_next_job(db, now=NOW)
+            return (job.id, job.claim_token) if job else None
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda _: compete(), range(2)))
+    winners = [r for r in results if r]
+    assert len(winners) == 1
+    token = winners[0][1]
+    barrier = Barrier(2)
+    def dispatch():
+        with factory() as db:
+            barrier.wait()
+            try:
+                return asyncio.run(Queue.process_job(db, job_id, claim_token=token, now=NOW)).status
+            except HTTPException as exc:
+                assert exc.status_code == 409
+                return "CONFLICT"
+    with ThreadPoolExecutor(2) as pool:
+        list(pool.map(lambda _: dispatch(), range(2)))
+    assert provider.submit_generation_job.await_count == 1
+
+
+def test_real_concurrent_idempotency(durable_db):
+    factory, shot_id = durable_db
+    barrier = Barrier(2)
+    def create_race():
+        with factory() as db:
+            barrier.wait()
+            return Queue.create_and_dispatch_job(db, shot_id, idempotency_key="same-request").id
+    with ThreadPoolExecutor(2) as pool:
+        ids = list(pool.map(lambda _: create_race(), range(2)))
+    assert ids[0] == ids[1]
+    with factory() as db:
+        assert db.query(Job).count() == 1
+
+
+@pytest.mark.anyio
+async def test_crash_after_provider_acceptance_before_persistence(durable_db, provider):
+    factory, shot_id = durable_db
+    class ProcessDeath(BaseException):
+        pass
+    async def accepted_then_crash(params):
+        with factory() as other:
+            stored = other.query(Job).one()
+            assert stored.status == "SUBMITTING" and stored.submission_attempt_id
+        raise ProcessDeath()
+    provider.submit_generation_job.side_effect = accepted_then_crash
+    with factory() as db:
+        job = Queue.create_and_dispatch_job(db, shot_id)
+        job_id = job.id
+        token = claim(db, job).claim_token
+        with pytest.raises(ProcessDeath):
+            await Queue.process_job(db, job_id, claim_token=token, now=NOW)
+    with factory() as restarted:
+        assert Queue.recover_pending_jobs(restarted, now=NOW+timedelta(seconds=LEASE_SECONDS)) == 1
+        stored = restarted.get(Job, job_id)
+        assert stored.status == "RECONCILIATION_REQUIRED"
+        assert Queue.claim_next_job(restarted, now=NOW+timedelta(days=1)) is None
+        await Queue.process_job(restarted, job_id, claim_token=token, now=NOW+timedelta(days=1))
+    assert provider.submit_generation_job.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_ambiguous_result_quarantined(db_session, sample_shot, provider):
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="", status="FAILED", retryable=True, submission_uncertain=True)
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert result.status == "RECONCILIATION_REQUIRED"
+    assert Queue.claim_next_job(db_session, now=NOW+timedelta(days=1)) is None
+
+
+@pytest.mark.anyio
+async def test_bounded_retry_and_durable_eligibility(db_session, sample_shot, provider):
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="", status="FAILED", retryable=True, status_code=429)
+    job = create(db_session, sample_shot, max_retries=3)
+    for attempt, seconds in enumerate((0,5,15), 1):
+        now = NOW+timedelta(seconds=seconds)
+        token = claim(db_session, job, now).claim_token
+        result = await Queue.process_job(db_session, job.id, claim_token=token, now=now)
+        assert result.retry_count == attempt
+        if attempt < 3:
+            assert result.status == "PENDING"
+            assert claim(db_session, job, now+timedelta(seconds=4 if attempt == 1 else 9)) is None
+        else:
+            assert result.status == "FAILED"
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW+timedelta(days=1))
+    assert provider.submit_generation_job.await_count == 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code", [400,401,403,None])
+async def test_permanent_failures_never_resubmit(db_session, sample_shot, provider, code):
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="", status="FAILED", status_code=code,
+        error_message="network timeout 429 secret=LEAK", raw_response={"retryable":True})
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert result.status == "FAILED" and result.retry_count == 0
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert provider.submit_generation_job.await_count == 1
+    assert "LEAK" not in str(result.result) + str(result.error_message)
+
+
+@pytest.mark.anyio
+async def test_poll_schedule_output_and_terminal_noop(db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=9))
+    assert provider.check_job_status.await_count == 0
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=10))
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=10))
+    assert provider.check_job_status.await_count == 1
+    provider.check_job_status.return_value = ProviderJobResult(provider_job_id="task-1", status="COMPLETED",
+        video_url="https://example.com/movie.mp4", raw_response={"secret":"LEAK"})
+    result = await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=20))
+    assert result.status == "COMPLETED" and result.output_asset_id is None
+    assert result.result["video_url"] == "https://example.com/movie.mp4"
+    assert db_session.query(Asset).count() == 0
+    assert "LEAK" not in str(result.result)
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(days=1))
+    assert provider.check_job_status.await_count == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code", [429,500,502,503,504])
+async def test_poll_transient_backoff_and_bound(db_session, sample_shot, provider, code):
+    job = create(db_session, sample_shot, max_retries=2)
+    token = claim(db_session, job).claim_token
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    provider.check_job_status.return_value = ProviderJobResult(provider_job_id="task-1", status="FAILED", retryable=True, status_code=code)
+    result = await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=10))
+    assert result.status == "PROCESSING"
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=19))
+    assert provider.check_job_status.await_count == 1
+    result = await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=20))
+    assert result.status == "FAILED"
+    assert provider.submit_generation_job.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_cancel_api_and_terminal_noop(client, db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    response = client.post(f"/api/v1/jobs/{job.id}/cancel")
+    assert response.json()["status"] == "CANCELLED"
+    assert provider.cancel_job.await_count == 0
+    active = create(db_session, sample_shot)
+    token = claim(db_session, active).claim_token
+    await Queue.process_job(db_session, active.id, claim_token=token, now=NOW)
+    response = client.post(f"/api/v1/jobs/{active.id}/cancel")
+    assert response.json()["status"] == "CANCELLED"
+    client.post(f"/api/v1/jobs/{active.id}/cancel")
+    assert provider.cancel_job.await_count == 1
+    assert "claim_token" not in response.json()
+
+
+@pytest.mark.anyio
+async def test_cancel_failures_and_submitting_noop(db_session, sample_shot, provider, caplog):
+    job = create(db_session, sample_shot)
+    job.status = "SUBMITTING"
+    db_session.commit()
+    await Queue.cancel_job(db_session, job.id, now=NOW)
+    assert provider.cancel_job.await_count == 0
     job.status = "PROCESSING"
+    job.provider_job_id = "task-1"
     db_session.commit()
-
-    mock_poll = ProviderJobResult(
-        provider_job_id="task_poll_limit_123",
-        status="PROCESSING",
-        progress_percentage=20.0,
-    )
-
-    with patch.object(ViduProviderAdapter, "check_job_status", new_callable=AsyncMock) as mock_check:
-        mock_check.return_value = mock_poll
-
-        # Poll with max_polls = 2
-        j1 = await JobDispatchService.poll_job_status(db=db_session, job_id=job.id, max_polls=2)
-        assert j1.status == "PROCESSING"
-
-        j2 = await JobDispatchService.poll_job_status(db=db_session, job_id=job.id, max_polls=2)
-        assert j2.status == "PROCESSING"
-
-        # 3rd poll exceeds max_polls=2 -> transitions to FAILED
-        j3 = await JobDispatchService.poll_job_status(db=db_session, job_id=job.id, max_polls=2)
-        assert j3.status == "FAILED"
-        assert "Bounded polling limit exceeded" in (j3.error_message or "")
+    provider.cancel_job.side_effect = RuntimeError('Authorization: token=LEAK')
+    result = await Queue.cancel_job(db_session, job.id, now=NOW)
+    assert result.status == "PROCESSING"
+    assert "LEAK" not in str(result.error_message) + caplog.text
+    await Queue.cancel_job(db_session, job.id, now=NOW)
+    assert provider.cancel_job.await_count == 1
 
 
-# 9. DB IDEMPOTENCY & CONCURRENCY
-def test_db_idempotency_and_concurrency(client: TestClient, sample_shot):
-    payload = {
-        "shot_id": str(sample_shot.id),
-        "provider_name": "vidu",
-        "idempotency_key": "unique_idem_key_42",
-    }
-    r1 = client.post("/api/v1/jobs", json=payload)
-    assert r1.status_code == 201
-    job_id1 = r1.json()["id"]
-
-    # Re-sending same shot + idempotency key returns existing job
-    r2 = client.post("/api/v1/jobs", json=payload)
-    assert r2.status_code == 201
-    assert r2.json()["id"] == job_id1
+@pytest.mark.parametrize("key", ["api_key", "AUTHORIZATION", "access_token", "secret", "password", "credential"])
+def test_nested_secret_params_rejected_without_echo(client, db_session, sample_shot, key):
+    response = client.post("/api/v1/jobs", json={"shot_id":str(sample_shot.id), "custom_params":{"nested":[{key:"NEVER_PERSIST"}]}})
+    assert response.status_code == 400
+    assert "NEVER_PERSIST" not in response.text
+    assert db_session.query(Job).count() == 0
 
 
-# 10. NO DUPLICATE PROVIDER SUBMISSION AFTER RETRY / RESTART
-@pytest.mark.anyio
-async def test_no_duplicate_provider_submission(db_session, sample_shot):
-    job = JobDispatchService.create_and_dispatch_job(
-        db=db_session,
-        shot_id=sample_shot.id,
-        provider_name="vidu",
-    )
-    job.provider_job_id = "already_submitted_vidu_123"
-    job.status = "PROCESSING"
-    db_session.commit()
-
-    # Re-dispatching an already submitted job MUST NOT call submit_generation_job
-    with patch.object(ViduProviderAdapter, "submit_generation_job", new_callable=AsyncMock) as mock_submit:
-        res = await JobDispatchService.process_job(db=db_session, job_id=job.id)
-        assert mock_submit.call_count == 0
-        assert res.provider_job_id == "already_submitted_vidu_123"
-        assert res.status == "PROCESSING"
-
-
-# 11. RESTART RECOVERY
-def test_restart_recovery(db_session, sample_shot):
-    # Job stuck in CLAIMED without provider_job_id
-    stuck_job = GenerationJob(
-        id=uuid.uuid4(),
-        shot_id=sample_shot.id,
-        provider_name="vidu",
-        status="CLAIMED",
-        provider_job_id=None,
-        retry_count=0,
-        max_retries=3,
-    )
-    # Active job in PROCESSING with provider_job_id
-    active_job = GenerationJob(
-        id=uuid.uuid4(),
-        shot_id=sample_shot.id,
-        provider_name="vidu",
-        status="PROCESSING",
-        provider_job_id="vidu_active_99",
-        retry_count=0,
-        max_retries=3,
-    )
-    db_session.add_all([stuck_job, active_job])
-    db_session.commit()
-
-    recovered = JobDispatchService.recover_pending_jobs(db=db_session)
-    assert recovered >= 1
-
-    db_session.refresh(stuck_job)
-    db_session.refresh(active_job)
-
-    # Stuck job without provider_job_id is reset to PENDING for retry
-    assert stuck_job.status == "PENDING"
-    # Active job with provider_job_id stays in PROCESSING (no re-submission)
-    assert active_job.status == "PROCESSING"
-    assert active_job.provider_job_id == "vidu_active_99"
-
-
-# 12. SECRET LEAKAGE PREVENTION
-def test_secret_leakage_safety():
-    raw_error = "Failed connecting to https://api.vidu.com with Token abc123supersecret and password=pass456"
-    sanitized = sanitize_secret_text(raw_error)
-    assert "abc123supersecret" not in sanitized
-    assert "pass456" not in sanitized
-    assert "[REDACTED]" in sanitized
-
-
-# 13. OUTPUT ASSET SAFETY (NO FABRICATED ASSET RECORD)
-@pytest.mark.anyio
-async def test_no_fabricated_asset_metadata(db_session, sample_shot):
-    job = JobDispatchService.create_and_dispatch_job(
-        db=db_session,
-        shot_id=sample_shot.id,
-        provider_name="vidu",
-    )
-    job.provider_job_id = "task_done_777"
-    job.status = "PROCESSING"
-    db_session.commit()
-
-    completed_result = ProviderJobResult(
-        provider_job_id="task_done_777",
-        status="COMPLETED",
-        progress_percentage=100.0,
-        video_url="https://storage.vidu.com/rendered_output.mp4",
-        thumbnail_url="https://storage.vidu.com/thumb.jpg",
-    )
-
-    with patch.object(ViduProviderAdapter, "check_job_status", new_callable=AsyncMock) as mock_check:
-        mock_check.return_value = completed_result
-        polled_job = await JobDispatchService.poll_job_status(db=db_session, job_id=job.id)
-
-        assert polled_job.status == "COMPLETED"
-        # Output Asset Safety:
-        # 1. output_asset_id MUST BE NONE (no fake Asset created)
-        assert polled_job.output_asset_id is None
-        # 2. No Asset in DB with dummy sha256 or 0 file size
-        fake_assets = (
-            db_session.query(Asset)
-            .filter(Asset.checksum_sha256 == "0000000000000000000000000000000000000000000000000000000000000000")
-            .all()
-        )
-        assert len(fake_assets) == 0
-        # 3. Provider video_url safely kept in result
-        assert polled_job.result["video_url"] == "https://storage.vidu.com/rendered_output.mp4"
-
-
-# 14. DB-BACKED CLAIM / WORKER BEHAVIOR
-def test_db_claim_worker_behavior(db_session, sample_shot):
-    j1 = JobDispatchService.create_and_dispatch_job(
-        db=db_session, shot_id=sample_shot.id, provider_name="vidu"
-    )
-    j2 = JobDispatchService.create_and_dispatch_job(
-        db=db_session, shot_id=sample_shot.id, provider_name="vidu"
-    )
-
-    # Worker claims first job
-    claimed1 = JobDispatchService.claim_next_job(db=db_session, worker_id="worker_1")
-    assert claimed1 is not None
-    assert claimed1.id == j1.id
-    assert claimed1.status == "CLAIMED"
-
-    # Next claim gets second job
-    claimed2 = JobDispatchService.claim_next_job(db=db_session, worker_id="worker_2")
-    assert claimed2 is not None
-    assert claimed2.id == j2.id
-    assert claimed2.status == "CLAIMED"
-
-    # Third claim returns None (all claimed)
-    claimed3 = JobDispatchService.claim_next_job(db=db_session)
-    assert claimed3 is None
-
+def test_worker_restarts_and_recovers_due_jobs(durable_db, provider):
+    factory, shot_id = durable_db
+    with factory() as db:
+        job_id = Queue.create_and_dispatch_job(db, shot_id).id
+    asyncio.run(run_once(factory))
+    asyncio.run(run_once(factory))
+    with factory() as db:
+        assert db.get(Job, job_id).provider_job_id == "task-1"
+    assert provider.submit_generation_job.await_count == 1

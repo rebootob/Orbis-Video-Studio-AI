@@ -1,416 +1,446 @@
-import logging
+"""Durable queue operations. Every external operation is fenced by a DB lease.
+
+Worker flow: recover -> claim -> dispatch(token); poll due jobs separately.
+No provider identity after an ambiguous submit requires manual reconciliation.
+"""
+import threading
 import uuid
-import re
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any
+
 import httpx
-from typing import Optional, Dict, Any, List
-from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
-from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.models.shot import Shot
-from app.models.generation_job import GenerationJob
+from app.models.generation_job import GenerationJob as Job
 from app.providers.base import VideoGenerationParams, ProviderJobResult
 from app.providers.factory import ProviderFactory
+from app.providers.safety import (
+    contains_secret,
+    safe_result,
+    sanitize_secret_text,
+    strip_secret_keys,
+)
 
-logger = logging.getLogger(__name__)
+LEASE_SECONDS = 120
+POLL_SECONDS = 10
+RETRY_SECONDS = 5
+MAX_BACKOFF_SECONDS = 300
+TERMINAL = ("COMPLETED", "FAILED", "CANCELLED", "RECONCILIATION_REQUIRED")
+ACTIVE = ("QUEUED", "PROCESSING")
+
+_claim_lock = threading.Lock()
 
 
-def is_retryable_error(
-    status_code: Optional[int] = None,
-    exc: Optional[Exception] = None,
-    error_message: Optional[str] = None,
-) -> bool:
-    """
-    Retry classification:
-    RETRY: network, timeout, 429, eligible 5xx
-    NO RETRY: config/validation, 400, 401, 403, provider rejection, unsupported provider/config
-    """
-    if isinstance(exc, (ValueError, TypeError, KeyError)):
-        return False
+def utc_now():
+    return datetime.now(timezone.utc)
 
-    if isinstance(
-        exc,
-        (
-            httpx.TimeoutException,
-            httpx.NetworkError,
-            httpx.ConnectError,
-            httpx.ConnectTimeout,
-            httpx.ReadTimeout,
-        ),
-    ):
-        return True
 
+def ensure_utc(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def backoff(attempt):
+    return min(MAX_BACKOFF_SECONDS, RETRY_SECONDS * 2 ** min(max(attempt - 1, 0), 6))
+
+
+def is_retryable_error(status_code=None, exc=None, error_message=None):
     if status_code is not None:
-        if status_code == 429:
-            return True
-        if 500 <= status_code <= 599:
-            return True
-        if status_code in (400, 401, 403, 404, 422):
+        return status_code == 429 or status_code in (500, 502, 503, 504)
+    if exc is not None:
+        return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
+    if error_message is not None:
+        msg = error_message.lower()
+        if any(w in msg for w in ("400", "401", "403", "unauthorized", "moderation", "policy", "unsupported", "invalid")):
             return False
-
-    if error_message:
-        lower_msg = error_message.lower()
-        non_retryable_markers = [
-            "http 400",
-            "http 401",
-            "http 403",
-            "http 404",
-            "http 422",
-            "unsupported provider",
-            "unauthorized",
-            "forbidden",
-            "rejected",
-            "moderation",
-            "nsfw",
-            "policy violation",
-            "invalid configuration",
-            "validation error",
-            "bad request",
-            "quota exceeded",
-            "api key missing",
-        ]
-        for marker in non_retryable_markers:
-            if marker in lower_msg:
-                return False
-
-        retryable_markers = [
-            "timeout",
-            "timed out",
-            "rate limit",
-            "429",
-            "http 500",
-            "http 502",
-            "http 503",
-            "http 504",
-            "connection error",
-            "connection reset",
-            "network error",
-        ]
-        for marker in retryable_markers:
-            if marker in lower_msg:
-                return True
-
+        if any(w in msg for w in ("504", "503", "502", "500", "429", "timeout", "rate limit")):
+            return True
+        return False
     return False
 
 
-def sanitize_secret_text(text: Optional[str]) -> Optional[str]:
-    if not text:
-        return text
-    sanitized = re.sub(
-        r'(Token|Bearer|key|api_key|secret|password)\s*[:=]?\s*[A-Za-z0-9_\-\.]+',
-        r'\1 [REDACTED]',
-        text,
-        flags=re.IGNORECASE,
+def is_result_retryable(res: ProviderJobResult) -> bool:
+    if res.status_code is not None:
+        return is_retryable_error(status_code=res.status_code)
+    if res.error_code == "TRANSPORT_ERROR":
+        return True
+    if res.error_code in ("PROVIDER_REJECTED", "INVALID_CONFIG", "PROVIDER_ERROR"):
+        return False
+    return bool(res.retryable)
+
+
+def due(column, now):
+    return or_(column.is_(None), column <= now)
+
+
+def load(db: Session, job_id):
+    job = db.query(Job).populate_existing().filter(Job.id == job_id).first()
+    if job is None:
+        raise HTTPException(404, "Generation job not found")
+    return job
+
+
+def change(db: Session, filters, values):
+    changed = db.query(Job).filter(*filters).update(values, synchronize_session=False)
+    db.commit()
+    return changed
+
+
+def released():
+    return {"claimed_by": None, "claim_token": None, "claim_expires_at": None}
+
+
+def failure(exc, submitting=False):
+    transient = is_retryable_error(exc=exc)
+    safe_before_send = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+    return ProviderJobResult(
+        provider_job_id="",
+        status="FAILED",
+        error_code="TRANSPORT_ERROR" if transient else "PROVIDER_ERROR",
+        retryable=transient,
+        submission_uncertain=submitting and not safe_before_send,
     )
-    return sanitized
 
 
 class JobDispatchService:
     @staticmethod
     def create_and_dispatch_job(
         db: Session,
-        shot_id: uuid.UUID,
-        provider_name: str = "vidu",
-        idempotency_key: Optional[str] = None,
-        custom_params: Optional[Dict[str, Any]] = None,
-        max_retries: int = 3,
-    ) -> GenerationJob:
-        shot = db.query(Shot).filter(Shot.id == shot_id).first()
+        shot_id,
+        provider_name="vidu",
+        idempotency_key=None,
+        custom_params=None,
+        max_retries=3,
+        reference_images=None,
+    ):
+        if not 1 <= max_retries <= 10:
+            raise HTTPException(400, "max_retries must be between 1 and 10")
+        if contains_secret(custom_params or {}) or contains_secret(reference_images or []):
+            raise HTTPException(400, "Secret-like generation parameters are not allowed")
+        if not isinstance(provider_name, str) or len(provider_name) > 50 or contains_secret(provider_name):
+            raise HTTPException(400, "Invalid provider name")
+        if idempotency_key is not None and (not idempotency_key or len(idempotency_key) > 255 or contains_secret(idempotency_key)):
+            raise HTTPException(400, "Invalid idempotency key")
+        shot = db.get(Shot, shot_id)
         if not shot:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Shot {shot_id} not found",
-            )
-
+            raise HTTPException(404, "Shot not found")
         if idempotency_key:
-            existing_job = (
-                db.query(GenerationJob)
-                .filter(
-                    GenerationJob.shot_id == shot_id,
-                    GenerationJob.idempotency_key == idempotency_key,
-                )
-                .first()
+            existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
+            if existing:
+                return existing
+        prompt = shot.video_prompt or shot.visual_prompt or shot.action or f"Shot {shot.shot_number}"
+        if contains_secret(prompt):
+            raise HTTPException(400, "Secret-like generation parameters are not allowed")
+
+        clean_custom_params = strip_secret_keys(custom_params or {})
+        clean_reference_images = strip_secret_keys(reference_images) if reference_images else None
+
+        try:
+            params = VideoGenerationParams(
+                shot_id=str(shot_id),
+                prompt=prompt,
+                duration_seconds=shot.duration_seconds or 4.0,
+                reference_images=clean_reference_images,
+                provider_specific_params=clean_custom_params,
             )
-            if existing_job:
-                return existing_job
+        except ValueError:
+            raise HTTPException(400, "Invalid generation parameters") from None
 
-        prompt_text = shot.video_prompt or shot.visual_prompt or shot.action or f"Shot {shot.shot_number}"
-
-        gen_params = VideoGenerationParams(
-            shot_id=str(shot.id),
-            prompt=prompt_text,
-            duration_seconds=shot.duration_seconds or 4.0,
-            provider_specific_params=custom_params or {},
-        )
-
-        job = GenerationJob(
+        job = Job(
             id=uuid.uuid4(),
-            shot_id=shot.id,
+            shot_id=shot_id,
             provider_name=provider_name,
             status="PENDING",
             idempotency_key=idempotency_key,
-            max_retries=max_retries,
             retry_count=0,
-            payload=gen_params.model_dump(),
+            max_retries=max_retries,
+            payload=params.model_dump(),
         )
-
         try:
             db.add(job)
             db.commit()
-            db.refresh(job)
-            return job
+            return load(db, job.id)
         except IntegrityError:
             db.rollback()
             if idempotency_key:
-                existing_job = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.shot_id == shot_id,
-                        GenerationJob.idempotency_key == idempotency_key,
-                    )
-                    .first()
-                )
-                if existing_job:
-                    return existing_job
+                existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
+                if existing:
+                    return existing
             raise
 
     @staticmethod
-    def claim_next_job(db: Session, worker_id: Optional[str] = None) -> Optional[GenerationJob]:
-        """Atomically claims the next eligible PENDING job using DB-level concurrency controls."""
-        query = (
-            db.query(GenerationJob)
-            .filter(
-                GenerationJob.status == "PENDING",
-                GenerationJob.retry_count < GenerationJob.max_retries,
-            )
-            .order_by(GenerationJob.created_at.asc())
-        )
-        if db.bind and db.bind.dialect.name == "postgresql":
-            job = query.with_for_update(skip_locked=True).first()
-            if job:
-                job.status = "CLAIMED"
-                db.commit()
-                db.refresh(job)
-                return job
-            return None
-        else:
-            candidates = query.limit(10).all()
-            for cand in candidates:
-                updated = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.id == cand.id,
-                        GenerationJob.status == "PENDING",
-                    )
-                    .update({"status": "CLAIMED"}, synchronize_session=False)
-                )
-                if updated > 0:
-                    db.commit()
-                    db.refresh(cand)
-                    return cand
+    def claim_next_job(
+        db: Session,
+        worker_id=None,
+        lease_duration_seconds=LEASE_SECONDS,
+        *,
+        now=None,
+        job_id=None,
+    ):
+        now = now or utc_now()
+        worker_id = worker_id or "queue-worker"
+        if len(worker_id) > 255 or contains_secret(worker_id):
+            raise HTTPException(400, "Invalid worker identifier")
+        lease_secs = lease_duration_seconds or LEASE_SECONDS
+        eligible = [
+            Job.status == "PENDING",
+            Job.provider_job_id.is_(None),
+            Job.submission_attempt_id.is_(None),
+            Job.retry_count < Job.max_retries,
+            due(Job.next_retry_at, now),
+        ]
+        if job_id is not None:
+            eligible.append(Job.id == job_id)
+
+        with _claim_lock:
+            candidate_ids = [
+                row[0] for row in db.query(Job.id).filter(*eligible).order_by(Job.created_at, Job.id).limit(100).all()
+            ]
+            for candidate in candidate_ids:
+                claim_token = uuid.uuid4().hex
+                if change(db, [Job.id == candidate, *eligible], {
+                    "status": "CLAIMED",
+                    "claimed_by": worker_id,
+                    "claim_token": claim_token,
+                    "claim_expires_at": now + timedelta(seconds=lease_secs),
+                }):
+                    return load(db, candidate)
             return None
 
     @staticmethod
-    def recover_pending_jobs(db: Session) -> int:
-        """
-        Restart recovery for pending/recoverable jobs.
-        - Jobs stuck in 'CLAIMED' without provider_job_id are recovered to 'PENDING'
-          (or 'FAILED' if max_retries reached).
-        - Jobs in 'PROCESSING' with provider_job_id are left intact for polling
-          (preventing duplicate provider submission).
-        """
-        stuck_claimed = (
-            db.query(GenerationJob)
-            .filter(
-                GenerationJob.status == "CLAIMED",
-                GenerationJob.provider_job_id.is_(None),
-            )
-            .all()
-        )
-        recovered_count = 0
-        for job in stuck_claimed:
-            if job.retry_count < job.max_retries:
-                job.status = "PENDING"
-            else:
-                job.status = "FAILED"
-                job.error_message = "Max retries exceeded during recovery"
-            recovered_count += 1
-
-        db.commit()
-        return recovered_count
+    def recover_pending_jobs(db: Session, *, now=None):
+        now = now or utc_now()
+        expired = due(Job.claim_expires_at, now)
+        count = 0
+        for state, values in (
+            ("CLAIMED", {"status": "PENDING"}),
+            ("SUBMITTING", {"status": "RECONCILIATION_REQUIRED", "error_message": "Submission outcome unknown; manual reconciliation required"}),
+            ("POLLING", {"status": "PROCESSING", "next_poll_at": now + timedelta(seconds=POLL_SECONDS)}),
+            ("CANCELLING", {"status": "RECONCILIATION_REQUIRED", "error_message": "Cancellation outcome unknown; manual reconciliation required"}),
+        ):
+            count += change(db, [Job.status == state, expired], {**released(), **values})
+        count += change(db, [Job.status.in_(ACTIVE), Job.provider_job_id.is_(None), expired], {
+            **released(), "status": "RECONCILIATION_REQUIRED",
+            "error_message": "Provider identity missing; manual reconciliation required",
+        })
+        return count
 
     @staticmethod
-    async def process_job(db: Session, job_id: uuid.UUID) -> GenerationJob:
-        job = db.query(GenerationJob).filter(GenerationJob.id == job_id).first()
-        if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"GenerationJob {job_id} not found",
-            )
-
-        if job.status == "COMPLETED":
+    async def process_job(db: Session, job_id, *, claim_token=None, worker_id=None, now=None):
+        now = now or utc_now()
+        job = load(db, job_id)
+        if job.status in TERMINAL or job.provider_job_id:
             return job
 
-        # Guard: If provider_job_id is already assigned, DO NOT re-submit to provider!
-        if job.provider_job_id:
-            logger.info(f"Job {job.id} already submitted (provider_job_id={job.provider_job_id}), skipping re-submission.")
-            if job.status not in ("PROCESSING", "COMPLETED", "FAILED"):
-                job.status = "PROCESSING"
-                db.commit()
-                db.refresh(job)
-            return job
+        if not claim_token:
+            raise HTTPException(409, "A valid queue claim is required")
 
-        # Unsupported provider / configuration check (NON-RETRYABLE)
+        attempt = uuid.uuid4().hex
+        if not change(db, [
+            Job.id == job_id,
+            Job.status == "CLAIMED",
+            Job.claim_token == claim_token,
+            Job.claim_expires_at > now,
+            Job.provider_job_id.is_(None),
+            Job.submission_attempt_id.is_(None),
+            Job.retry_count < Job.max_retries,
+            due(Job.next_retry_at, now),
+        ], {
+            "status": "SUBMITTING",
+            "submission_attempt_id": attempt,
+            "claim_expires_at": now + timedelta(seconds=LEASE_SECONDS),
+        }):
+            raise HTTPException(409, "Queue claim is invalid or expired")
+
+        job = load(db, job_id)
         try:
             adapter = ProviderFactory.get_provider(job.provider_name)
-        except Exception as exc:
-            job.status = "FAILED"
-            job.error_message = sanitize_secret_text(f"Unsupported provider: {str(exc)}")
-            db.commit()
-            db.refresh(job)
-            return job
+            params = VideoGenerationParams(**(job.payload or {}))
+            if contains_secret(params.model_dump()):
+                raise ValueError("Unsafe payload")
+            configured = adapter.validate_config({})
+        except Exception:
+            configured = False
 
-        gen_params = VideoGenerationParams(**(job.payload or {}))
-
-        # Mark PROCESSING before submitting to prevent race/duplicate submissions
-        job.status = "PROCESSING"
-        db.commit()
-
-        try:
-            res: ProviderJobResult = await adapter.submit_generation_job(gen_params)
-        except Exception as exc:
-            err_msg = sanitize_secret_text(f"Submission exception: {str(exc)}")
-            retryable = is_retryable_error(exc=exc, error_message=err_msg)
-            if retryable:
-                job.retry_count += 1
-                if job.retry_count >= job.max_retries:
-                    job.status = "FAILED"
-                else:
-                    job.status = "PENDING"
-            else:
-                job.status = "FAILED"
-            job.error_message = err_msg
-            job.result = {"error": err_msg}
-            db.commit()
-            db.refresh(job)
-            return job
-
-        if res.status == "FAILED":
-            err_msg = sanitize_secret_text(res.error_message or "Submission failed")
-            job.error_message = err_msg
-
-            status_code = None
-            if res.raw_response and isinstance(res.raw_response, dict):
-                status_code = res.raw_response.get("status_code")
-
-            retryable = is_retryable_error(status_code=status_code, error_message=err_msg)
-            if retryable:
-                job.retry_count += 1
-                if job.retry_count >= job.max_retries:
-                    job.status = "FAILED"
-                else:
-                    job.status = "PENDING"
-            else:
-                # Non-retryable: 400, 401, 403, validation, rejection
-                job.status = "FAILED"
-
-            job.result = res.raw_response or {"error": err_msg}
+        if not configured:
+            res = ProviderJobResult(provider_job_id="", status="FAILED", error_code="INVALID_CONFIG", retryable=False)
         else:
-            job.provider_job_id = res.provider_job_id
-            job.status = res.status
-            if res.cost_usd is not None:
-                job.cost_usd = res.cost_usd
-            result_data = res.model_dump(exclude={"raw_response"})
-            if res.raw_response:
-                result_data["provider_data"] = res.raw_response
-            job.result = result_data
+            try:
+                res = await adapter.submit_generation_job(params)
+            except Exception as exc:
+                res = failure(exc, submitting=True)
 
-        db.commit()
-        db.refresh(job)
-        return job
+        values = released()
+        values.update(result=safe_result(res), error_message=None, next_retry_at=None)
 
-    @staticmethod
-    async def poll_job_status(db: Session, job_id: uuid.UUID, max_polls: int = 60) -> GenerationJob:
-        job = db.query(GenerationJob).filter(GenerationJob.id == job_id).first()
-        if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"GenerationJob {job_id} not found",
+        retryable = is_result_retryable(res)
+
+        if res.submission_uncertain or (res.status != "FAILED" and not res.provider_job_id):
+            values.update(
+                status="RECONCILIATION_REQUIRED",
+                error_message="Submission outcome unknown; manual reconciliation required",
+            )
+        elif res.status == "FAILED":
+            retries = job.retry_count + (1 if retryable else 0)
+            retry = retryable and retries < job.max_retries
+            values.update(
+                status="PENDING" if retry else "FAILED",
+                retry_count=retries,
+                error_message=sanitize_secret_text(res.error_message) if res.error_message else ("Transient provider failure" if retryable else "Provider rejected submission"),
+                submission_attempt_id=None if retry else attempt,
+                next_retry_at=now + timedelta(seconds=backoff(retries)) if retry else None,
+            )
+        else:
+            values.update(
+                provider_job_id=res.provider_job_id,
+                status=res.status,
+                next_poll_at=now + timedelta(seconds=POLL_SECONDS) if res.status in ACTIVE else None,
             )
 
-        if job.status in ("COMPLETED", "FAILED") or not job.provider_job_id:
+        change(db, [
+            Job.id == job_id,
+            Job.status == "SUBMITTING",
+            Job.claim_token == claim_token,
+            Job.submission_attempt_id == attempt,
+        ], values)
+        return load(db, job_id)
+
+    @staticmethod
+    async def poll_job_status(db: Session, job_id, *, now=None, max_polls=None):
+        now = now or utc_now()
+        job = load(db, job_id)
+        if job.status not in ACTIVE or not job.provider_job_id:
             return job
 
-        # Bounded polling enforcement
-        curr_result = dict(job.result or {})
-        poll_count = curr_result.get("_poll_count", 0) + 1
-        curr_result["_poll_count"] = poll_count
+        limit = min(job.max_polls, max_polls) if max_polls is not None else job.max_polls
 
-        if poll_count > max_polls:
-            job.status = "FAILED"
-            job.error_message = f"Bounded polling limit exceeded ({max_polls} attempts)"
-            job.result = curr_result
-            db.commit()
-            db.refresh(job)
+        if job.next_poll_at and ensure_utc(job.next_poll_at) > ensure_utc(now):
             return job
 
+        if job.poll_count >= limit:
+            values = {
+                **released(),
+                "status": "FAILED",
+                "error_message": "Bounded polling limit exceeded",
+                "next_poll_at": None,
+            }
+            change(db, [Job.id == job_id, Job.status.in_(ACTIVE)], values)
+            return load(db, job_id)
+
+        token = uuid.uuid4().hex
+        eligible = [Job.id == job_id, Job.status.in_(ACTIVE), due(Job.next_poll_at, now), Job.poll_count < limit]
+        if not change(db, eligible, {
+            "status": "POLLING",
+            "claim_token": token,
+            "claimed_by": "poller",
+            "claim_expires_at": now + timedelta(seconds=LEASE_SECONDS),
+            "poll_count": Job.poll_count + 1,
+            "next_poll_at": now + timedelta(seconds=POLL_SECONDS),
+        }):
+            return load(db, job_id)
+
+        job = load(db, job_id)
         try:
             adapter = ProviderFactory.get_provider(job.provider_name)
+            res = await adapter.check_job_status(job.provider_job_id)
         except Exception as exc:
-            job.error_message = sanitize_secret_text(str(exc))
-            job.status = "FAILED"
-            db.commit()
-            return job
+            res = failure(exc)
 
-        try:
-            res: ProviderJobResult = await adapter.check_job_status(job.provider_job_id)
-        except Exception as exc:
-            err_msg = sanitize_secret_text(str(exc))
-            retryable = is_retryable_error(exc=exc, error_message=err_msg)
-            if retryable and job.retry_count + 1 < job.max_retries:
-                job.retry_count += 1
-                job.status = "PENDING"
-            else:
-                job.status = "FAILED"
-            job.error_message = err_msg
-            job.result = curr_result
-            db.commit()
-            db.refresh(job)
-            return job
-
-        job.status = res.status
-        job_result = res.model_dump(exclude={"raw_response"})
-        job_result["_poll_count"] = poll_count
-        if res.raw_response:
-            job_result["provider_data"] = res.raw_response
-        job.result = job_result
-
-        if res.cost_usd is not None:
-            job.cost_usd = res.cost_usd
-
+        values = {
+            **released(),
+            "result": safe_result(res),
+            "error_message": sanitize_secret_text(res.error_message) if res.error_message else None,
+            "status": res.status,
+            "next_poll_at": now + timedelta(seconds=POLL_SECONDS),
+        }
         if res.status == "FAILED":
-            err_msg = sanitize_secret_text(res.error_message or "Job processing failed at provider")
-            job.error_message = err_msg
-            status_code = None
-            if res.raw_response and isinstance(res.raw_response, dict):
-                status_code = res.raw_response.get("status_code")
+            retryable = is_result_retryable(res)
+            retries = job.retry_count + (1 if retryable else 0)
+            retry = retryable and retries < job.max_retries
+            values.update(
+                status="PROCESSING" if retry else "FAILED",
+                retry_count=retries,
+                error_message=sanitize_secret_text(res.error_message) if res.error_message else ("Transient status failure" if retryable else "Provider job failed"),
+                next_poll_at=now + timedelta(seconds=max(POLL_SECONDS, backoff(retries))) if retry else None,
+            )
+        elif values["status"] in TERMINAL:
+            values["next_poll_at"] = None
 
-            retryable = is_retryable_error(status_code=status_code, error_message=err_msg)
-            if retryable and job.retry_count + 1 < job.max_retries:
-                job.retry_count += 1
-                job.status = "PENDING"
-            else:
-                job.status = "FAILED"
+        change(db, [Job.id == job_id, Job.status == "POLLING", Job.claim_token == token], values)
+        return load(db, job_id)
 
-        elif res.status == "COMPLETED":
-            # Output Asset Safety:
-            # - NO fake Asset record for external provider URL
-            # - NO fake SHA256 / file size / storage metadata
-            # - Provider video_url remains in job.result
-            shot = db.query(Shot).filter(Shot.id == job.shot_id).first()
-            if shot:
-                shot.status = "COMPLETED"
+    @staticmethod
+    async def cancel_job(db: Session, job_id, *, now=None):
+        now = now or utc_now()
+        job = load(db, job_id)
+        if job.status in TERMINAL or job.status == "SUBMITTING":
+            return job
 
-        db.commit()
-        db.refresh(job)
-        return job
+        if job.provider_job_id is None and job.submission_attempt_id is None:
+            if change(db, [
+                Job.id == job_id,
+                Job.status.in_(("PENDING", "CLAIMED")),
+                Job.provider_job_id.is_(None),
+                Job.submission_attempt_id.is_(None),
+            ], {
+                **released(),
+                "status": "CANCELLED",
+                "next_retry_at": None,
+                "next_poll_at": None,
+            }):
+                return load(db, job_id)
+            return job
+
+        if not job.provider_job_id:
+            return job
+
+        token = uuid.uuid4().hex
+        if not change(db, [
+            Job.id == job_id,
+            Job.status.in_(ACTIVE),
+            Job.provider_job_id.is_not(None),
+            due(Job.next_retry_at, now),
+        ], {
+            "status": "CANCELLING",
+            "claim_token": token,
+            "claimed_by": "canceller",
+            "claim_expires_at": now + timedelta(seconds=LEASE_SECONDS),
+        }):
+            return load(db, job_id)
+
+        job = load(db, job_id)
+        try:
+            adapter = ProviderFactory.get_provider(job.provider_name)
+            cancelled = await adapter.cancel_job(job.provider_job_id)
+        except Exception as exc:
+            cancelled = False
+            err_text = sanitize_secret_text(str(exc))
+        else:
+            err_text = "Provider cancellation not confirmed"
+
+        if cancelled:
+            values = {
+                **released(),
+                "status": "CANCELLED",
+                "error_message": None,
+                "next_retry_at": None,
+                "next_poll_at": None,
+            }
+        else:
+            values = {
+                **released(),
+                "status": "PROCESSING",
+                "error_message": sanitize_secret_text(err_text),
+                "next_retry_at": now + timedelta(seconds=POLL_SECONDS),
+                "next_poll_at": now + timedelta(seconds=POLL_SECONDS),
+            }
+
+        change(db, [Job.id == job_id, Job.status == "CANCELLING", Job.claim_token == token], values)
+        return load(db, job_id)

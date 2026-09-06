@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.generation_job import JobCreateRequest, JobResponse
+from app.schemas.generation_job import JobCreateRequest, JobResponse, ClaimResponse, DispatchRequest
 from app.services.job_dispatch import JobDispatchService
 from app.models.generation_job import GenerationJob
 
@@ -23,6 +23,7 @@ def create_job(
         idempotency_key=request.idempotency_key,
         custom_params=request.custom_params,
         max_retries=request.max_retries,
+        reference_images=request.reference_images,
     )
     return job
 
@@ -44,22 +45,37 @@ def get_job(
 @router.post("/jobs/{job_id}/dispatch", response_model=JobResponse)
 async def dispatch_job(
     job_id: uuid.UUID,
+    request: Optional[DispatchRequest] = None,
+    worker_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    job = await JobDispatchService.process_job(db=db, job_id=job_id)
+    claim_token = request.claim_token if request else None
+    job = await JobDispatchService.process_job(
+        db=db, job_id=job_id, claim_token=claim_token, worker_id=worker_id
+    )
     return job
 
 
 @router.post("/jobs/{job_id}/poll", response_model=JobResponse)
 async def poll_job(
     job_id: uuid.UUID,
+    max_polls: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
-    job = await JobDispatchService.poll_job_status(db=db, job_id=job_id)
+    job = await JobDispatchService.poll_job_status(db=db, job_id=job_id, max_polls=max_polls)
     return job
 
 
-@router.post("/queue/claim", response_model=Optional[JobResponse])
+@router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
+async def cancel_job(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    job = await JobDispatchService.cancel_job(db=db, job_id=job_id)
+    return job
+
+
+@router.post("/queue/claim", response_model=Optional[ClaimResponse])
 def claim_next_job(
     worker_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -72,8 +88,8 @@ def claim_next_job(
 def recover_jobs(
     db: Session = Depends(get_db),
 ):
-    count = JobDispatchService.recover_pending_jobs(db=db)
-    return {"recovered_count": count}
+    stats = JobDispatchService.recover_pending_jobs(db=db)
+    return stats
 
 
 @router.get("/shots/{shot_id}/jobs", response_model=List[JobResponse])

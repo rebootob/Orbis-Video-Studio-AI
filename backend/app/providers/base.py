@@ -28,12 +28,17 @@ class VideoGenerationParams(BaseModel):
 
 class ProviderJobResult(BaseModel):
     provider_job_id: str
-    status: Literal["QUEUED", "PROCESSING", "COMPLETED", "FAILED"]
+    status: Literal["QUEUED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
     progress_percentage: Optional[float] = 0.0
     video_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     cost_usd: Optional[float] = None
     error_message: Optional[str] = None
+    # Typed failure metadata; untrusted response text is never used for retry decisions.
+    error_code: Optional[str] = None
+    status_code: Optional[int] = None
+    retryable: bool = False
+    submission_uncertain: bool = False
     raw_response: Optional[Dict[str, Any]] = None
 
 
