@@ -128,6 +128,8 @@ export interface Story {
   theme?: string | null;
   tone?: string | null;
   target_duration_seconds?: number | null;
+  language?: string | null;
+  status?: string;
   is_locked: boolean;
   created_at: string;
   updated_at: string;

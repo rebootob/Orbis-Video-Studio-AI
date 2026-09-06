@@ -49,10 +49,10 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
           onClick={onGenerateFullStoryboard}
           disabled={isRunning}
           data-testid="generate-full-storyboard-btn"
-          title="Automated orchestration: Creates Story, Plans Scenes, and Generates Shot Prompts"
+          title="Generate visual scenes and layout for the storyboard"
         >
           <Sparkles size={16} />
-          {totalShots === 0 ? 'Create Full Storyboard (Auto)' : 'Regenerate Storyboard'}
+          {totalShots === 0 ? 'Generate Storyboard Scenes' : 'Regenerate Storyboard Scenes'}
         </button>
 
         {/* Generate Selected */}
@@ -90,29 +90,32 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
           </button>
         )}
 
-        {/* Stage Review shortcuts */}
+        {/* Stage Inspection shortcuts */}
         {onStageReview && (
           <div style={{ display: 'flex', gap: '4px', marginLeft: '6px' }}>
             <button
               className="btn btn-xs btn-outline"
               onClick={() => onStageReview('STORY')}
-              title="Review Story Brief"
+              title="Inspect Story Brief & Narrative Outline"
+              data-testid="review-stage-story-btn"
             >
-              <BookOpen size={12} /> Story
+              <BookOpen size={12} /> Inspect Story
             </button>
             <button
               className="btn btn-xs btn-outline"
               onClick={() => onStageReview('STORYBOARD')}
-              title="Review Storyboard Structure"
+              title="Inspect Storyboard Scenes & Layout"
+              data-testid="review-stage-storyboard-btn"
             >
-              <Layers size={12} /> Storyboard
+              <Layers size={12} /> Inspect Storyboard
             </button>
             <button
               className="btn btn-xs btn-outline"
               onClick={() => onStageReview('SHOT_PLAN')}
-              title="Review Shot Blueprint"
+              title="Inspect Shot Plan & Prompts"
+              data-testid="review-stage-shot-plan-btn"
             >
-              <Film size={12} /> Shot Plan
+              <Film size={12} /> Inspect Shot Plan
             </button>
           </div>
         )}

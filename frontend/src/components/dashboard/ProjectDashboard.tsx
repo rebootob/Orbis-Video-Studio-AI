@@ -122,35 +122,35 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     }
   };
 
-  const getProgressSummary = (status: string) => {
+  const getStageProgress = (status: string) => {
     switch (status?.toUpperCase()) {
       case 'DRAFT':
-        return { pct: 5, label: '5% • Initial Draft' };
+        return { label: 'Initial Brief & Config', stage: 'Brief / Draft' };
       case 'STORY_GENERATED':
-        return { pct: 20, label: '20% • Story Generated' };
+        return { label: 'Story Outline Generated', stage: 'Story' };
       case 'STORY_APPROVED':
-        return { pct: 30, label: '30% • Story Approved' };
+        return { label: 'Story Outline Approved', stage: 'Story' };
       case 'STORYBOARD_GENERATED':
-        return { pct: 40, label: '40% • Storyboard Generated' };
+        return { label: 'Storyboard Generated', stage: 'Storyboard' };
       case 'STORYBOARD_APPROVED':
-        return { pct: 50, label: '50% • Storyboard Approved' };
+        return { label: 'Storyboard Approved', stage: 'Storyboard' };
       case 'SHOT_PLAN_GENERATED':
-        return { pct: 60, label: '60% • Shot Plan Generated' };
+        return { label: 'Shot Plan & Prompts Formulated', stage: 'Shot Plan' };
       case 'SHOT_PLAN_APPROVED':
-        return { pct: 70, label: '70% • Shot Plan Approved' };
+        return { label: 'Shot Plan Approved', stage: 'Shot Plan' };
       case 'IMAGES_GENERATED':
-        return { pct: 80, label: '80% • Images Ready' };
+        return { label: 'Images / Keyframes Ready', stage: 'Images' };
       case 'VIDEO_IN_PROGRESS':
-        return { pct: 85, label: '85% • Video Generating' };
+        return { label: 'Video Generation In Progress', stage: 'Video' };
       case 'FINAL_REVIEW':
-        return { pct: 95, label: '95% • Final QC & Review' };
+        return { label: 'Final Cut / QC Review', stage: 'Final Review' };
       case 'APPROVED':
       case 'COMPLETED':
-        return { pct: 100, label: '100% • Production Complete' };
+        return { label: 'Production Complete', stage: 'Complete' };
       case 'ARCHIVED':
-        return { pct: 0, label: 'Archived' };
+        return { label: 'Project Archived', stage: 'Archived' };
       default:
-        return { pct: 10, label: `${status || 'Draft'}` };
+        return { label: status ? status.replace(/_/g, ' ') : 'Draft', stage: 'Draft' };
     }
   };
 
@@ -543,24 +543,39 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     </span>
                   </div>
 
-                  {/* Actual Progress Summary */}
+                  {/* Truthful Stage Progress */}
                   {(() => {
-                    const prog = getProgressSummary(project.status);
+                    const prog = getStageProgress(project.status);
                     return (
                       <div style={{ marginTop: '6px', marginBottom: '10px' }} data-testid={`project-progress-${project.id}`}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          <span>Progress</span>
+                          <span>Stage Progress</span>
                           <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{prog.label}</span>
                         </div>
-                        <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--bg-card)', borderRadius: '2px', overflow: 'hidden' }}>
-                          <div
-                            style={{
-                              width: `${prog.pct}%`,
-                              height: '100%',
-                              backgroundColor: prog.pct === 100 ? '#10b981' : 'var(--primary)',
-                              transition: 'width 0.3s ease',
-                            }}
-                          />
+                        <div style={{ display: 'flex', gap: '3px', width: '100%' }}>
+                          {['Brief', 'Story', 'Storyboard', 'Shot Plan', 'Video', 'Complete'].map((step, idx) => {
+                            const stages = ['Brief / Draft', 'Story', 'Storyboard', 'Shot Plan', 'Video', 'Complete'];
+                            const currentIdx = stages.indexOf(prog.stage);
+                            const isPastOrCurrent = currentIdx >= idx;
+                            const isCurrent = currentIdx === idx;
+                            return (
+                              <div
+                                key={step}
+                                style={{
+                                  flex: 1,
+                                  height: '4px',
+                                  borderRadius: '2px',
+                                  backgroundColor: isCurrent
+                                    ? 'var(--primary)'
+                                    : isPastOrCurrent
+                                    ? '#10b981'
+                                    : 'var(--bg-card)',
+                                  transition: 'background-color 0.2s ease',
+                                }}
+                                title={`Stage: ${step}`}
+                              />
+                            );
+                          })}
                         </div>
                       </div>
                     );

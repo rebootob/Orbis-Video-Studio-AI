@@ -4,6 +4,7 @@ import type {
   ProjectCreatePayload,
   Scene,
   Shot,
+  Story,
   GenerationJob,
   BudgetSummary,
   CostLedgerEntry,
@@ -14,6 +15,7 @@ import type {
 import { api } from './api/client';
 import { ProjectDashboard } from './components/dashboard/ProjectDashboard';
 import { NewProjectModal } from './components/new-project/NewProjectModal';
+import { StoryInspectionModal } from './components/workspace/StoryInspectionModal';
 import { WorkspaceHeader } from './components/workspace/WorkspaceHeader';
 import { ModeSpecBanner } from './components/workspace/ModeSpecBanner';
 import { StoryboardGrid } from './components/storyboard/StoryboardGrid';
@@ -51,6 +53,8 @@ export const App: React.FC = () => {
   const [budget, setBudget] = useState<BudgetSummary | null>(null);
   const [ledgerEntries, setLedgerEntries] = useState<CostLedgerEntry[]>([]);
   const [references, setReferences] = useState<ReferenceItem[]>([]);
+  const [story, setStory] = useState<Story | null>(null);
+  const [isStoryInspectionOpen, setIsStoryInspectionOpen] = useState(false);
   const [automationStep, setAutomationStep] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(false);
 
@@ -103,6 +107,10 @@ export const App: React.FC = () => {
       // 5. Load References
       const rItems = await api.listProjectReferences(project.id);
       setReferences(rItems);
+
+      // 6. Load Story (if any)
+      const storyData = await api.getProjectStory(project.id);
+      setStory(storyData);
     } catch (err: any) {
       console.error('Failed to load workspace data', err);
     }
@@ -176,11 +184,13 @@ export const App: React.FC = () => {
     if (!selectedProject) return;
     try {
       setAutomationStep('Generating Story Brief & Narrative Outline...');
-      await api.generateProjectStory(selectedProject.id);
+      const storyRes = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
+      setStory(storyRes);
       await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
       await loadProjects();
+      setIsStoryInspectionOpen(true);
     } catch (err: any) {
       alert(`Story generation failed: ${err.message}`);
     } finally {
@@ -188,13 +198,31 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleApproveStory = async () => {
+    if (!selectedProject) return;
+    await handleUpdateStatus('STORY_APPROVED');
+    setIsStoryInspectionOpen(false);
+  };
+
   // Stage Generator: Storyboard (Scenes & Shot Structure)
   const handleGenerateStoryboard = async () => {
     if (!selectedProject) return;
     try {
       setAutomationStep('Generating Storyboard Scenes & Layout...');
-      if (scenes.length === 0) {
-        await api.generateProjectStory(selectedProject.id);
+      if (selectedProject.video_mode === 'STORY') {
+        if (!story) {
+          const s = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
+          setStory(s);
+          await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
+          await loadWorkspaceData(selectedProject);
+          setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
+          await loadProjects();
+          setIsStoryInspectionOpen(true);
+          return;
+        }
+        await api.generateStoryScenes(story.id, { generate_shots: false });
+      } else {
+        await api.generateProjectStoryboard(selectedProject.id, { generate_shots: false });
       }
       await api.updateProject(selectedProject.id, { status: 'STORYBOARD_GENERATED' });
       await loadWorkspaceData(selectedProject);
@@ -207,18 +235,16 @@ export const App: React.FC = () => {
     }
   };
 
-  // Stage Generator: Detailed Shot Plan & Prompts
+  // Stage Generator: Detailed Shot Plan & Prompts via Backend Service
   const handleGenerateShotPlan = async () => {
     if (!selectedProject) return;
     try {
       setAutomationStep('Formulating Detailed Shot Plan & Prompts...');
-      for (const shot of shots) {
-        if (!shot.visual_prompt && !shot.video_prompt) {
-          await api.updateShot(shot.id, {
-            visual_prompt: `Detailed cinematic camera setup for shot #${shot.shot_number}`,
-            video_prompt: `Dynamic motion and lighting for shot #${shot.shot_number}`,
-          });
-        }
+      if (scenes.length === 0) {
+        throw new Error('Please generate storyboard scenes before generating shot plans.');
+      }
+      for (const scene of scenes) {
+        await api.generateSceneShots(scene.id);
       }
       await api.updateProject(selectedProject.id, { status: 'SHOT_PLAN_GENERATED' });
       await loadWorkspaceData(selectedProject);
@@ -234,7 +260,7 @@ export const App: React.FC = () => {
   // High-Level Automation: Generate Storyboard according to mode
   const handleGenerateFullStoryboard = async () => {
     if (!selectedProject) return;
-    if (selectedProject.video_mode === 'STORY') {
+    if (selectedProject.video_mode === 'STORY' && (!story || selectedProject.status === 'DRAFT')) {
       await handleGenerateStory();
     } else {
       await handleGenerateStoryboard();
@@ -439,7 +465,7 @@ export const App: React.FC = () => {
         handleGenerateStory();
         break;
       case 'APPROVE_STORY':
-        handleUpdateStatus('STORY_APPROVED');
+        setIsStoryInspectionOpen(true);
         break;
       case 'GENERATE_STORYBOARD':
         handleGenerateStoryboard();
@@ -568,11 +594,11 @@ export const App: React.FC = () => {
                 onGenerateShot={handleGenerateShot}
                 onStageReview={(st) => {
                   if (st === 'STORY') {
-                    handleUpdateStatus('STORY_GENERATED' as any);
+                    setIsStoryInspectionOpen(true);
                   } else if (st === 'STORYBOARD') {
-                    handleUpdateStatus('STORYBOARD_GENERATED' as any);
+                    setActiveTab('storyboard');
                   } else if (st === 'SHOT_PLAN') {
-                    handleUpdateStatus('SHOT_PLAN_GENERATED' as any);
+                    setActiveTab('storyboard');
                   }
                 }}
               />
@@ -649,6 +675,19 @@ export const App: React.FC = () => {
         onClose={() => setIsNewProjectOpen(false)}
         onCreate={handleCreateProject}
       />
+
+      {/* Story Inspection Modal */}
+      {selectedProject && (
+        <StoryInspectionModal
+          isOpen={isStoryInspectionOpen}
+          story={story}
+          projectTitle={selectedProject.title}
+          projectStatus={selectedProject.status}
+          onClose={() => setIsStoryInspectionOpen(false)}
+          onApprove={handleApproveStory}
+          onRegenerate={handleGenerateStory}
+        />
+      )}
     </div>
   );
 };

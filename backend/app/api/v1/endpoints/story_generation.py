@@ -64,6 +64,7 @@ def generate_project_story(
             target_audience=request.target_audience,
             custom_instructions=request.custom_instructions,
             options=options,
+            generate_scenes=request.generate_scenes,
         )
         return story
     except CreativeGenerationError as e:
@@ -90,6 +91,34 @@ def generate_story_scenes(
             story_id=story_id,
             custom_instructions=request.custom_instructions,
             options=options,
+            generate_shots=request.generate_shots,
+        )
+        return scenes
+    except CreativeGenerationError as e:
+        raise _map_error(e)
+
+
+@router.post(
+    "/projects/{project_id}/storyboard/generate",
+    response_model=List[SceneResponse],
+    status_code=status.HTTP_200_OK,
+)
+def generate_project_storyboard(
+    project_id: uuid.UUID,
+    request: SceneGenerateRequest = SceneGenerateRequest(),
+    db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
+):
+    """Generate or regenerate storyboard scenes directly for a project (bypassing Story)."""
+    service = StoryGenerationService(db=db, provider=provider)
+    options = GenerationRequestOptions(profile=request.profile)
+
+    try:
+        scenes = service.generate_project_storyboard(
+            project_id=project_id,
+            custom_instructions=request.custom_instructions,
+            options=options,
+            generate_shots=request.generate_shots,
         )
         return scenes
     except CreativeGenerationError as e:

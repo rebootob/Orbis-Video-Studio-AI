@@ -135,8 +135,9 @@ describe('ProjectDashboard', () => {
     expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.getByText('Shots')).toBeInTheDocument();
 
-    // Progress
+    // Truthful Stage Progress
     expect(screen.getByTestId('project-progress-proj-1')).toBeInTheDocument();
-    expect(screen.getByText(/50% • Storyboard Approved/)).toBeInTheDocument();
+    expect(screen.getByText('Stage Progress')).toBeInTheDocument();
+    expect(screen.getByText('Storyboard Approved')).toBeInTheDocument();
   });
 });

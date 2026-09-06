@@ -306,3 +306,141 @@ def test_sanitized_provider_error_response_no_raw_body_leak(monkeypatch):
     assert "sk-test-key-12345" not in exc_info.value.message
     assert exc_info.value.message == "OpenAI provider returned HTTP error 400."
 
+
+def test_regeneration_preserves_history_and_lineage(client, db_session):
+    """Verify that regenerating a story or scenes soft-archives previous records instead of destructively deleting them."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Lineage Retention Project", description="Historical lineage brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # First generation pass
+    resp1 = client.post(f"/api/v1/projects/{project.id}/story/generate", json={"generate_scenes": True})
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    old_scene_ids = [uuid.UUID(s["id"]) for s in data1["scenes"]]
+    old_shot_ids = [uuid.UUID(sh["id"]) for s in data1["scenes"] for sh in s["shots"]]
+    assert len(old_scene_ids) > 0
+    assert len(old_shot_ids) > 0
+
+    # Second generation pass (regeneration)
+    resp2 = client.post(f"/api/v1/projects/{project.id}/story/generate", json={"generate_scenes": True})
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    new_scene_ids = [uuid.UUID(s["id"]) for s in data2["scenes"]]
+    new_shot_ids = [uuid.UUID(sh["id"]) for s in data2["scenes"] for sh in s["shots"]]
+
+    # Verify new records were created
+    assert set(old_scene_ids).isdisjoint(set(new_scene_ids))
+    assert set(old_shot_ids).isdisjoint(set(new_shot_ids))
+
+    # CRITICAL: Verify previous records REMAIN in the database
+    for old_scene_id in old_scene_ids:
+        sc = db_session.get(Scene, old_scene_id)
+        assert sc is not None, f"Scene {old_scene_id} was unexpectedly deleted from DB!"
+        assert (sc.scene_config or {}).get("archived") is True
+
+    for old_shot_id in old_shot_ids:
+        sh = db_session.get(Shot, old_shot_id)
+        assert sh is not None, f"Shot {old_shot_id} was unexpectedly deleted from DB!"
+        assert sh.status == "ARCHIVED"
+
+    # Verify normal list endpoint excludes archived by default, but includes them when requested
+    list_resp = client.get(f"/api/v1/projects/{project.id}/scenes")
+    assert list_resp.status_code == 200
+    active_ids = [s["id"] for s in list_resp.json()]
+    assert all(str(oid) not in active_ids for oid in old_scene_ids)
+
+    list_all_resp = client.get(f"/api/v1/projects/{project.id}/scenes?include_archived=true")
+    assert list_all_resp.status_code == 200
+    all_ids = [s["id"] for s in list_all_resp.json()]
+    assert all(str(oid) in all_ids for oid in old_scene_ids)
+
+
+def test_staged_story_generation_without_scenes(client, db_session):
+    """Verify that STORY mode can generate an inspectable Story artifact without creating scenes/shots before approval."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Staged Story Only Project", description="Story stage brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/projects/{project.id}/story/generate",
+        json={"generate_scenes": False},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "GENERATED"
+    assert "title" in data and data["title"]
+    assert "logline" in data and data["logline"]
+    assert "synopsis" in data and data["synopsis"]
+
+    # Verify NO scenes or shots were created downstream
+    assert len(data["scenes"]) == 0
+    scenes_in_db = db_session.query(Scene).filter(Scene.story_id == uuid.UUID(data["id"])).all()
+    assert len(scenes_in_db) == 0
+
+
+def test_non_story_mode_storyboard_bypass(client, db_session):
+    """Verify that SHORT / LOOP / SCENE modes can generate a storyboard directly without creating a Story entity."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(
+        title="Short Mode Project",
+        description="Viral TikTok hook brief",
+        video_mode="SHORT",
+        status="DRAFT",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    # Call project storyboard generation directly
+    resp = client.post(
+        f"/api/v1/projects/{project.id}/storyboard/generate",
+        json={"generate_shots": False},
+    )
+    assert resp.status_code == 200
+    scenes = resp.json()
+    assert len(scenes) >= 1
+
+    # Verify scenes belong to project directly and story_id is None
+    for sc in scenes:
+        scene_row = db_session.get(Scene, uuid.UUID(sc["id"]))
+        assert scene_row.project_id == project.id
+        assert scene_row.story_id is None
+        # Verify shots not yet generated
+        assert len(scene_row.shots) == 0
+
+    # Verify NO Story record was created
+    story = db_session.query(Story).filter(Story.project_id == project.id).first()
+    assert story is None
+
+
+def test_real_shot_plan_generation_service(client, db_session):
+    """Verify that generating a shot plan uses the real backend service to create detailed prompts."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Shot Planning Project", description="Detailed planning brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=1, heading="INT. CONTROL ROOM")
+    db_session.add(scene)
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/scenes/{scene.id}/shots/generate", json={})
+    assert resp.status_code == 200
+    shots = resp.json()
+    assert len(shots) >= 1
+    shot1 = shots[0]
+    assert shot1["scene_id"] == str(scene.id)
+    assert shot1["shot_type"] == "AI_GENERATED"
+    assert shot1["image_prompt"] is not None and len(shot1["image_prompt"]) > 0
+    assert shot1["video_prompt"] is not None and len(shot1["video_prompt"]) > 0
+    assert shot1["camera"] is not None

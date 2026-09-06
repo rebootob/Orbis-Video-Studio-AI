@@ -181,8 +181,41 @@ export const api = {
     }
   },
 
-  async generateProjectStory(projectId: string, options?: { custom_instructions?: string }): Promise<Story> {
+  async generateProjectStory(
+    projectId: string,
+    options?: { generate_scenes?: boolean; custom_instructions?: string }
+  ): Promise<Story> {
     return request<Story>(`/projects/${projectId}/story/generate`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  async generateStoryScenes(
+    storyId: string,
+    options?: { generate_shots?: boolean; custom_instructions?: string }
+  ): Promise<Scene[]> {
+    return request<Scene[]>(`/stories/${storyId}/scenes/generate`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  async generateProjectStoryboard(
+    projectId: string,
+    options?: { generate_shots?: boolean; custom_instructions?: string }
+  ): Promise<Scene[]> {
+    return request<Scene[]>(`/projects/${projectId}/storyboard/generate`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  async generateSceneShots(
+    sceneId: string,
+    options?: { custom_instructions?: string }
+  ): Promise<Shot[]> {
+    return request<Shot[]>(`/scenes/${sceneId}/shots/generate`, {
       method: 'POST',
       body: JSON.stringify(options || {}),
     });
@@ -197,12 +230,12 @@ export const api = {
     return request<GenerationJob[]>(`/shots/${shotId}/jobs`);
   },
 
-  async createJob(shotId: string, providerName = 'vidu'): Promise<GenerationJob> {
+  async createJob(shotId: string, providerName?: string): Promise<GenerationJob> {
     return request<GenerationJob>('/jobs', {
       method: 'POST',
       body: JSON.stringify({
         shot_id: shotId,
-        provider_name: providerName,
+        provider_name: providerName || undefined,
       }),
     });
   },

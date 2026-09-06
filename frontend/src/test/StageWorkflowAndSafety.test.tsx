@@ -141,3 +141,109 @@ describe('QCHistoryPanel Truthful Stage Actions', () => {
     expect(screen.queryByText('NEEDS ATTENTION')).not.toBeInTheDocument();
   });
 });
+
+describe('StoryInspectionModal Inspectable Artifact & Approval', () => {
+  const mockStory = {
+    id: 'story-123',
+    project_id: 'proj-1',
+    title: 'The Cyber Chronicles',
+    logline: 'A lone courier must deliver data before dawn.',
+    synopsis: 'Full detailed narrative synopsis of the cyber world...',
+    tone: 'Cyberpunk Noir',
+    target_duration: 120,
+    language: 'en',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  it('renders story details, allows inspection, approval, and regeneration', async () => {
+    const { StoryInspectionModal } = await import('../components/workspace/StoryInspectionModal');
+    const handleApprove = vi.fn();
+    const handleRegenerate = vi.fn();
+    const handleClose = vi.fn();
+
+    render(
+      <StoryInspectionModal
+        isOpen={true}
+        story={mockStory}
+        projectTitle="Test Cyber Project"
+        onClose={handleClose}
+        onApprove={handleApprove}
+        onRegenerate={handleRegenerate}
+      />
+    );
+
+    expect(screen.getByText('Inspect Story Brief & Narrative Outline')).toBeInTheDocument();
+    expect(screen.getByText('The Cyber Chronicles')).toBeInTheDocument();
+    expect(screen.getByText('A lone courier must deliver data before dawn.')).toBeInTheDocument();
+    expect(screen.getByText('Full detailed narrative synopsis of the cyber world...')).toBeInTheDocument();
+
+    const approveBtn = screen.getByTestId('story-approve-btn');
+    fireEvent.click(approveBtn);
+    expect(handleApprove).toHaveBeenCalledTimes(1);
+
+    const regenBtn = screen.getByTestId('story-regenerate-btn');
+    fireEvent.click(regenBtn);
+    expect(handleRegenerate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AutomationBar Reworded Action & Stage Shortcuts', () => {
+  it('renders reworded Generate Storyboard Scenes button and inspection shortcuts', async () => {
+    const { AutomationBar } = await import('../components/storyboard/AutomationBar');
+    const handleGenerate = vi.fn();
+    const handleStageReview = vi.fn();
+
+    render(
+      <AutomationBar
+        automationStep={null}
+        totalShots={0}
+        selectedShotCount={0}
+        hasFailedJobs={false}
+        onGenerateFullStoryboard={handleGenerate}
+        onBatchGenerateShots={vi.fn()}
+        onGenerateSelectedShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+        onStageReview={handleStageReview}
+      />
+    );
+
+    const generateBtn = screen.getByTestId('generate-full-storyboard-btn');
+    expect(generateBtn).toHaveTextContent('Generate Storyboard Scenes');
+
+    const inspectStoryBtn = screen.getByTestId('review-stage-story-btn');
+    fireEvent.click(inspectStoryBtn);
+    expect(handleStageReview).toHaveBeenCalledWith('STORY');
+
+    const inspectStoryboardBtn = screen.getByTestId('review-stage-storyboard-btn');
+    fireEvent.click(inspectStoryboardBtn);
+    expect(handleStageReview).toHaveBeenCalledWith('STORYBOARD');
+  });
+});
+
+describe('Provider-Neutral Single-Shot Routing', () => {
+  it('omits provider_name when not explicitly provided to allow backend config resolution', async () => {
+    const { api } = await import('../api/client');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        id: 'job-1',
+        shot_id: 'shot-1',
+        provider_name: 'vidu',
+        status: 'PENDING',
+      }),
+    } as any);
+
+    await api.createJob('shot-1');
+
+    expect(fetchSpy).toHaveBeenCalled();
+    const lastCall = fetchSpy.mock.calls[0];
+    const bodyObj = JSON.parse(lastCall[1]?.body as string);
+    // provider_name must NOT be present or must be undefined so backend config resolves
+    expect(bodyObj.provider_name).toBeUndefined();
+    expect(bodyObj.shot_id).toBe('shot-1');
+
+    fetchSpy.mockRestore();
+  });
+});

@@ -127,23 +127,30 @@ class StoryGenerationService:
         target_audience: Optional[str] = None,
         custom_instructions: Optional[str] = None,
         options: Optional[GenerationRequestOptions] = None,
+        generate_scenes: bool = True,
     ) -> Story:
-        """Orchestrates complete Story, Scene, and Shot generation for a Project."""
+        """Orchestrates complete Story generation for a Project, optionally generating scenes and shots."""
         # 1. Fetch Project
         project = self.db.get(Project, project_id)
         if not project:
             raise CreativeGenerationError(
-                "PROJECT_NOT_FOUND", f"Project with ID '{project_id}' not found."
+                "PROJECT_NOT_FOUND", f"Project '{project_id}' not found."
             )
 
-        # 2. Check existing Story lock state
+        # 2. Check Project Lock
+        if getattr(project, "is_locked", False):
+            raise CreativeGenerationError(
+                "PROJECT_LOCKED", f"Project '{project_id}' is locked against modification."
+            )
+
+        # 3. Check Existing Story Lock
         existing_story = self.db.query(Story).filter(Story.project_id == project_id).first()
         if existing_story and existing_story.is_locked:
             raise CreativeGenerationError(
-                "STORY_LOCKED", f"Story for project '{project_id}' is locked and cannot be regenerated."
+                "STORY_LOCKED", f"Story for project '{project_id}' is locked against regeneration."
             )
 
-        # 3. Gather extracted document facts from WP004
+        # 4. Gather extracted document facts from WP004
         doc_extractions = self._gather_document_extractions(project_id)
 
         # 4. NO_SOURCE_CONTEXT Guard: verify at least one source of context is provided
@@ -162,7 +169,7 @@ class StoryGenerationService:
         ref_context = ReferenceContextBuilder.build_context(self.db, project_id)
         ref_text = ReferenceContextBuilder.format_prompt_section(ref_context)
 
-        # 6. Compose prompt
+        # 6. Compose Prompt
         prompt = StoryPromptComposer.compose(
             project_title=project.title,
             project_brief=project.description,
@@ -232,10 +239,15 @@ class StoryGenerationService:
                 story.language = story_dto.language
                 story.status = "GENERATED"
 
-                # Remove unlocked old scenes (cascade will remove shots)
-                for scene in list(story.scenes):
-                    if not scene.is_locked:
-                        self.db.delete(scene)
+                if generate_scenes:
+                    # Soft-archive unlocked old scenes and shots to retain full history and lineage
+                    for scene in list(story.scenes):
+                        if not scene.is_locked:
+                            scene.scene_config = dict(scene.scene_config or {})
+                            scene.scene_config["archived"] = True
+                            for shot in scene.shots:
+                                if not shot.is_locked:
+                                    shot.status = "ARCHIVED"
             else:
                 story = Story(
                     id=uuid.uuid4(),
@@ -251,38 +263,39 @@ class StoryGenerationService:
                 self.db.add(story)
                 self.db.flush()
 
-            # Add generated scenes and shots
-            for s_dto in story_dto.scenes:
-                scene = Scene(
-                    id=uuid.uuid4(),
-                    story_id=story.id,
-                    scene_number=s_dto.scene_number,
-                    heading=s_dto.title,
-                    purpose=s_dto.purpose,
-                    setting=s_dto.setting,
-                    duration_seconds=s_dto.duration_seconds,
-                    narration=s_dto.narration,
-                    dialogue=s_dto.dialogue,
-                )
-                self.db.add(scene)
-                self.db.flush()
-
-                for sh_dto in s_dto.shots:
-                    shot = Shot(
+            # Add generated scenes and shots only when generate_scenes is True
+            if generate_scenes:
+                for s_dto in story_dto.scenes:
+                    scene = Scene(
                         id=uuid.uuid4(),
-                        scene_id=scene.id,
-                        shot_number=sh_dto.shot_number,
-                        shot_type="AI_GENERATED",
-                        visual_prompt=sh_dto.description,
-                        image_prompt=sh_dto.image_prompt,
-                        video_prompt=sh_dto.video_prompt,
-                        camera=sh_dto.camera,
-                        subject=sh_dto.subject,
-                        action=sh_dto.action,
-                        duration_seconds=sh_dto.duration_seconds,
-                        status="PENDING",
+                        story_id=story.id,
+                        scene_number=s_dto.scene_number,
+                        heading=s_dto.title,
+                        purpose=s_dto.purpose,
+                        setting=s_dto.setting,
+                        duration_seconds=s_dto.duration_seconds,
+                        narration=s_dto.narration,
+                        dialogue=s_dto.dialogue,
                     )
-                    self.db.add(shot)
+                    self.db.add(scene)
+                    self.db.flush()
+
+                    for sh_dto in s_dto.shots:
+                        shot = Shot(
+                            id=uuid.uuid4(),
+                            scene_id=scene.id,
+                            shot_number=sh_dto.shot_number,
+                            shot_type="AI_GENERATED",
+                            visual_prompt=sh_dto.description,
+                            image_prompt=sh_dto.image_prompt,
+                            video_prompt=sh_dto.video_prompt,
+                            camera=sh_dto.camera,
+                            subject=sh_dto.subject,
+                            action=sh_dto.action,
+                            duration_seconds=sh_dto.duration_seconds,
+                            status="PENDING",
+                        )
+                        self.db.add(shot)
 
             self.db.commit()
             self.db.refresh(story)
@@ -298,8 +311,9 @@ class StoryGenerationService:
         story_id: uuid.UUID,
         custom_instructions: Optional[str] = None,
         options: Optional[GenerationRequestOptions] = None,
+        generate_shots: bool = True,
     ) -> List[Scene]:
-        """Regenerates/Generates scenes for an existing story context."""
+        """Regenerates/Generates scenes for an existing story context with history retention."""
         story = self.db.get(Story, story_id)
         if not story:
             raise CreativeGenerationError("STORY_NOT_FOUND", f"Story with ID '{story_id}' not found.")
@@ -363,10 +377,14 @@ class StoryGenerationService:
                 commit=False,
             )
 
-            # Remove unlocked scenes
+            # Soft-archive unlocked scenes and shots to retain full history and lineage
             for scene in list(story.scenes):
                 if not scene.is_locked:
-                    self.db.delete(scene)
+                    scene.scene_config = dict(scene.scene_config or {})
+                    scene.scene_config["archived"] = True
+                    for shot in scene.shots:
+                        if not shot.is_locked:
+                            shot.status = "ARCHIVED"
 
             created_scenes = []
             for s_dto in scenes_dto:
@@ -384,22 +402,23 @@ class StoryGenerationService:
                 self.db.add(scene)
                 self.db.flush()
 
-                for sh_dto in s_dto.shots:
-                    shot = Shot(
-                        id=uuid.uuid4(),
-                        scene_id=scene.id,
-                        shot_number=sh_dto.shot_number,
-                        shot_type="AI_GENERATED",
-                        visual_prompt=sh_dto.description,
-                        image_prompt=sh_dto.image_prompt,
-                        video_prompt=sh_dto.video_prompt,
-                        camera=sh_dto.camera,
-                        subject=sh_dto.subject,
-                        action=sh_dto.action,
-                        duration_seconds=sh_dto.duration_seconds,
-                        status="PENDING",
-                    )
-                    self.db.add(shot)
+                if generate_shots:
+                    for sh_dto in s_dto.shots:
+                        shot = Shot(
+                            id=uuid.uuid4(),
+                            scene_id=scene.id,
+                            shot_number=sh_dto.shot_number,
+                            shot_type="AI_GENERATED",
+                            visual_prompt=sh_dto.description,
+                            image_prompt=sh_dto.image_prompt,
+                            video_prompt=sh_dto.video_prompt,
+                            camera=sh_dto.camera,
+                            subject=sh_dto.subject,
+                            action=sh_dto.action,
+                            duration_seconds=sh_dto.duration_seconds,
+                            status="PENDING",
+                        )
+                        self.db.add(shot)
                 created_scenes.append(scene)
 
             self.db.commit()
@@ -481,10 +500,10 @@ class StoryGenerationService:
                 commit=False,
             )
 
-            # Remove unlocked shots
+            # Soft-archive unlocked old shots to preserve history and lineage
             for shot in list(scene.shots):
                 if not shot.is_locked:
-                    self.db.delete(shot)
+                    shot.status = "ARCHIVED"
 
             created_shots = []
             for sh_dto in shots_dto:
@@ -507,6 +526,139 @@ class StoryGenerationService:
 
             self.db.commit()
             return created_shots
+        except CreativeGenerationError:
+            raise
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def generate_project_storyboard(
+        self,
+        project_id: uuid.UUID,
+        custom_instructions: Optional[str] = None,
+        options: Optional[GenerationRequestOptions] = None,
+        generate_shots: bool = False,
+    ) -> List[Scene]:
+        """Generates storyboard scenes directly for a project (for SHORT, LOOP, SCENE modes bypassing Story)."""
+        project = self.db.get(Project, project_id)
+        if not project:
+            raise CreativeGenerationError("PROJECT_NOT_FOUND", f"Project with ID '{project_id}' not found.")
+        if getattr(project, "is_locked", False):
+            raise CreativeGenerationError("PROJECT_LOCKED", "Project is locked.")
+
+        # If project has an existing story context, delegate to generate_story_scenes
+        if project.story:
+            return self.generate_story_scenes(
+                story_id=project.story.id,
+                custom_instructions=custom_instructions,
+                options=options,
+                generate_shots=generate_shots,
+            )
+
+        doc_extractions = self._gather_document_extractions(project_id)
+
+        prompt = ScenePromptComposer.compose(
+            story_title=project.title,
+            logline=project.description or f"{project.video_mode} project",
+            synopsis=project.description or f"{project.video_mode} production layout",
+            extracted_documents=doc_extractions,
+            target_duration_seconds=project.target_duration_seconds or 30.0,
+            tone="cinematic",
+            language="th",
+            custom_instructions=custom_instructions,
+        )
+
+        from app.services.budget import BudgetService
+        from app.services.pricing import ProviderPricingService
+        model_name = (getattr(options, "model_override", None) or getattr(options, "model", None)) or "gpt-4o"
+        est_cost, _, _ = ProviderPricingService.estimate_cost(
+            provider="openai",
+            operation="STORY_GENERATION",
+            model=model_name,
+            params={
+                "prompt_tokens": max(1, len(prompt) // 4),
+                "completion_tokens": 500,
+            },
+        )
+        try:
+            BudgetService.check_budget_before_dispatch(self.db, project_id, estimated_cost=est_cost)
+        except Exception as exc:
+            raise CreativeGenerationError(
+                "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+            )
+
+        start_time = time.perf_counter()
+        try:
+            res = self.provider.generate_scenes(prompt=prompt, options=options)
+            scenes_dto: List[GeneratedSceneDTO] = res.data
+        except CreativeGenerationError as e:
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            self._log_audit(
+                project_id=project_id,
+                request_type="SCENE_GENERATE",
+                error=e,
+                duration_ms=duration_ms,
+                commit=True,
+            )
+            raise e
+
+        try:
+            self._log_audit(
+                project_id=project_id,
+                request_type="SCENE_GENERATE",
+                result=res,
+                duration_ms=res.duration_ms,
+                commit=False,
+            )
+
+            # Soft-archive unlocked scenes directly associated with project
+            existing_scenes = self.db.query(Scene).filter(Scene.project_id == project_id).all()
+            for scene in existing_scenes:
+                if not scene.is_locked:
+                    scene.scene_config = dict(scene.scene_config or {})
+                    scene.scene_config["archived"] = True
+                    for shot in scene.shots:
+                        if not shot.is_locked:
+                            shot.status = "ARCHIVED"
+
+            created_scenes = []
+            for s_dto in scenes_dto:
+                scene = Scene(
+                    id=uuid.uuid4(),
+                    project_id=project_id,
+                    story_id=None,
+                    scene_number=s_dto.scene_number,
+                    heading=s_dto.title,
+                    purpose=s_dto.purpose,
+                    setting=s_dto.setting,
+                    duration_seconds=s_dto.duration_seconds,
+                    narration=s_dto.narration,
+                    dialogue=s_dto.dialogue,
+                )
+                self.db.add(scene)
+                self.db.flush()
+
+                if generate_shots:
+                    for sh_dto in s_dto.shots:
+                        shot = Shot(
+                            id=uuid.uuid4(),
+                            scene_id=scene.id,
+                            shot_number=sh_dto.shot_number,
+                            shot_type="AI_GENERATED",
+                            visual_prompt=sh_dto.description,
+                            image_prompt=sh_dto.image_prompt,
+                            video_prompt=sh_dto.video_prompt,
+                            camera=sh_dto.camera,
+                            subject=sh_dto.subject,
+                            action=sh_dto.action,
+                            duration_seconds=sh_dto.duration_seconds,
+                            status="PENDING",
+                        )
+                        self.db.add(shot)
+                created_scenes.append(scene)
+
+            self.db.commit()
+            return created_scenes
         except CreativeGenerationError:
             raise
         except Exception:
