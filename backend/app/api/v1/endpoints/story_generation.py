@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.story import Story
+from app.models.story_version import StoryVersion
 from app.schemas.story_generation import (
     StoryGenerateRequest,
     SceneGenerateRequest,
     ShotGenerateRequest,
     StoryResponse,
+    StoryVersionResponse,
     SceneResponse,
     ShotResponse,
 )
@@ -26,7 +28,7 @@ router = APIRouter()
 def _map_error(e: CreativeGenerationError) -> HTTPException:
     if e.code in ("PROJECT_NOT_FOUND", "STORY_NOT_FOUND", "SCENE_NOT_FOUND"):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
-    elif e.code in ("STORY_LOCKED", "SCENE_LOCKED", "SHOT_LOCKED"):
+    elif e.code in ("STORY_LOCKED", "SCENE_LOCKED", "SHOT_LOCKED", "STAGE_NOT_APPROVED"):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
     elif e.code in ("NO_SOURCE_CONTEXT", "SOURCE_EXTRACTION_NOT_READY"):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message)
@@ -168,3 +170,22 @@ def get_project_story(
             detail=f"Story record not found for Project '{project_id}'.",
         )
     return story
+
+
+@router.get(
+    "/projects/{project_id}/story/versions",
+    response_model=List[StoryVersionResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_project_story_versions(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Retrieve full revision history / snapshots for Project Story."""
+    versions = (
+        db.query(StoryVersion)
+        .filter(StoryVersion.project_id == project_id)
+        .order_by(StoryVersion.version_number.desc())
+        .all()
+    )
+    return versions

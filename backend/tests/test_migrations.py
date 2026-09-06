@@ -312,8 +312,8 @@ def test_009_cost_ledger_and_budget_lifecycle(tmp_path, monkeypatch):
         a_row = conn.execute(select(adjustments).where(adjustments.c.id == a_id)).mappings().first()
         assert a_row["adjusted_cost"] == 0.15
 
-    # 3. Downgrade -1 (to 008)
-    command.downgrade(cfg, "-1")
+    # 3. Downgrade to 008
+    command.downgrade(cfg, "008_hybrid_shot_locks_modes")
     meta3 = MetaData()
     meta3.reflect(bind=engine)
     assert "usage_ledger" not in meta3.tables
@@ -367,4 +367,80 @@ def test_009_cost_ledger_and_budget_lifecycle(tmp_path, monkeypatch):
         with engine.begin() as conn:
             conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="POLL", provider_event_id="evt-uniq-1", created_at=now, updated_at=now))
 
+    engine.dispose()
+
+
+def test_010_story_version_history_lifecycle(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+    url = f"sqlite:///{tmp_path / 'wp010_migration.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to 009
+    command.upgrade(cfg, "009_cost_ledger_and_budget")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "story_versions" not in meta.tables
+
+    # 2. Upgrade to head (010)
+    command.upgrade(cfg, "head")
+    meta2 = MetaData()
+    meta2.reflect(bind=engine)
+    assert "story_versions" in meta2.tables
+    stories_tbl = Table("stories", meta2, autoload_with=engine)
+    stories_tbl.c.id.type = Uuid()
+    stories_tbl.c.project_id.type = Uuid()
+    assert "version_number" in stories_tbl.c
+
+    story_versions_tbl = Table("story_versions", meta2, autoload_with=engine)
+    story_versions_tbl.c.id.type = Uuid()
+    story_versions_tbl.c.story_id.type = Uuid()
+    story_versions_tbl.c.project_id.type = Uuid()
+
+    # Insert sample story version record
+    now = datetime.now(timezone.utc)
+    s_id = uuid.uuid4()
+    p_id = uuid.uuid4()
+    v_id = uuid.uuid4()
+
+    projects_tbl = Table("projects", meta2, autoload_with=engine)
+    projects_tbl.c.id.type = Uuid()
+
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(id=p_id, title="Test", status="DRAFT", created_at=now, updated_at=now))
+        conn.execute(stories_tbl.insert().values(id=s_id, project_id=p_id, version_number=1, status="DRAFT", is_locked=False, created_at=now, updated_at=now))
+        conn.execute(story_versions_tbl.insert().values(
+            id=v_id,
+            story_id=s_id,
+            project_id=p_id,
+            version_number=1,
+            title="Initial Title",
+            logline="Initial Logline",
+            synopsis="Initial Synopsis",
+            status="SUPERSEDED",
+            created_at=now,
+        ))
+
+    with engine.connect() as conn:
+        row = conn.execute(select(story_versions_tbl).where(story_versions_tbl.c.id == v_id)).mappings().first()
+        assert row["title"] == "Initial Title"
+        assert row["version_number"] == 1
+
+    # 3. Downgrade -1 (to 009)
+    command.downgrade(cfg, "-1")
+    meta3 = MetaData()
+    meta3.reflect(bind=engine)
+    assert "story_versions" not in meta3.tables
+
+    # 4. Re-upgrade to head (010)
+    command.upgrade(cfg, "head")
+    meta4 = MetaData()
+    meta4.reflect(bind=engine)
+    assert "story_versions" in meta4.tables
     engine.dispose()

@@ -122,36 +122,74 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     }
   };
 
-  const getStageProgress = (status: string) => {
+  const getStageProgress = (status: string, videoMode?: VideoMode) => {
+    const isStoryMode = videoMode === 'STORY';
+    const isArchived = status?.toUpperCase() === 'ARCHIVED';
+
+    const stages = isStoryMode
+      ? ['Brief', 'Story', 'Storyboard', 'Shot Plan', 'Images', 'Video', 'Complete']
+      : ['Brief', 'Storyboard', 'Shot Plan', 'Images', 'Video', 'Complete'];
+
+    let label = 'Initial Brief & Config';
+    let currentStage = 'Brief';
+
     switch (status?.toUpperCase()) {
       case 'DRAFT':
-        return { label: 'Initial Brief & Config', stage: 'Brief / Draft' };
+        label = 'Initial Brief & Config';
+        currentStage = 'Brief';
+        break;
       case 'STORY_GENERATED':
-        return { label: 'Story Outline Generated', stage: 'Story' };
+        label = 'Story Outline Generated';
+        currentStage = isStoryMode ? 'Story' : 'Brief';
+        break;
       case 'STORY_APPROVED':
-        return { label: 'Story Outline Approved', stage: 'Story' };
+        label = 'Story Outline Approved';
+        currentStage = isStoryMode ? 'Story' : 'Brief';
+        break;
       case 'STORYBOARD_GENERATED':
-        return { label: 'Storyboard Generated', stage: 'Storyboard' };
+        label = 'Storyboard Generated';
+        currentStage = 'Storyboard';
+        break;
       case 'STORYBOARD_APPROVED':
-        return { label: 'Storyboard Approved', stage: 'Storyboard' };
+        label = 'Storyboard Approved';
+        currentStage = 'Storyboard';
+        break;
       case 'SHOT_PLAN_GENERATED':
-        return { label: 'Shot Plan & Prompts Formulated', stage: 'Shot Plan' };
+        label = 'Shot Plan Formulated';
+        currentStage = 'Shot Plan';
+        break;
       case 'SHOT_PLAN_APPROVED':
-        return { label: 'Shot Plan Approved', stage: 'Shot Plan' };
+        label = 'Shot Plan Approved';
+        currentStage = 'Shot Plan';
+        break;
       case 'IMAGES_GENERATED':
-        return { label: 'Images / Keyframes Ready', stage: 'Images' };
+        label = 'Images / Keyframes Ready';
+        currentStage = 'Images';
+        break;
       case 'VIDEO_IN_PROGRESS':
-        return { label: 'Video Generation In Progress', stage: 'Video' };
+        label = 'Video Generation In Progress';
+        currentStage = 'Video';
+        break;
       case 'FINAL_REVIEW':
-        return { label: 'Final Cut / QC Review', stage: 'Final Review' };
+      case 'READY_FOR_REVIEW':
+        label = 'Final Cut / QC Review';
+        currentStage = 'Video';
+        break;
       case 'APPROVED':
       case 'COMPLETED':
-        return { label: 'Production Complete', stage: 'Complete' };
+        label = 'Production Complete';
+        currentStage = 'Complete';
+        break;
       case 'ARCHIVED':
-        return { label: 'Project Archived', stage: 'Archived' };
+        label = 'Project Archived';
+        currentStage = 'Archived';
+        break;
       default:
-        return { label: status ? status.replace(/_/g, ' ') : 'Draft', stage: 'Draft' };
+        label = status ? status.replace(/_/g, ' ') : 'Draft';
+        currentStage = 'Brief';
     }
+
+    return { label, currentStage, stages, isArchived };
   };
 
   const handleStartRename = (project: Project, e: React.MouseEvent) => {
@@ -543,9 +581,10 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     </span>
                   </div>
 
-                  {/* Truthful Stage Progress */}
+                  {/* Truthful Mode-Aware Stage Progress */}
                   {(() => {
-                    const prog = getStageProgress(project.status);
+                    const prog = getStageProgress(project.status, project.video_mode);
+                    const currentIdx = prog.stages.indexOf(prog.currentStage);
                     return (
                       <div style={{ marginTop: '6px', marginBottom: '10px' }} data-testid={`project-progress-${project.id}`}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
@@ -553,11 +592,9 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                           <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{prog.label}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '3px', width: '100%' }}>
-                          {['Brief', 'Story', 'Storyboard', 'Shot Plan', 'Video', 'Complete'].map((step, idx) => {
-                            const stages = ['Brief / Draft', 'Story', 'Storyboard', 'Shot Plan', 'Video', 'Complete'];
-                            const currentIdx = stages.indexOf(prog.stage);
-                            const isPastOrCurrent = currentIdx >= idx;
-                            const isCurrent = currentIdx === idx;
+                          {prog.stages.map((step, idx) => {
+                            const isPastOrCurrent = !prog.isArchived && currentIdx >= idx;
+                            const isCurrent = !prog.isArchived && currentIdx === idx;
                             return (
                               <div
                                 key={step}
@@ -573,6 +610,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                                   transition: 'background-color 0.2s ease',
                                 }}
                                 title={`Stage: ${step}`}
+                                data-testid={`stage-segment-${step.toLowerCase().replace(/\s+/g, '-')}`}
                               />
                             );
                           })}

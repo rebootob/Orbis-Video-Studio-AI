@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, TYPE_CHECKING
-from sqlalchemy import String, Text, Float, Boolean, DateTime, ForeignKey, func
+from sqlalchemy import String, Text, Float, Boolean, Integer, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -9,6 +9,7 @@ from app.db.base_class import Base
 if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.scene import Scene
+    from app.models.story_version import StoryVersion
 
 
 def utc_now() -> datetime:
@@ -35,6 +36,7 @@ class Story(Base):
     language: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="DRAFT", nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -47,4 +49,10 @@ class Story(Base):
     project: Mapped["Project"] = relationship("Project", back_populates="story")
     scenes: Mapped[List["Scene"]] = relationship(
         "Scene", back_populates="story", cascade="all, delete-orphan", order_by="Scene.scene_number"
+    )
+    versions: Mapped[List["StoryVersion"]] = relationship(
+        "StoryVersion",
+        back_populates="story",
+        cascade="all, delete-orphan",
+        order_by="StoryVersion.version_number.desc()",
     )

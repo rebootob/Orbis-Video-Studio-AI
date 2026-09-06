@@ -219,6 +219,52 @@ describe('AutomationBar Reworded Action & Stage Shortcuts', () => {
     fireEvent.click(inspectStoryboardBtn);
     expect(handleStageReview).toHaveBeenCalledWith('STORYBOARD');
   });
+
+  it('disables Storyboard generation when STORY is unapproved, and disables Batch generation when SHOT_PLAN is unapproved', async () => {
+    const { AutomationBar } = await import('../components/storyboard/AutomationBar');
+
+    // In STORY mode at STORY_GENERATED stage (unapproved story)
+    const { rerender } = render(
+      <AutomationBar
+        automationStep={null}
+        totalShots={0}
+        selectedShotCount={0}
+        hasFailedJobs={false}
+        projectStatus="STORY_GENERATED"
+        videoMode="STORY"
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onGenerateSelectedShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />
+    );
+
+    const generateBtn = screen.getByTestId('generate-full-storyboard-btn');
+    expect(generateBtn).toBeDisabled();
+    expect(generateBtn).toHaveAttribute('title', expect.stringContaining('Story outline must be approved'));
+
+    // Batch generate button must also be disabled when not SHOT_PLAN_APPROVED
+    const batchBtn = screen.getByTestId('batch-generate-shots-btn');
+    expect(batchBtn).toBeDisabled();
+
+    // Rerender after Story approval: Storyboard button becomes enabled
+    rerender(
+      <AutomationBar
+        automationStep={null}
+        totalShots={0}
+        selectedShotCount={0}
+        hasFailedJobs={false}
+        projectStatus="STORY_APPROVED"
+        videoMode="STORY"
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onGenerateSelectedShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('generate-full-storyboard-btn')).not.toBeDisabled();
+  });
 });
 
 describe('Provider-Neutral Single-Shot Routing', () => {

@@ -140,4 +140,46 @@ describe('ProjectDashboard', () => {
     expect(screen.getByText('Stage Progress')).toBeInTheDocument();
     expect(screen.getByText('Storyboard Approved')).toBeInTheDocument();
   });
+
+  it('renders mode-aware progress rail with Images stage for STORY and SHORT modes', () => {
+    const storyProject: Project = {
+      ...mockProjects[0],
+      video_mode: 'STORY',
+      status: 'IMAGES_GENERATED',
+    };
+    const shortProject: Project = {
+      ...mockProjects[1],
+      video_mode: 'SHORT',
+      status: 'IMAGES_GENERATED',
+    };
+
+    const { rerender } = render(
+      <ProjectDashboard
+        projects={[storyProject]}
+        loading={false}
+        onSelectProject={vi.fn()}
+        onOpenNewProjectModal={vi.fn()}
+        onDeleteProject={vi.fn()}
+      />
+    );
+
+    // In STORY mode, Story and Images segments are present
+    expect(screen.getByTitle('Stage: Story')).toBeInTheDocument();
+    expect(screen.getByTitle('Stage: Images')).toBeInTheDocument();
+    expect(screen.getByText('Images / Keyframes Ready')).toBeInTheDocument();
+
+    rerender(
+      <ProjectDashboard
+        projects={[shortProject]}
+        loading={false}
+        onSelectProject={vi.fn()}
+        onOpenNewProjectModal={vi.fn()}
+        onDeleteProject={vi.fn()}
+      />
+    );
+
+    // In SHORT mode, Story stage is bypassed from the rail, but Images is present
+    expect(screen.queryByTitle('Stage: Story')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Stage: Images')).toBeInTheDocument();
+  });
 });

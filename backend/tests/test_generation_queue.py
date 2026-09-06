@@ -43,7 +43,7 @@ def deny_live_http(monkeypatch):
 
 
 def make_shot(db):
-    project = Project(id=uuid.uuid4(), title="Queue test")
+    project = Project(id=uuid.uuid4(), title="Queue test", status="SHOT_PLAN_APPROVED")
     story = Story(id=uuid.uuid4(), project_id=project.id, logline="Test")
     scene = Scene(id=uuid.uuid4(), story_id=story.id, scene_number=1, heading="EXT. PARK")
     shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="AI_GENERATED",

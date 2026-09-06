@@ -271,7 +271,7 @@ def test_project_queue_and_batch_endpoints(client: TestClient, db_session: Sessi
         id=uuid.uuid4(),
         title="Queue Test Project",
         video_mode="SHORT",
-        status="DRAFT",
+        status="SHOT_PLAN_APPROVED",
     )
     db_session.add(proj)
     db_session.commit()
@@ -473,7 +473,7 @@ def test_scene_and_shot_soft_archive_preserves_full_history(client: TestClient, 
 
 
 def test_batch_job_estimate_and_selected_generation(client: TestClient, db_session: Session):
-    proj = Project(id=uuid.uuid4(), title="Estimate & Selected Project", video_mode="SHORT")
+    proj = Project(id=uuid.uuid4(), title="Estimate & Selected Project", video_mode="SHORT", status="SHOT_PLAN_APPROVED")
     db_session.add(proj)
     db_session.commit()
 

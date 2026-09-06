@@ -3,7 +3,8 @@ import time
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.project import Project
-from app.models.story import Story
+from app.models.story import Story, utc_now
+from app.models.story_version import StoryVersion
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.asset import Asset
@@ -127,7 +128,7 @@ class StoryGenerationService:
         target_audience: Optional[str] = None,
         custom_instructions: Optional[str] = None,
         options: Optional[GenerationRequestOptions] = None,
-        generate_scenes: bool = True,
+        generate_scenes: bool = False,
     ) -> Story:
         """Orchestrates complete Story generation for a Project, optionally generating scenes and shots."""
         # 1. Fetch Project
@@ -231,6 +232,26 @@ class StoryGenerationService:
 
             if existing_story:
                 story = existing_story
+                # Retain full history: Snapshot previous Story revision before overwriting
+                prev_version = getattr(story, "version_number", 1) or 1
+                snapshot = StoryVersion(
+                    id=uuid.uuid4(),
+                    story_id=story.id,
+                    project_id=project_id,
+                    version_number=prev_version,
+                    title=story.title,
+                    logline=story.logline,
+                    synopsis=story.synopsis,
+                    tone=story.tone,
+                    target_duration_seconds=story.target_duration_seconds,
+                    language=story.language,
+                    status="SUPERSEDED",
+                    created_at=story.updated_at or utc_now(),
+                )
+                self.db.add(snapshot)
+                self.db.flush()
+
+                story.version_number = prev_version + 1
                 story.title = story_dto.title
                 story.logline = story_dto.logline
                 story.synopsis = story_dto.synopsis
@@ -239,15 +260,14 @@ class StoryGenerationService:
                 story.language = story_dto.language
                 story.status = "GENERATED"
 
-                if generate_scenes:
-                    # Soft-archive unlocked old scenes and shots to retain full history and lineage
-                    for scene in list(story.scenes):
-                        if not scene.is_locked:
-                            scene.scene_config = dict(scene.scene_config or {})
-                            scene.scene_config["archived"] = True
-                            for shot in scene.shots:
-                                if not shot.is_locked:
-                                    shot.status = "ARCHIVED"
+                # Invalidate/supersede downstream storyboard & shots when upstream story outline changes
+                for scene in list(story.scenes):
+                    if not scene.is_locked:
+                        scene.scene_config = dict(scene.scene_config or {})
+                        scene.scene_config["archived"] = True
+                        for shot in scene.shots:
+                            if not shot.is_locked:
+                                shot.status = "ARCHIVED"
             else:
                 story = Story(
                     id=uuid.uuid4(),
@@ -259,6 +279,7 @@ class StoryGenerationService:
                     target_duration_seconds=story_dto.target_duration_seconds,
                     language=story_dto.language,
                     status="GENERATED",
+                    version_number=1,
                 )
                 self.db.add(story)
                 self.db.flush()
@@ -311,7 +332,7 @@ class StoryGenerationService:
         story_id: uuid.UUID,
         custom_instructions: Optional[str] = None,
         options: Optional[GenerationRequestOptions] = None,
-        generate_shots: bool = True,
+        generate_shots: bool = False,
     ) -> List[Scene]:
         """Regenerates/Generates scenes for an existing story context with history retention."""
         story = self.db.get(Story, story_id)
@@ -319,6 +340,26 @@ class StoryGenerationService:
             raise CreativeGenerationError("STORY_NOT_FOUND", f"Story with ID '{story_id}' not found.")
         if story.is_locked:
             raise CreativeGenerationError("STORY_LOCKED", "Story is locked.")
+
+        # Gate enforcement for STORY mode:
+        project = self.db.get(Project, story.project_id)
+        if project and project.video_mode == "STORY":
+            ALLOWED_STORYBOARD_STORY_STATUSES = {
+                "STORY_APPROVED",
+                "STORYBOARD_GENERATED",
+                "STORYBOARD_APPROVED",
+                "SHOT_PLAN_GENERATED",
+                "SHOT_PLAN_APPROVED",
+                "IMAGES_GENERATED",
+                "VIDEO_IN_PROGRESS",
+                "READY_FOR_REVIEW",
+                "COMPLETED",
+            }
+            if story.status != "APPROVED" and project.status not in ALLOWED_STORYBOARD_STORY_STATUSES:
+                raise CreativeGenerationError(
+                    "STAGE_NOT_APPROVED",
+                    f"Storyboard generation in STORY mode requires 'STORY_APPROVED' stage, current project status is '{project.status}'."
+                )
 
         doc_extractions = self._gather_document_extractions(story.project_id)
 
@@ -443,6 +484,23 @@ class StoryGenerationService:
             raise CreativeGenerationError("SCENE_LOCKED", "Scene is locked.")
 
         project_id = scene.project_id or (scene.story.project_id if scene.story else None)
+        project = self.db.get(Project, project_id) if project_id else None
+        if project:
+            ALLOWED_SHOT_PLAN_STATUSES = {
+                "STORYBOARD_APPROVED",
+                "SHOT_PLAN_GENERATED",
+                "SHOT_PLAN_APPROVED",
+                "IMAGES_GENERATED",
+                "VIDEO_IN_PROGRESS",
+                "READY_FOR_REVIEW",
+                "COMPLETED",
+            }
+            if project.status not in ALLOWED_SHOT_PLAN_STATUSES:
+                raise CreativeGenerationError(
+                    "STAGE_NOT_APPROVED",
+                    f"Shot Plan generation requires 'STORYBOARD_APPROVED' stage, current project status is '{project.status}'."
+                )
+
         doc_extractions = self._gather_document_extractions(project_id) if project_id else []
 
         prompt = ShotPromptComposer.compose(
@@ -546,7 +604,21 @@ class StoryGenerationService:
         if getattr(project, "is_locked", False):
             raise CreativeGenerationError("PROJECT_LOCKED", "Project is locked.")
 
-        # If project has an existing story context, delegate to generate_story_scenes
+        # If in STORY mode, must have a Story and delegate to generate_story_scenes (which enforces STORY_APPROVED)
+        if project.video_mode == "STORY":
+            if not project.story:
+                raise CreativeGenerationError(
+                    "STAGE_NOT_APPROVED",
+                    "Storyboard generation in STORY mode requires an approved Story outline first.",
+                )
+            return self.generate_story_scenes(
+                story_id=project.story.id,
+                custom_instructions=custom_instructions,
+                options=options,
+                generate_shots=generate_shots,
+            )
+
+        # For non-STORY modes, if project happens to have an existing story context, delegate
         if project.story:
             return self.generate_story_scenes(
                 story_id=project.story.id,

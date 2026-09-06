@@ -6,6 +6,8 @@ interface AutomationBarProps {
   selectedShotCount: number;
   totalShots: number;
   hasFailedJobs: boolean;
+  projectStatus?: string;
+  videoMode?: string;
   onGenerateFullStoryboard: () => Promise<void>;
   onBatchGenerateShots: () => void; // Opens cost confirmation modal
   onGenerateSelectedShots: () => void; // Opens cost confirmation modal for selected
@@ -18,6 +20,8 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
   selectedShotCount,
   totalShots,
   hasFailedJobs,
+  projectStatus,
+  videoMode,
   onGenerateFullStoryboard,
   onBatchGenerateShots,
   onGenerateSelectedShots,
@@ -25,6 +29,22 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
   onStageReview,
 }) => {
   const isRunning = Boolean(automationStep);
+
+  // In STORY mode, story outline must be approved before storyboard generation
+  const isStoryMode = videoMode === 'STORY';
+  const isStoryGated = isStoryMode && projectStatus === 'STORY_GENERATED';
+
+  // Production generation requires SHOT_PLAN_APPROVED or downstream production status
+  const allowedProductionStatuses = [
+    'SHOT_PLAN_APPROVED',
+    'IMAGES_GENERATED',
+    'VIDEO_IN_PROGRESS',
+    'FINAL_REVIEW',
+    'READY_FOR_REVIEW',
+    'COMPLETED',
+    'APPROVED',
+  ];
+  const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
 
   return (
     <div
@@ -47,12 +67,20 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
         <button
           className="btn btn-primary"
           onClick={onGenerateFullStoryboard}
-          disabled={isRunning}
+          disabled={isRunning || isStoryGated}
           data-testid="generate-full-storyboard-btn"
-          title="Generate visual scenes and layout for the storyboard"
+          title={
+            isStoryGated
+              ? 'Story outline must be approved before generating storyboard scenes.'
+              : 'Generate visual scenes and layout for the storyboard'
+          }
         >
           <Sparkles size={16} />
-          {totalShots === 0 ? 'Generate Storyboard Scenes' : 'Regenerate Storyboard Scenes'}
+          {isStoryMode && projectStatus === 'DRAFT'
+            ? 'Generate Story Brief'
+            : totalShots === 0
+            ? 'Generate Storyboard Scenes'
+            : 'Regenerate Storyboard Scenes'}
         </button>
 
         {/* Generate Selected */}
@@ -60,9 +88,13 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
           <button
             className="btn btn-secondary"
             onClick={onGenerateSelectedShots}
-            disabled={isRunning}
+            disabled={isRunning || isProductionGated}
             data-testid="generate-selected-btn"
-            title="Generate only selected shots"
+            title={
+              isProductionGated
+                ? 'Shot Plan must be approved before generating shots.'
+                : 'Generate only selected shots'
+            }
           >
             <CheckSquare size={16} /> Generate Selected ({selectedShotCount})
           </button>
@@ -72,9 +104,13 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
         <button
           className="btn btn-outline"
           onClick={onBatchGenerateShots}
-          disabled={isRunning || totalShots === 0}
+          disabled={isRunning || totalShots === 0 || isProductionGated}
           data-testid="batch-generate-shots-btn"
-          title="Review cost estimate and dispatch incomplete shots"
+          title={
+            isProductionGated
+              ? 'Shot Plan must be approved before generating batch video.'
+              : 'Review cost estimate and dispatch incomplete shots'
+          }
         >
           <Play size={16} /> Batch Generate Video
         </button>

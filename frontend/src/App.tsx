@@ -207,6 +207,10 @@ export const App: React.FC = () => {
   // Stage Generator: Storyboard (Scenes & Shot Structure)
   const handleGenerateStoryboard = async () => {
     if (!selectedProject) return;
+    if (selectedProject.video_mode === 'STORY' && selectedProject.status !== 'STORY_APPROVED') {
+      alert("Story outline must be approved before generating storyboard scenes. Current stage is '" + selectedProject.status + "'.");
+      return;
+    }
     try {
       setAutomationStep('Generating Storyboard Scenes & Layout...');
       if (selectedProject.video_mode === 'STORY') {
@@ -238,6 +242,10 @@ export const App: React.FC = () => {
   // Stage Generator: Detailed Shot Plan & Prompts via Backend Service
   const handleGenerateShotPlan = async () => {
     if (!selectedProject) return;
+    if (selectedProject.status !== 'STORYBOARD_APPROVED') {
+      alert("Storyboard must be approved before generating shot plans. Current stage is '" + selectedProject.status + "'.");
+      return;
+    }
     try {
       setAutomationStep('Formulating Detailed Shot Plan & Prompts...');
       if (scenes.length === 0) {
@@ -270,6 +278,19 @@ export const App: React.FC = () => {
   // Automation: Batch Generate Shots (Selected or All Incomplete)
   const handleBatchGenerateShots = async (shotIds?: string[] | null, onlyIncomplete = true) => {
     if (!selectedProject) return;
+    const allowedStatuses = [
+      'SHOT_PLAN_APPROVED',
+      'IMAGES_GENERATED',
+      'VIDEO_IN_PROGRESS',
+      'FINAL_REVIEW',
+      'READY_FOR_REVIEW',
+      'COMPLETED',
+      'APPROVED',
+    ];
+    if (!allowedStatuses.includes(selectedProject.status)) {
+      alert("Shot Plan must be approved before batch generating video. Current stage is '" + selectedProject.status + "'.");
+      return;
+    }
     try {
       setAutomationStep('Dispatching Batch Generation Jobs...');
       await api.batchGenerateProjectShots(selectedProject.id, {
@@ -577,6 +598,8 @@ export const App: React.FC = () => {
                 shots={shots}
                 jobs={jobs}
                 automationStep={automationStep}
+                projectStatus={selectedProject.status}
+                videoMode={selectedProject.video_mode}
                 onGenerateFullStoryboard={handleGenerateFullStoryboard}
                 onBatchGenerateShots={handleBatchGenerateShots}
                 onRetryFailed={handleRetryFailed}

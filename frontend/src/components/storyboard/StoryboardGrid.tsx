@@ -12,6 +12,8 @@ interface StoryboardGridProps {
   shots: Shot[];
   jobs: GenerationJob[];
   automationStep: string | null;
+  projectStatus?: string;
+  videoMode?: string;
   onGenerateFullStoryboard: () => Promise<void>;
   onBatchGenerateShots: (shotIds?: string[] | null, onlyIncomplete?: boolean) => Promise<void>;
   onRetryFailed: () => Promise<void>;
@@ -36,6 +38,8 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   shots,
   jobs,
   automationStep,
+  projectStatus,
+  videoMode,
   onGenerateFullStoryboard,
   onBatchGenerateShots,
   onRetryFailed,
@@ -168,6 +172,8 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
         selectedShotCount={selectedShotIds.size}
         totalShots={shots.length}
         hasFailedJobs={hasFailedJobs}
+        projectStatus={projectStatus}
+        videoMode={videoMode}
         onGenerateFullStoryboard={onGenerateFullStoryboard}
         onBatchGenerateShots={triggerBatchIncomplete}
         onGenerateSelectedShots={triggerSelectedShots}
@@ -197,8 +203,9 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
               margin: '0 auto 20px auto',
             }}
           >
-            Use high-level automation to generate a full storyboard from your project brief,
-            or add your first scene manually below.
+            {videoMode === 'STORY'
+              ? 'Generate a story brief and outline first, then approve it to generate storyboard scenes.'
+              : 'Generate storyboard scenes from your project brief, or add your first scene manually below.'}
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
             <button
@@ -206,7 +213,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
               onClick={onGenerateFullStoryboard}
               data-testid="empty-state-generate-btn"
             >
-              Create Full Storyboard (Auto)
+              {videoMode === 'STORY' ? 'Generate Story Brief' : 'Generate Storyboard Scenes'}
             </button>
             <button
               className="btn btn-secondary"
