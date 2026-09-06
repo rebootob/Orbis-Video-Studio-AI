@@ -76,6 +76,44 @@ class StoryGenerationService:
             error_message=error.message if error else None,
         )
         self.db.add(audit)
+        if result and not error:
+            try:
+                from app.services.cost_ledger import CostLedgerService
+                from app.services.pricing import ProviderPricingService, CostStatus
+                cost, curr, _ = ProviderPricingService.estimate_cost(
+                    provider=getattr(result, "provider", "openai"),
+                    operation="STORY_GENERATION",
+                    model=getattr(result, "model", "gpt-4o"),
+                    params={
+                        "prompt_tokens": getattr(result, "prompt_tokens", None) or 0,
+                        "completion_tokens": getattr(result, "completion_tokens", None) or 0,
+                    },
+                )
+                CostLedgerService.record_entry(
+                    self.db,
+                    project_id=project_id,
+                    provider=getattr(result, "provider", "openai"),
+                    operation=f"STORY_{request_type}",
+                    model=getattr(result, "model", "gpt-4o"),
+                    usage_units={
+                        "prompt_tokens": getattr(result, "prompt_tokens", None),
+                        "completion_tokens": getattr(result, "completion_tokens", None),
+                        "duration_ms": duration_ms,
+                    },
+                    estimated_cost=cost,
+                    actual_cost=cost,
+                    currency=curr,
+                    cost_status=CostStatus.CONFIRMED if cost is not None else CostStatus.UNKNOWN,
+                    commit=False,
+                )
+            except Exception as exc:
+                audit.status = "ACCOUNTING_FAILED"
+                audit.error_message = f"Usage ledger recording failed: {exc}"
+                self.db.commit()
+                raise CreativeGenerationError(
+                    "LEDGER_RECORDING_FAILED", f"Usage ledger recording failed: {exc}"
+                ) from exc
+
         if commit:
             self.db.commit()
         return audit
@@ -136,6 +174,26 @@ class StoryGenerationService:
             custom_instructions=custom_instructions,
             reference_context_text=ref_text,
         )
+
+        # Check budget before dispatch, factoring in estimated cost if pricing is configured
+        from app.services.budget import BudgetService
+        from app.services.pricing import ProviderPricingService
+        model_name = (getattr(options, "model_override", None) or getattr(options, "model", None)) or "gpt-4o"
+        est_cost, _, _ = ProviderPricingService.estimate_cost(
+            provider="openai",
+            operation="STORY_GENERATION",
+            model=model_name,
+            params={
+                "prompt_tokens": max(1, len(prompt) // 4),
+                "completion_tokens": 1000,
+            },
+        )
+        try:
+            BudgetService.check_budget_before_dispatch(self.db, project_id, estimated_cost=est_cost)
+        except Exception as exc:
+            raise CreativeGenerationError(
+                "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+            )
 
         # 6. Dispatch call to CreativeGenerationProvider
         start_time = time.perf_counter()
@@ -229,6 +287,8 @@ class StoryGenerationService:
             self.db.commit()
             self.db.refresh(story)
             return story
+        except CreativeGenerationError:
+            raise
         except Exception:
             self.db.rollback()
             raise
@@ -258,6 +318,26 @@ class StoryGenerationService:
             language=story.language or "th",
             custom_instructions=custom_instructions,
         )
+
+        # Check budget before dispatch, factoring in estimated cost if pricing is configured
+        from app.services.budget import BudgetService
+        from app.services.pricing import ProviderPricingService
+        model_name = (getattr(options, "model_override", None) or getattr(options, "model", None)) or "gpt-4o"
+        est_cost, _, _ = ProviderPricingService.estimate_cost(
+            provider="openai",
+            operation="STORY_GENERATION",
+            model=model_name,
+            params={
+                "prompt_tokens": max(1, len(prompt) // 4),
+                "completion_tokens": 500,
+            },
+        )
+        try:
+            BudgetService.check_budget_before_dispatch(self.db, story.project_id, estimated_cost=est_cost)
+        except Exception as exc:
+            raise CreativeGenerationError(
+                "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+            )
 
         start_time = time.perf_counter()
         try:
@@ -324,6 +404,8 @@ class StoryGenerationService:
 
             self.db.commit()
             return created_scenes
+        except CreativeGenerationError:
+            raise
         except Exception:
             self.db.rollback()
             raise
@@ -341,7 +423,8 @@ class StoryGenerationService:
         if scene.is_locked:
             raise CreativeGenerationError("SCENE_LOCKED", "Scene is locked.")
 
-        doc_extractions = self._gather_document_extractions(scene.story.project_id)
+        project_id = scene.project_id or (scene.story.project_id if scene.story else None)
+        doc_extractions = self._gather_document_extractions(project_id) if project_id else []
 
         prompt = ShotPromptComposer.compose(
             scene_heading=scene.heading or f"Scene {scene.scene_number}",
@@ -354,6 +437,26 @@ class StoryGenerationService:
             custom_instructions=custom_instructions,
         )
 
+        if project_id:
+            from app.services.budget import BudgetService
+            from app.services.pricing import ProviderPricingService
+            model_name = (getattr(options, "model_override", None) or getattr(options, "model", None)) or "gpt-4o"
+            est_cost, _, _ = ProviderPricingService.estimate_cost(
+                provider="openai",
+                operation="STORY_GENERATION",
+                model=model_name,
+                params={
+                    "prompt_tokens": max(1, len(prompt) // 4),
+                    "completion_tokens": 500,
+                },
+            )
+            try:
+                BudgetService.check_budget_before_dispatch(self.db, project_id, estimated_cost=est_cost)
+            except Exception as exc:
+                raise CreativeGenerationError(
+                    "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+                )
+
         start_time = time.perf_counter()
         try:
             res = self.provider.generate_shots(prompt=prompt, options=options)
@@ -361,7 +464,7 @@ class StoryGenerationService:
         except CreativeGenerationError as e:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             self._log_audit(
-                project_id=scene.story.project_id,
+                project_id=project_id,
                 request_type="SHOT_GENERATE",
                 error=e,
                 duration_ms=duration_ms,
@@ -371,7 +474,7 @@ class StoryGenerationService:
 
         try:
             self._log_audit(
-                project_id=scene.story.project_id,
+                project_id=project_id,
                 request_type="SHOT_GENERATE",
                 result=res,
                 duration_ms=res.duration_ms,
@@ -404,6 +507,8 @@ class StoryGenerationService:
 
             self.db.commit()
             return created_shots
+        except CreativeGenerationError:
+            raise
         except Exception:
             self.db.rollback()
             raise

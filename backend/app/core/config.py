@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     VIDU_TIMEOUT_SECONDS: float = 30.0
     VIDU_MAX_RETRIES: int = 3
 
+    # Provider Pricing Configuration (Replaceable / Configurable via settings)
+    PROVIDER_PRICING_CONFIG: Optional[dict] = None
+
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
     model_config = SettingsConfigDict(

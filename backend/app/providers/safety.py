@@ -16,9 +16,16 @@ def sanitize_secret_text(text):
     )
 
 
+def is_secret_key(k: str) -> bool:
+    k_lower = str(k).lower()
+    if k_lower in ("prompt_tokens", "completion_tokens", "total_tokens", "tokens") or k_lower.endswith("_tokens"):
+        return False
+    return bool(SECRET_KEY.search(k_lower))
+
+
 def contains_secret(value):
     if isinstance(value, dict):
-        return any(SECRET_KEY.search(str(k)) or contains_secret(v) for k, v in value.items())
+        return any(is_secret_key(k) or contains_secret(v) for k, v in value.items())
     if isinstance(value, list):
         return any(contains_secret(v) for v in value)
     if isinstance(value, str):

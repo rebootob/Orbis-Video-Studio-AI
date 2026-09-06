@@ -137,18 +137,54 @@ class JobDispatchService:
         except ValueError:
             raise HTTPException(400, "Invalid generation parameters") from None
 
+        from app.services.pricing import ProviderPricingService
+        from app.services.budget import BudgetService
+        from app.services.cost_ledger import CostLedgerService
+
+        project_id = LockMachineService._resolve_entity_project_id(shot)
+        duration_secs = shot.duration_seconds or 4.0
+        estimated_cost, currency, cost_status = ProviderPricingService.estimate_cost(
+            provider=provider_name,
+            operation="VIDEO_GENERATION",
+            model=None,
+            params={"duration_seconds": duration_secs},
+        )
         job = Job(
             id=uuid.uuid4(),
             shot_id=shot_id,
             provider_name=provider_name,
             status="PENDING",
             idempotency_key=idempotency_key,
+            cost_usd=estimated_cost,
             retry_count=0,
             max_retries=max_retries,
             payload=params.model_dump(),
         )
+
         try:
+            if project_id:
+                # Concurrency-safe budget check with row lock
+                BudgetService.check_budget_before_dispatch(
+                    db, project_id, estimated_cost, lock_row=True
+                )
+
             db.add(job)
+            db.flush()
+            if project_id:
+                CostLedgerService.record_entry(
+                    db,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    job_id=job.id,
+                    provider=provider_name,
+                    operation="VIDEO_GENERATION",
+                    usage_units={"duration_seconds": duration_secs},
+                    estimated_cost=estimated_cost,
+                    currency=currency,
+                    cost_status=cost_status,
+                    idempotency_key=idempotency_key,
+                    commit=False,
+                )
             db.commit()
             return load(db, job.id)
         except IntegrityError:
@@ -157,6 +193,9 @@ class JobDispatchService:
                 existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
                 if existing:
                     return existing
+            raise
+        except Exception:
+            db.rollback()
             raise
 
     @staticmethod
@@ -306,6 +345,14 @@ class JobDispatchService:
             Job.claim_token == claim_token,
             Job.submission_attempt_id == attempt,
         ], values)
+        if res.status == "COMPLETED":
+            from app.services.cost_ledger import CostLedgerService
+            CostLedgerService.confirm_job_cost(
+                db,
+                job_id,
+                actual_cost=res.cost_usd,
+                provider_event_id=res.provider_job_id,
+            )
         return load(db, job_id)
 
     @staticmethod
@@ -366,6 +413,14 @@ class JobDispatchService:
             values["next_poll_at"] = None
 
         change(db, [Job.id == job_id, Job.status == "POLLING", Job.claim_token == token], values)
+        if res.status == "COMPLETED":
+            from app.services.cost_ledger import CostLedgerService
+            CostLedgerService.confirm_job_cost(
+                db,
+                job_id,
+                actual_cost=res.cost_usd,
+                provider_event_id=job.provider_job_id,
+            )
         return load(db, job_id)
 
     @staticmethod

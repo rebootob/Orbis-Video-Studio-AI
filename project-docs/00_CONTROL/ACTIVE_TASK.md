@@ -7,7 +7,7 @@
 ## Active Work Package
 
 ```text
-P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration
+P2-WP009 — Cost Control & Granular Usage Audit Ledger
 ```
 
 Status:
@@ -17,34 +17,22 @@ IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
 ```
 
 Owner Authorization:
-Authorized via GitHub Issue #18 on feature branch `ai/p2-wp008-hybrid-shot-lock-modes`.
+Authorized via GitHub Issue #22 on feature branch `ai/p2-wp009-cost-ledger`.
 
 Execution Engine:
 Antigravity (bounded execution complete; STOPPING for ChatGPT review).
 
-### Proposed objective
+### Objective
 
-Establish the provider-neutral shot execution and locking layer needed by multiple production modes while preserving the existing Story workflow.
+Build a provider-neutral, auditable usage and cost-control layer that records billable AI/provider activity per project/job/shot, prevents duplicate charging under retry/reconciliation flows, and enforces project-level budget controls before chargeable dispatch.
 
-Candidate core scope:
-
-1. Hybrid shot source model: AI generated, imported video, imported image, recorded footage, stock asset and mixed composition.
-2. Granular lock state machine for Script / Scene / Shot / Character / Location / Voice / Timing where applicable.
-3. Provider-neutral base `video_mode` model and mode configuration.
-4. Initial V1 modes: `STORY`, `SHORT`, `LOOP`, `SCENE`.
-5. Story becomes optional at Project level where the selected mode does not require it.
-6. Configuration inheritance remains Project -> Scene -> Shot.
-7. Preserve WP006 Reference Library and WP007 provider/queue boundaries.
-
-Strictly not authorized merely by this proposal:
-
-- PRODUCT / EXPLAINER / PRESENTER / MONTAGE implementation
-- frontend workspace implementation
-- cost ledger (WP009)
-- selective regeneration service (WP011)
-- audio/TTS/subtitles
-- timeline/render work
-- production deployment
+Scope Delivered:
+1. Provider-neutral `UsageLedger` and `LedgerAdjustment` audit models with migration 009.
+2. Idempotent recording of usage events, preventing duplicate charges across retries and reconciliations.
+3. Pluggable `ProviderPricingService` registry without hard-coded pricing in core domain logic.
+4. Project budget management: soft warning thresholds and fail-closed hard caps before chargeable dispatch.
+5. Manual adjustment audit trail preserving original costs and reasons without overwriting history.
+6. Summary and query endpoints grouping by provider and operation.
 
 ---
 
