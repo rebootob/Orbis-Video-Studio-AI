@@ -40,7 +40,7 @@ def _to_uuid(val: Any) -> uuid.UUID:
 class AssemblyService:
 
     @staticmethod
-    def _resolve_shot_visual_source(shot: Shot, asset_map: Dict[str, Asset]) -> Tuple[Optional[uuid.UUID], str, float]:
+    def _resolve_shot_visual_source(shot: Shot, asset_map: Dict[str, Asset]) -> Tuple[Optional[uuid.UUID], str, Optional[float]]:
         """
         Resolves the visual asset for a shot adhering strictly to resolution order:
         1. Approved/current VIDEO asset
@@ -48,11 +48,14 @@ class AssemblyService:
         3. Approved/current KEYFRAME / IMAGE asset
         4. MISSING blocker
 
-        Also resolves known source duration from asset or metadata if present.
+        Returns:
+        (selected_asset_id, source_type, known_source_duration)
+        where known_source_duration is float if known from Asset/metadata, or None if UNKNOWN.
+        Do NOT fabricate 4.0 as authoritative source media duration.
         """
         selected_asset_id: Optional[uuid.UUID] = None
         source_type = "MISSING"
-        known_duration = float(shot.duration_seconds) if shot.duration_seconds else 4.0
+        known_source_duration: Optional[float] = None
 
         def asset_category(a: Asset) -> str:
             atype = (a.asset_type or "").upper()
@@ -86,26 +89,28 @@ class AssemblyService:
                 source_type = "VIDEO"
                 a_dur = get_asset_duration(source_asset)
                 if a_dur is not None and a_dur > 0:
-                    known_duration = a_dur
+                    known_source_duration = a_dur
                 elif isinstance(shot.source_metadata, dict) and shot.source_metadata.get("duration_seconds"):
-                    known_duration = float(shot.source_metadata["duration_seconds"])
-                return selected_asset_id, source_type, known_duration
+                    known_source_duration = float(shot.source_metadata["duration_seconds"])
+                elif isinstance(shot.source_metadata, dict) and shot.source_metadata.get("duration"):
+                    known_source_duration = float(shot.source_metadata["duration"])
+                return selected_asset_id, source_type, known_source_duration
 
             elif cat in ("IMAGE", "KEYFRAME"):
                 # source_asset_id is an IMAGE/KEYFRAME asset -> MUST NOT BECOME VIDEO!
                 selected_asset_id = source_asset.id
                 source_type = "KEYFRAME" if cat == "KEYFRAME" else "IMAGE"
-                return selected_asset_id, source_type, known_duration
+                return selected_asset_id, source_type, None
 
         # Step 3: Check shot.keyframe_asset_id fallback
         if shot.keyframe_asset_id and str(shot.keyframe_asset_id) in asset_map:
             keyframe_asset = asset_map[str(shot.keyframe_asset_id)]
             selected_asset_id = keyframe_asset.id
             source_type = "KEYFRAME"
-            return selected_asset_id, source_type, known_duration
+            return selected_asset_id, source_type, None
 
         # Step 4: MISSING
-        return None, "MISSING", known_duration
+        return None, "MISSING", None
 
     @staticmethod
     def get_active_timeline(db: Session, project_id: str) -> Optional[AssemblyTimeline]:
@@ -131,7 +136,12 @@ class AssemblyService:
 
         existing_timeline = cls.get_active_timeline(db, project_id)
         existing_placements: Dict[str, AssemblyShotPlacement] = {}
+        existing_scenes_order: List[uuid.UUID] = []
+
         if existing_timeline:
+            # Preserve manual scene order from existing_timeline
+            sorted_existing_scenes = sorted(existing_timeline.scenes, key=lambda s: s.scene_order)
+            existing_scenes_order = [s.scene_id for s in sorted_existing_scenes]
             for scene in existing_timeline.scenes:
                 for placement in scene.shot_placements:
                     existing_placements[str(placement.shot_id)] = placement
@@ -153,33 +163,66 @@ class AssemblyService:
         db.add(timeline)
         db.flush()
 
-        # Fetch scenes & shots ordered
-        scenes = db.query(Scene).filter(Scene.project_id == p_uuid).order_by(Scene.scene_number.asc()).all()
-        scene_ids = [s.id for s in scenes]
+        # Fetch canonical project scenes & shots
+        db_scenes = db.query(Scene).filter(Scene.project_id == p_uuid).order_by(Scene.scene_number.asc()).all()
+        db_scene_map: Dict[str, Scene] = {str(s.id): s for s in db_scenes}
+        scene_ids = [s.id for s in db_scenes]
 
         shots = []
         if scene_ids:
             shots = db.query(Shot).filter(Shot.scene_id.in_(scene_ids)).order_by(Shot.shot_number.asc()).all()
 
-        # Fetch visual assets for project in one set-based query
         assets = db.query(Asset).filter(Asset.project_id == p_uuid).all()
         asset_map: Dict[str, Asset] = {str(a.id): a for a in assets}
 
-        # Build assembly scenes and placements preserving existing manual/locked edits
-        for scene_idx, scene in enumerate(scenes):
+        # 1. Determine Ordered Scene List for Assembly (preserving manual scene order)
+        ordered_assembly_scene_ids: List[uuid.UUID] = []
+        for sc_id in existing_scenes_order:
+            if str(sc_id) in db_scene_map and sc_id not in ordered_assembly_scene_ids:
+                ordered_assembly_scene_ids.append(sc_id)
+        for db_sc in db_scenes:
+            if db_sc.id not in ordered_assembly_scene_ids:
+                ordered_assembly_scene_ids.append(db_sc.id)
+
+        # 2. Determine Assembly Scene Assignment for each shot (preserving cross-scene moves)
+        shots_by_assembly_scene_id: Dict[str, List[Tuple[Shot, Optional[AssemblyShotPlacement]]]] = {
+            str(sc_id): [] for sc_id in ordered_assembly_scene_ids
+        }
+
+        for shot in shots:
+            existing_p = existing_placements.get(str(shot.id))
+            if existing_p and existing_p.scene_id and str(existing_p.scene_id) in shots_by_assembly_scene_id:
+                target_sc_id_str = str(existing_p.scene_id)
+            else:
+                target_sc_id_str = str(shot.scene_id)
+                if target_sc_id_str not in shots_by_assembly_scene_id:
+                    shots_by_assembly_scene_id[target_sc_id_str] = []
+
+            shots_by_assembly_scene_id[target_sc_id_str].append((shot, existing_p))
+
+        # 3. Build assembly scenes and placements
+        for scene_idx, scene_id in enumerate(ordered_assembly_scene_ids):
             assembly_scene = AssemblyScene(
                 id=uuid.uuid4(),
                 timeline_id=timeline.id,
-                scene_id=scene.id,
+                scene_id=scene_id,
                 scene_order=scene_idx,
             )
             db.add(assembly_scene)
             db.flush()
 
-            scene_shots = [sh for sh in shots if sh.scene_id == scene.id]
-            for shot_idx, shot in enumerate(scene_shots):
-                existing_p = existing_placements.get(str(shot.id))
-                res_asset_id, res_source_type, res_dur = cls._resolve_shot_visual_source(shot, asset_map)
+            assigned_shots = shots_by_assembly_scene_id.get(str(scene_id), [])
+            # Sort assigned shots: by existing placement shot_order if present, else by shot.shot_number
+            def shot_sort_key(item: Tuple[Shot, Optional[AssemblyShotPlacement]]):
+                sh, p = item
+                if p is not None:
+                    return (0, p.shot_order)
+                return (1, sh.shot_number)
+
+            sorted_assigned = sorted(assigned_shots, key=shot_sort_key)
+
+            for shot_idx, (shot, existing_p) in enumerate(sorted_assigned):
+                res_asset_id, res_source_type, known_src_dur = cls._resolve_shot_visual_source(shot, asset_map)
 
                 if existing_p:
                     if existing_p.is_locked:
@@ -199,7 +242,7 @@ class AssemblyService:
                             selected_asset_id = existing_p.visual_asset_id if existing_p.visual_asset_id else res_asset_id
                             source_type = existing_p.source_type if existing_p.visual_asset_id else res_source_type
                             trim_in = existing_p.trim_in
-                            trim_out = existing_p.trim_out if existing_p.trim_out is not None else (res_dur if source_type == "VIDEO" else None)
+                            trim_out = existing_p.trim_out if existing_p.trim_out is not None else known_src_dur
                             still_duration = existing_p.still_duration
                             transition_to_next = existing_p.transition_to_next
                             is_locked = False
@@ -208,15 +251,17 @@ class AssemblyService:
                             selected_asset_id = res_asset_id
                             source_type = res_source_type
                             trim_in = 0.0
-                            trim_out = res_dur if res_source_type == "VIDEO" else None
+                            trim_out = known_src_dur if res_source_type == "VIDEO" else None
                             still_duration = 4.0
                             transition_to_next = existing_p.transition_to_next
                             is_locked = False
                             p_version = 1
 
                         if source_type == "VIDEO":
-                            t_out = trim_out if trim_out is not None else res_dur
-                            effective_duration = max(0.1, t_out - trim_in)
+                            if trim_out is not None:
+                                effective_duration = max(0.1, trim_out - trim_in)
+                            else:
+                                effective_duration = max(0.1, 4.0 - trim_in)
                         else:
                             effective_duration = max(0.1, still_duration)
                 else:
@@ -224,9 +269,9 @@ class AssemblyService:
                     selected_asset_id = res_asset_id
                     source_type = res_source_type
                     trim_in = 0.0
-                    trim_out = res_dur if res_source_type == "VIDEO" else None
+                    trim_out = known_src_dur if res_source_type == "VIDEO" else None
                     still_duration = 4.0
-                    effective_duration = res_dur if res_source_type == "VIDEO" else 4.0
+                    effective_duration = known_src_dur if (res_source_type == "VIDEO" and known_src_dur is not None) else 4.0
                     transition_to_next = "CUT"
                     is_locked = False
                     p_version = 1
@@ -235,7 +280,7 @@ class AssemblyService:
                     id=uuid.uuid4(),
                     timeline_id=timeline.id,
                     assembly_scene_id=assembly_scene.id,
-                    scene_id=scene.id,
+                    scene_id=scene_id,  # Preserves target assembly scene ID!
                     shot_id=shot.id,
                     shot_order=shot_idx,
                     visual_asset_id=selected_asset_id,
@@ -256,7 +301,7 @@ class AssemblyService:
             timeline_id=timeline.id,
             action="AUTO_ASSEMBLE",
             actor=actor,
-            change_reason="Automated timeline assembly with state preservation",
+            change_reason="Automated timeline assembly with state and structure preservation",
         )
         db.add(audit)
         db.commit()
@@ -470,8 +515,10 @@ class AssemblyService:
 
         # Recalculate effective duration
         if placement.source_type == "VIDEO":
-            t_out = placement.trim_out or 4.0
-            placement.effective_duration = max(0.1, t_out - placement.trim_in)
+            if placement.trim_out is not None:
+                placement.effective_duration = max(0.1, placement.trim_out - placement.trim_in)
+            else:
+                placement.effective_duration = max(0.1, 4.0 - placement.trim_in)
         else:
             placement.effective_duration = max(0.1, placement.still_duration)
 

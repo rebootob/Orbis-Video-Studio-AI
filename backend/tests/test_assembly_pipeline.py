@@ -137,6 +137,7 @@ def test_visual_fallback_resolution(db_session: Session, test_setup):
     assert p1.source_type == "VIDEO"
     assert str(p1.visual_asset_id) == str(test_setup["video_asset"].id)
     assert p1.effective_duration == 4.0
+    assert p1.trim_out is None  # Source duration unknown
 
     # Shot 2 has keyframe asset -> KEYFRAME
     p2 = placements[str(test_setup["shot2"].id)]
@@ -382,6 +383,108 @@ def test_known_video_duration_used_for_trim_bounds(db_session: Session, test_set
     assert p3.source_type == "VIDEO"
     assert p3.trim_out == 7.5
     assert p3.effective_duration == 7.5
+
+
+# =====================================================================
+# REGRESSION TESTS FOR REVIEW 5127042971 FINDINGS
+# =====================================================================
+
+def test_auto_assembly_preserves_scene_reorder(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    s1_id = str(test_setup["scene1"].id)
+    s2_id = str(test_setup["scene2"].id)
+
+    # Reorder scenes: Scene 2 -> order 0, Scene 1 -> order 1
+    AssemblyService.reorder_scenes(db_session, proj_id, [(s1_id, 1), (s2_id, 0)])
+
+    # Re-run Auto Assembly
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    scenes = sorted(t2.scenes, key=lambda s: s.scene_order)
+    assert str(scenes[0].scene_id) == s2_id
+    assert str(scenes[1].scene_id) == s1_id
+
+
+def test_auto_assembly_preserves_shot_reorder_in_scene(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    s1_id = str(test_setup["scene1"].id)
+    sh1_id = str(test_setup["shot1"].id)
+    sh2_id = str(test_setup["shot2"].id)
+
+    # Reorder shots in Scene 1: Shot 2 -> order 0, Shot 1 -> order 1
+    AssemblyService.reorder_shots_in_scene(db_session, proj_id, scene_id=s1_id, shot_orders=[(sh1_id, 1), (sh2_id, 0)])
+
+    # Re-run Auto Assembly
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    s1_placements = [sc for sc in t2.scenes if str(sc.scene_id) == s1_id][0].shot_placements
+    sorted_p = sorted(s1_placements, key=lambda p: p.shot_order)
+    assert str(sorted_p[0].shot_id) == sh2_id
+    assert str(sorted_p[1].shot_id) == sh1_id
+
+
+def test_auto_assembly_preserves_cross_scene_shot_move(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    sh1_id = str(test_setup["shot1"].id)
+    s2_id = str(test_setup["scene2"].id)
+
+    # Move Shot 1 from Scene 1 to Scene 2
+    AssemblyService.move_shot_to_scene(db_session, proj_id, shot_id=sh1_id, target_scene_id=s2_id, target_position=1)
+
+    # Re-run Auto Assembly
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1 = [p for s in t2.scenes for p in s.shot_placements if str(p.shot_id) == sh1_id][0]
+    assert str(p1.scene_id) == s2_id
+
+
+def test_auto_assembly_preserves_locked_cross_scene_shot_move(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    sh1_id = str(test_setup["shot1"].id)
+    s2_id = str(test_setup["scene2"].id)
+
+    # Move Shot 1 to Scene 2 and Lock placement
+    moved_t = AssemblyService.move_shot_to_scene(db_session, proj_id, shot_id=sh1_id, target_scene_id=s2_id, target_position=1)
+    p1_moved = [p for s in moved_t.scenes for p in s.shot_placements if str(p.shot_id) == sh1_id][0]
+    AssemblyService.update_shot_placement(db_session, proj_id, placement_id=str(p1_moved.id), is_locked=True)
+
+    # Re-run Auto Assembly
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1 = [p for s in t2.scenes for p in s.shot_placements if str(p.shot_id) == sh1_id][0]
+    assert str(p1.scene_id) == s2_id
+    assert p1.is_locked is True
+
+
+def test_unknown_video_duration_remains_none(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+
+    # Video asset without duration_seconds or metadata duration
+    raw_vid_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=_to_uuid(proj_id),
+        name="Unknown Duration Video",
+        original_filename="unknown.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1024,
+        checksum_sha256="dummy_unk",
+        storage_bucket="default",
+        storage_key="unknown.mp4",
+    )
+    db_session.add(raw_vid_asset)
+    db_session.flush()
+
+    shot3 = test_setup["shot3"]
+    shot3.source_asset_id = raw_vid_asset.id
+    db_session.commit()
+
+    timeline = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p3 = [p for p in timeline.shot_placements if str(p.shot_id) == str(shot3.id)][0]
+
+    assert p3.source_type == "VIDEO"
+    assert p3.trim_out is None  # Source duration remains unknown (None), not fabricated 4.0!
+    assert p3.effective_duration == 4.0  # Separate UI preview fallback
 
 
 from app.db.session import get_db
