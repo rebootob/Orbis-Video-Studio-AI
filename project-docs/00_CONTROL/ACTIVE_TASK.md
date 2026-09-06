@@ -7,70 +7,71 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P2-WP012
 ```
 
 Status:
 
 ```text
-WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
+IMPLEMENTED / AWAITING CHATGPT INDEPENDENT REVIEW
 ```
 
 Current Work Tracking:
 
 ```text
-Active Package: NONE
-Last Completed: P2-WP011 (Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails)
-Issue: #28
-PR: #29 (MERGED / CLOSED)
-Branch: ai/p2-wp011-batch-resume (MERGED)
-Reviewed HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
-Merge Commit: 643614b089a295ea96be179e470707609cbe4b53
-Final Review: PASS / READY TO MERGE (Review ID 5124729394)
-Canonical main HEAD: 643614b089a295ea96be179e470707609cbe4b53
-Gate: WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
+Active Package: P2-WP012 (Production Orchestrator & Staged Approval State Machine)
+Issue: #31
+PR: To be opened
+Branch: ai/p2-wp012-production-orchestrator
+Start HEAD: 3be8ffed28f8807ae89bab22fb64a8018a8fbdb7
+Canonical main HEAD: 3be8ffed28f8807ae89bab22fb64a8018a8fbdb7
+Gate: AWAITING CHATGPT INDEPENDENT REVIEW
 ```
 
 Execution Roles:
 
 ```text
-Owner = final human authority / authorization of next WP
+Owner = final human authority / authorization
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE (bounded low-credit Execution Plane when explicitly authorized)
+Antigravity = Bounded Execution Plane
 Codex = STOP
 Claude Code = STOP
 ```
 
 ---
 
-## P2-WP011 Closure Evidence
+## P2-WP012 Delivery Evidence
 
-1. **Transactional Job + Batch Audit Persistence**:
-   - Savepoint-level isolation (`begin_nested()`) wrapping `JobDispatchService.create_and_dispatch_job(commit=False)` and `BatchRunItem(decision="QUEUED")`.
-   - Durable consistency: GenerationJob, UsageLedger entry, and BatchRunItem persist atomically or roll back cleanly together without unaudited queued work.
-2. **Reconciliation / Cancellation Safety**:
-   - `CANCELLING` treated as active/in-flight (`CandidateSkipReason.CANCELLATION_IN_PROGRESS`), preventing duplicate generation.
-   - `RECONCILIATION_REQUIRED` blocks automatic generation/resume/retry (`CandidateSkipReason.RECONCILIATION_REQUIRED`).
-   - Single-shot create path fails closed with 409 for both states.
-3. **Bounded Keyset Processing**:
-   - Keyset pagination based on `(created_at, id)` snapshot boundary; eliminated unbounded in-memory candidate materialization.
-   - Streaming execution in chunks of $\le 50$ (`EXECUTE_CHUNK_SIZE = 50`).
-   - Set-based DB queries in `list_project_batch_runs` (0 N+1 queries).
-   - Paginated item details in `get_batch_run_details` (`item_limit`, `item_offset`).
-4. **Bounded Memory Retention & Truthful TOCTOU Boundary Enforcement**:
-   - Legacy `/jobs/batch` enforces strict execution boundary $\le 100$ with atomic rollback and 400 Bad Request if $> 100$ jobs would be queued, preventing untracked active jobs.
-   - `BatchResumeService.execute_batch` bounds compatibility `created_jobs` list via `MAX_COMPATIBILITY_RETURNED_JOBS = 100` and `accumulate_jobs=False` on canonical `/jobs/resume`, preventing unbounded ORM memory retention.
-   - Canonical `/jobs/resume` relies truthfully on durable `BatchRun` and `BatchRunItem` records.
-5. **Truthful Run / UI Outcomes & Stage Safety**:
-   - BatchRun counters reconciled dynamically on read.
-   - `handleBatchGenerateShots` strictly guards stage transition: does NOT switch project status to `VIDEO_IN_PROGRESS` when `queued_count == 0`.
+1. **State Machine & Mode-Aware Orchestrator Service**:
+   - `ProductionOrchestrator` service (`backend/app/services/production_orchestrator.py`) handles state evaluation, stage transitions, mode routing, and action execution.
+   - Respects mode boundaries: `STORY` mode proceeds through Story -> Storyboard -> Shots -> Video -> Complete, while `SHORT`, `LOOP`, and `SCENE` modes bypass Story generation/approval and start directly at Storyboard or Shots without forced story constraints.
+   - Idempotent execution and approval: Re-approving or executing on already matched stages returns clean `NO_OP` status without raising errors.
+
+2. **Stage Approval & Generic PATCH Guard**:
+   - Generic `PATCH /projects/{id}` endpoint strictly rejects client attempts to mutate `status` with HTTP 400 Bad Request, directing clients to the orchestrator.
+   - Server-side dispatches (`resume_project_jobs` and `batch_generate_project_shots`) transition project status to `VIDEO_IN_PROGRESS` server-side and log orchestration audits.
+   - Explicit `POST /projects/{id}/orchestration/approve` endpoint evaluates validity of requested stage transition, enforces prerequisites, and commits status change atomically.
+
+3. **Append-Only Orchestration Audit Ledger**:
+   - Reversible Alembic migration `012_production_orchestrator_and_staged_approvals.py` creates `orchestration_audits` table with indexed `(project_id, created_at)` and adds `automation_mode` to `projects`.
+   - `OrchestrationAudit` model and endpoints (`GET /projects/{id}/orchestration/history`) record transition details: `from_status`, `to_status`, `action`, `trigger`, `actor`, `reason`, and JSON payload.
+
+4. **Automation Modes (MANUAL, ASSISTED, AUTO)**:
+   - `automation_mode` configurable via `PATCH /projects/{id}/orchestration/settings`.
+   - `AUTO` mode automatically advances eligible automated stages (e.g., advancing to shot planning / storyboard creation) but strictly stops at mandatory human review gates (e.g. `STORY_GENERATED` awaiting `STORY_APPROVED`), hard budget limits, active jobs, or reconciliation requirements.
+
+5. **Frontend Orchestration Integration**:
+   - `AutomationBar` component renders automation mode selector (`MANUAL`, `ASSISTED`, `AUTO`), dynamic primary recommended action button, and blocked reasons alerts.
+   - `QCHistoryPanel` displays full Orchestration Stage Transition Audit History and wires approval actions to `approveStage`.
+   - Removed direct `api.updateProject(..., { status })` mutations in frontend, routing all workflow actions and approvals through orchestrator API endpoints.
 
 ---
 
 ## Next Allowed Action
 
-1. Antigravity: STOP / NONE.
+1. Antigravity: STOP / NONE after PR creation.
 2. Codex: STOP.
 3. Claude Code: STOP.
-4. Wait for explicit Owner authorization of the next work package.
-5. P2-WP012 remains: PROPOSED / NOT AUTHORIZED. Do NOT start or pre-authorize WP012.
+4. Await ChatGPT Independent Review on PR for Issue #31.
+5. Do NOT merge without Owner approval.
+6. Do NOT start WP013.

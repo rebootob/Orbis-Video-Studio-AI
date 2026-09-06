@@ -97,20 +97,29 @@ def test_project_crud_and_archive_endpoints(client: TestClient, db_session: Sess
     projects = list_resp.json()
     assert any(p["id"] == proj_id for p in projects)
 
-    # 3. Patch project
+    # 3. Patch project metadata
     patch_resp = client.patch(
         f"/api/v1/projects/{proj_id}",
         json={
             "title": "Updated Workspace Title",
-            "status": "APPROVED",
             "target_duration_seconds": 75.0,
         },
     )
     assert patch_resp.status_code == 200
     updated = patch_resp.json()
     assert updated["title"] == "Updated Workspace Title"
-    assert updated["status"] == "APPROVED"
+    assert updated["status"] == "DRAFT"
     assert updated["target_duration_seconds"] == 75.0
+
+    # 3b. Attempting to bypass orchestration via generic PATCH status returns 400
+    bad_patch = client.patch(
+        f"/api/v1/projects/{proj_id}",
+        json={
+            "status": "APPROVED",
+        },
+    )
+    assert bad_patch.status_code == 400
+    assert "orchestration" in bad_patch.json()["detail"].lower()
 
     # 4. Soft-delete / archive project (HTTP 200, status=ARCHIVED)
     del_resp = client.delete(f"/api/v1/projects/{proj_id}")

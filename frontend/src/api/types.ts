@@ -39,6 +39,7 @@ export interface Project {
   description?: string | null;
   status: string;
   video_mode: VideoMode;
+  automation_mode?: AutomationMode;
   purpose?: string | null;
   target_platform?: string | null;
   target_duration_seconds?: number | null;
@@ -269,4 +270,102 @@ export interface AssetUploadResponse {
   file_size_bytes?: number | null;
   mime_type?: string | null;
   created_at: string;
+}
+
+export type AutomationMode = 'MANUAL' | 'ASSISTED' | 'AUTO';
+
+export type OrchestrationActionType =
+  | 'GENERATION'
+  | 'APPROVAL'
+  | 'REVISION'
+  | 'EXECUTION'
+  | 'RECOVERY'
+  | 'NAVIGATION';
+
+export type OrchestrationActionResult =
+  | 'APPLIED'
+  | 'NO_OP'
+  | 'BLOCKED'
+  | 'REJECTED'
+  | 'FAILED';
+
+export interface OrchestrationActionModel {
+  action: string;
+  display_name: string;
+  description: string;
+  action_type: OrchestrationActionType;
+  is_chargeable: boolean;
+  is_blocked: boolean;
+  blocked_reason?: string | null;
+  parameters?: Record<string, any> | null;
+}
+
+export interface OrchestrationStateResponse {
+  project_id: string;
+  current_stage: string;
+  video_mode: string;
+  automation_mode: AutomationMode;
+  stage_display_name: string;
+  stage_description: string;
+  is_approval_required: boolean;
+  is_blocked: boolean;
+  blocked_reasons: string[];
+  recommended_action?: OrchestrationActionModel | null;
+  available_actions: OrchestrationActionModel[];
+  summary: Record<string, any>;
+}
+
+export interface OrchestrationAuditResponse {
+  id: string;
+  project_id: string;
+  from_state: string;
+  to_state?: string | null;
+  action: string;
+  actor: string;
+  result: string;
+  reason_code?: string | null;
+  detail?: string | null;
+  created_at: string;
+}
+
+export interface OrchestrationHistoryResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: OrchestrationAuditResponse[];
+}
+
+export interface ExecuteActionPayload {
+  action: string;
+  parameters?: Record<string, any>;
+}
+
+export interface ExecuteActionResponse {
+  success: boolean;
+  action: string;
+  from_stage: string;
+  to_stage: string;
+  result: OrchestrationActionResult;
+  message: string;
+  audit_id?: string | null;
+  orchestration_state: OrchestrationStateResponse;
+}
+
+export interface ApproveStagePayload {
+  stage?: string;
+  notes?: string;
+}
+
+export interface ApproveStageResponse {
+  success: boolean;
+  from_stage: string;
+  to_stage: string;
+  result: OrchestrationActionResult;
+  message: string;
+  audit_id?: string | null;
+  orchestration_state: OrchestrationStateResponse;
+}
+
+export interface OrchestrationSettingsPayload {
+  automation_mode: AutomationMode;
 }

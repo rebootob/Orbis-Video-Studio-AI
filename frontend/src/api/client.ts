@@ -16,6 +16,13 @@ import type {
   BatchRun,
   ReorderItem,
   AssetUploadResponse,
+  OrchestrationStateResponse,
+  OrchestrationHistoryResponse,
+  ExecuteActionPayload,
+  ExecuteActionResponse,
+  ApproveStagePayload,
+  ApproveStageResponse,
+  OrchestrationSettingsPayload,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -471,5 +478,53 @@ export const api = {
     }
 
     return response.json();
+  },
+
+  // Production Orchestrator & Staged Approvals
+  async getOrchestrationState(projectId: string): Promise<OrchestrationStateResponse> {
+    return request<OrchestrationStateResponse>(`/projects/${projectId}/orchestration`);
+  },
+
+  async executeOrchestrationAction(
+    projectId: string,
+    payload: ExecuteActionPayload
+  ): Promise<ExecuteActionResponse> {
+    return request<ExecuteActionResponse>(`/projects/${projectId}/orchestration/execute`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async approveStage(
+    projectId: string,
+    payload: ApproveStagePayload = {}
+  ): Promise<ApproveStageResponse> {
+    return request<ApproveStageResponse>(`/projects/${projectId}/orchestration/approve`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateOrchestrationSettings(
+    projectId: string,
+    payload: OrchestrationSettingsPayload
+  ): Promise<Project> {
+    return request<Project>(`/projects/${projectId}/orchestration/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getOrchestrationHistory(
+    projectId: string,
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<OrchestrationHistoryResponse> {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const qs = query.toString();
+    return request<OrchestrationHistoryResponse>(
+      `/projects/${projectId}/orchestration/history${qs ? `?${qs}` : ''}`
+    );
   },
 };

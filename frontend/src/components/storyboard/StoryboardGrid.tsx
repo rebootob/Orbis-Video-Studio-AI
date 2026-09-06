@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Scene, Shot, GenerationJob, ReorderItem } from '../../api/types';
+import type { Scene, Shot, GenerationJob, ReorderItem, OrchestrationStateResponse, AutomationMode } from '../../api/types';
 import { AutomationBar } from './AutomationBar';
 import { SceneSection } from './SceneSection';
 import { ShotDetailDrawer } from './ShotDetailDrawer';
@@ -14,6 +14,7 @@ interface StoryboardGridProps {
   automationStep: string | null;
   projectStatus?: string;
   videoMode?: string;
+  orchestrationState?: OrchestrationStateResponse | null;
   onGenerateFullStoryboard: () => Promise<void>;
   onBatchGenerateShots: (shotIds?: string[] | null, onlyIncomplete?: boolean) => Promise<void>;
   onRetryFailed: () => Promise<void>;
@@ -30,6 +31,8 @@ interface StoryboardGridProps {
   onToggleSceneLock: (scene: Scene) => Promise<void>;
   onGenerateShot: (shotId: string) => Promise<void>;
   onStageReview?: (stage: 'STORY' | 'STORYBOARD' | 'SHOT_PLAN') => void;
+  onExecuteRecommendedAction?: () => Promise<void>;
+  onUpdateAutomationMode?: (mode: AutomationMode) => Promise<void>;
 }
 
 export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
@@ -40,6 +43,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   automationStep,
   projectStatus,
   videoMode,
+  orchestrationState,
   onGenerateFullStoryboard,
   onBatchGenerateShots,
   onRetryFailed,
@@ -56,6 +60,8 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   onToggleSceneLock,
   onGenerateShot,
   onStageReview,
+  onExecuteRecommendedAction,
+  onUpdateAutomationMode,
 }) => {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(new Set());
@@ -184,11 +190,14 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
         hasFailedJobs={hasFailedJobs}
         projectStatus={projectStatus}
         videoMode={videoMode}
+        orchestrationState={orchestrationState}
         onGenerateFullStoryboard={onGenerateFullStoryboard}
         onBatchGenerateShots={triggerBatchIncomplete}
         onGenerateSelectedShots={triggerSelectedShots}
         onRetryFailed={triggerRetryFailed}
         onStageReview={onStageReview}
+        onExecuteRecommendedAction={onExecuteRecommendedAction}
+        onUpdateAutomationMode={onUpdateAutomationMode}
       />
 
       {/* Scenes List */}

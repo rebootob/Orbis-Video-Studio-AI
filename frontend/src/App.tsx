@@ -11,6 +11,9 @@ import type {
   ReferenceItem,
   ApprovalStatus,
   ReorderItem,
+  OrchestrationStateResponse,
+  OrchestrationAuditResponse,
+  AutomationMode,
 } from './api/types';
 import { api } from './api/client';
 import { ProjectDashboard } from './components/dashboard/ProjectDashboard';
@@ -57,6 +60,8 @@ export const App: React.FC = () => {
   const [isStoryInspectionOpen, setIsStoryInspectionOpen] = useState(false);
   const [automationStep, setAutomationStep] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(false);
+  const [orchestrationState, setOrchestrationState] = useState<OrchestrationStateResponse | null>(null);
+  const [orchestrationHistory, setOrchestrationHistory] = useState<OrchestrationAuditResponse[]>([]);
 
   // Load all projects on mount (including archived for dashboard filters)
   const loadProjects = useCallback(async () => {
@@ -74,6 +79,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  const loadOrchestrationData = useCallback(async (projectId: string) => {
+    try {
+      if (api.getOrchestrationState) {
+        const oState = await api.getOrchestrationState(projectId);
+        setOrchestrationState(oState);
+      }
+      if (api.getOrchestrationHistory) {
+        const oHist = await api.getOrchestrationHistory(projectId, { limit: 20 });
+        setOrchestrationHistory(oHist.items);
+      }
+    } catch (e) {
+      console.warn('Orchestration state load failed', e);
+    }
+  }, []);
 
   // Load workspace state for the selected project
   const loadWorkspaceData = useCallback(async (project: Project) => {
@@ -111,10 +131,13 @@ export const App: React.FC = () => {
       // 6. Load Story (if any)
       const storyData = await api.getProjectStory(project.id);
       setStory(storyData);
+
+      // 7. Load Orchestration State & History
+      await loadOrchestrationData(project.id);
     } catch (err: any) {
       console.error('Failed to load workspace data', err);
     }
-  }, []);
+  }, [loadOrchestrationData]);
 
   useEffect(() => {
     if (selectedProject) {
@@ -171,12 +194,34 @@ export const App: React.FC = () => {
     await loadProjects();
   };
 
-  // Status / QC Update
-  const handleUpdateStatus = async (status: ApprovalStatus) => {
+  // Status / Stage Approval via Orchestrator
+  const handleApproveStage = async (stage?: string, notes?: string) => {
     if (!selectedProject) return;
-    const updated = await api.updateProject(selectedProject.id, { status });
-    setSelectedProject(updated);
-    await loadProjects();
+    try {
+      const res = await api.approveStage(selectedProject.id, { stage, notes });
+      setSelectedProject({ ...selectedProject, status: res.to_stage });
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Stage approval failed: ${err.message}`);
+    }
+  };
+
+  const handleUpdateStatus = async (status: ApprovalStatus) => {
+    await handleApproveStage(status);
+  };
+
+  // Automation Settings Update
+  const handleUpdateAutomationMode = async (mode: AutomationMode) => {
+    if (!selectedProject) return;
+    try {
+      const updated = await api.updateOrchestrationSettings(selectedProject.id, { automation_mode: mode });
+      setSelectedProject(updated);
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Failed to update automation mode: ${err.message}`);
+    }
   };
 
   // Stage Generator: Story (STORY mode only)
@@ -186,10 +231,13 @@ export const App: React.FC = () => {
       setAutomationStep('Generating Story Brief & Narrative Outline...');
       const storyRes = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
       setStory(storyRes);
-      await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
+      if (api.executeOrchestrationAction) {
+        await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_STORY' });
+      }
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
       setIsStoryInspectionOpen(true);
     } catch (err: any) {
       alert(`Story generation failed: ${err.message}`);
@@ -200,7 +248,7 @@ export const App: React.FC = () => {
 
   const handleApproveStory = async () => {
     if (!selectedProject) return;
-    await handleUpdateStatus('STORY_APPROVED');
+    await handleApproveStage('STORY_GENERATED');
     setIsStoryInspectionOpen(false);
   };
 
@@ -217,10 +265,13 @@ export const App: React.FC = () => {
         if (!story) {
           const s = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
           setStory(s);
-          await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
+          if (api.executeOrchestrationAction) {
+            await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_STORY' });
+          }
           await loadWorkspaceData(selectedProject);
           setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
           await loadProjects();
+          await loadOrchestrationData(selectedProject.id);
           setIsStoryInspectionOpen(true);
           return;
         }
@@ -228,10 +279,13 @@ export const App: React.FC = () => {
       } else {
         await api.generateProjectStoryboard(selectedProject.id, { generate_shots: false });
       }
-      await api.updateProject(selectedProject.id, { status: 'STORYBOARD_GENERATED' });
+      if (api.executeOrchestrationAction) {
+        await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_STORYBOARD' });
+      }
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'STORYBOARD_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
     } catch (err: any) {
       alert(`Storyboard generation failed: ${err.message}`);
     } finally {
@@ -254,10 +308,13 @@ export const App: React.FC = () => {
       for (const scene of scenes) {
         await api.generateSceneShots(scene.id);
       }
-      await api.updateProject(selectedProject.id, { status: 'SHOT_PLAN_GENERATED' });
+      if (api.executeOrchestrationAction) {
+        await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_SHOT_PLAN' });
+      }
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'SHOT_PLAN_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
     } catch (err: any) {
       alert(`Shot plan generation failed: ${err.message}`);
     } finally {
@@ -272,6 +329,46 @@ export const App: React.FC = () => {
       await handleGenerateStory();
     } else {
       await handleGenerateStoryboard();
+    }
+  };
+
+  // Execute Recommended Action from Orchestrator
+  const handleExecuteRecommendedAction = async () => {
+    if (!selectedProject || !orchestrationState?.recommended_action) return;
+    const action = orchestrationState.recommended_action;
+    if (action.action_type === 'APPROVAL') {
+      await handleApproveStage(action.parameters?.stage);
+      return;
+    }
+    if (action.action === 'GENERATE_STORY') {
+      await handleGenerateStory();
+      return;
+    }
+    if (action.action === 'GENERATE_STORYBOARD') {
+      await handleGenerateStoryboard();
+      return;
+    }
+    if (action.action === 'GENERATE_SHOT_PLAN') {
+      await handleGenerateShotPlan();
+      return;
+    }
+    if (action.action === 'START_VIDEO_GENERATION' || action.action === 'CONTINUE_INCOMPLETE') {
+      handleBatchGenerateShots();
+      return;
+    }
+    // Generic execute fallback
+    try {
+      setAutomationStep(`Executing ${action.display_name}...`);
+      if (api.executeOrchestrationAction) {
+        await api.executeOrchestrationAction(selectedProject.id, { action: action.action });
+      }
+      await loadWorkspaceData(selectedProject);
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Execution failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
     }
   };
 
@@ -300,9 +397,9 @@ export const App: React.FC = () => {
         only_incomplete: onlyIncomplete,
       });
       if (run.queued_count > 0) {
-        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
         setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
         await loadProjects();
+        await loadOrchestrationData(selectedProject.id);
       }
       await loadWorkspaceData(selectedProject);
       if (run.skipped_count > 0 || run.queued_count === 0) {
@@ -337,9 +434,9 @@ export const App: React.FC = () => {
         operation_type: 'RETRY_FAILED',
       });
       if (run.queued_count > 0) {
-        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
         setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
         await loadProjects();
+        await loadOrchestrationData(selectedProject.id);
       }
       await loadWorkspaceData(selectedProject);
       alert(`Retry summary:\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count}`);
@@ -645,6 +742,7 @@ export const App: React.FC = () => {
                 automationStep={automationStep}
                 projectStatus={selectedProject.status}
                 videoMode={selectedProject.video_mode}
+                orchestrationState={orchestrationState}
                 onGenerateFullStoryboard={handleGenerateFullStoryboard}
                 onBatchGenerateShots={handleBatchGenerateShots}
                 onRetryFailed={handleRetryFailed}
@@ -669,6 +767,8 @@ export const App: React.FC = () => {
                     setActiveTab('storyboard');
                   }
                 }}
+                onExecuteRecommendedAction={handleExecuteRecommendedAction}
+                onUpdateAutomationMode={handleUpdateAutomationMode}
               />
             )}
 
@@ -713,7 +813,9 @@ export const App: React.FC = () => {
                 project={selectedProject}
                 jobs={jobs}
                 budget={budget}
+                orchestrationAudits={orchestrationHistory}
                 onUpdateStatus={handleUpdateStatus}
+                onApproveStage={handleApproveStage}
               />
             )}
           </main>

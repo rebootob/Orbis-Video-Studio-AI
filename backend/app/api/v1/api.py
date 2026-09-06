@@ -10,11 +10,13 @@ from app.api.v1.endpoints import (
     shots,
     locks,
     cost_ledger,
+    orchestration,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(projects.router, tags=["projects"])
+api_router.include_router(orchestration.router, tags=["orchestration"])
 api_router.include_router(assets.router, tags=["assets"])
 api_router.include_router(document_extraction.router, tags=["document-extraction"])
 api_router.include_router(story_generation.router, tags=["story-generation"])

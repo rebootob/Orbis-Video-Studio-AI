@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from app.models.scene import Scene
     from app.models.asset_lock import AssetLock
     from app.models.usage_ledger import UsageLedger
+    from app.models.batch_run import BatchRun
+    from app.models.orchestration_audit import OrchestrationAudit
 
 
 def utc_now() -> datetime:
@@ -28,6 +30,7 @@ class Project(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="DRAFT", nullable=False)
     video_mode: Mapped[str] = mapped_column(String(50), default="STORY", nullable=False)
+    automation_mode: Mapped[str] = mapped_column(String(50), default="MANUAL", nullable=False)
     purpose: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     target_platform: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     target_duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -60,4 +63,10 @@ class Project(Base):
     )
     usage_ledger_entries: Mapped[List["UsageLedger"]] = relationship(
         "UsageLedger", back_populates="project", cascade="all, delete-orphan"
+    )
+    batch_runs: Mapped[List["BatchRun"]] = relationship(
+        "BatchRun", back_populates="project", cascade="all, delete-orphan"
+    )
+    orchestration_audits: Mapped[List["OrchestrationAudit"]] = relationship(
+        "OrchestrationAudit", back_populates="project", cascade="all, delete-orphan"
     )
