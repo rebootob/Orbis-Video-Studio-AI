@@ -203,6 +203,8 @@ export interface ReferenceItem {
 
 export interface BatchJobEstimateResponse {
   shot_count: number;
+  skipped_count?: number;
+  total_evaluated?: number;
   estimated_cost_total?: number | null;
   currency: string;
   has_unknown_pricing: boolean;
@@ -210,9 +212,43 @@ export interface BatchJobEstimateResponse {
 }
 
 export interface BatchJobCreatePayload {
+  operation_type?: 'CONTINUE_INCOMPLETE' | 'RETRY_FAILED' | 'GENERATE_SELECTED';
   shot_ids?: string[] | null;
   provider_name?: string | null;
   only_incomplete?: boolean;
+}
+
+export interface BatchResumePayload {
+  operation_type: 'CONTINUE_INCOMPLETE' | 'RETRY_FAILED' | 'GENERATE_SELECTED';
+  shot_ids?: string[] | null;
+  provider_name?: string | null;
+  only_incomplete?: boolean;
+}
+
+export interface BatchRunItem {
+  id: string;
+  batch_run_id: string;
+  shot_id: string;
+  job_id?: string | null;
+  decision: 'QUEUED' | 'SKIPPED' | 'FAILED';
+  skip_reason?: string | null;
+  created_at: string;
+}
+
+export interface BatchRun {
+  id: string;
+  project_id: string;
+  operation_type: string;
+  status: string;
+  requested_count: number;
+  eligible_count: number;
+  queued_count: number;
+  skipped_count: number;
+  completed_count: number;
+  failed_count: number;
+  created_at: string;
+  updated_at: string;
+  items?: BatchRunItem[];
 }
 
 export interface ReorderItem {

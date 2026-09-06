@@ -62,6 +62,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
 
   // Cost confirmation modal state
   const [costModalOpen, setCostModalOpen] = useState(false);
+  const [costModalOperationType, setCostModalOperationType] = useState<'CONTINUE_INCOMPLETE' | 'RETRY_FAILED' | 'GENERATE_SELECTED'>('CONTINUE_INCOMPLETE');
   const [costModalShotIds, setCostModalShotIds] = useState<string[] | null>(null);
   const [costModalOnlyIncomplete, setCostModalOnlyIncomplete] = useState(true);
 
@@ -152,6 +153,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
 
   // Batch trigger helpers
   const triggerBatchIncomplete = () => {
+    setCostModalOperationType('CONTINUE_INCOMPLETE');
     setCostModalShotIds(null);
     setCostModalOnlyIncomplete(true);
     setCostModalOpen(true);
@@ -159,7 +161,15 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
 
   const triggerSelectedShots = () => {
     if (selectedShotIds.size === 0) return;
+    setCostModalOperationType('GENERATE_SELECTED');
     setCostModalShotIds(Array.from(selectedShotIds));
+    setCostModalOnlyIncomplete(false);
+    setCostModalOpen(true);
+  };
+
+  const triggerRetryFailed = async () => {
+    setCostModalOperationType('RETRY_FAILED');
+    setCostModalShotIds(null);
     setCostModalOnlyIncomplete(false);
     setCostModalOpen(true);
   };
@@ -177,7 +187,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
         onGenerateFullStoryboard={onGenerateFullStoryboard}
         onBatchGenerateShots={triggerBatchIncomplete}
         onGenerateSelectedShots={triggerSelectedShots}
-        onRetryFailed={onRetryFailed}
+        onRetryFailed={triggerRetryFailed}
         onStageReview={onStageReview}
       />
 
@@ -282,12 +292,17 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
       <CostConfirmationModal
         isOpen={costModalOpen}
         projectId={projectId}
+        operationType={costModalOperationType}
         shotIds={costModalShotIds}
         onlyIncomplete={costModalOnlyIncomplete}
         onClose={() => setCostModalOpen(false)}
         onConfirm={async () => {
-          await onBatchGenerateShots(costModalShotIds, costModalOnlyIncomplete);
-          setSelectedShotIds(new Set());
+          if (costModalOperationType === 'RETRY_FAILED') {
+            await onRetryFailed();
+          } else {
+            await onBatchGenerateShots(costModalShotIds, costModalOnlyIncomplete);
+            setSelectedShotIds(new Set());
+          }
         }}
       />
     </div>

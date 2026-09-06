@@ -12,6 +12,8 @@ import type {
   ReferenceItem,
   BatchJobEstimateResponse,
   BatchJobCreatePayload,
+  BatchResumePayload,
+  BatchRun,
   ReorderItem,
   AssetUploadResponse,
 } from './types';
@@ -252,6 +254,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload || {}),
     });
+  },
+
+  async resumeProjectJobs(projectId: string, payload?: BatchResumePayload): Promise<BatchRun> {
+    return request<BatchRun>(`/projects/${projectId}/jobs/resume`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  async listBatchRuns(projectId: string): Promise<BatchRun[]> {
+    return request<BatchRun[]>(`/projects/${projectId}/batch-runs`);
+  },
+
+  async getBatchRun(projectId: string, runId: string): Promise<BatchRun> {
+    return request<BatchRun>(`/projects/${projectId}/batch-runs/${runId}`);
   },
 
   async cancelJob(jobId: string): Promise<GenerationJob> {

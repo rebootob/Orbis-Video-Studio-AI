@@ -66,13 +66,14 @@ def test_queue_safety_upgrade_preserves_clean_requests_and_quarantines_legacy(tm
     project_id = uuid.uuid4()
     story_id = uuid.uuid4()
     scene_id = uuid.uuid4()
-    shot_id = uuid.uuid4()
+    shot_ids = [uuid.uuid4() for _ in range(3)]
     now = datetime.now(timezone.utc)
     with engine.begin() as connection:
         connection.execute(projects_tbl.insert().values(id=project_id, title="Migration test", status="DRAFT", created_at=now, updated_at=now))
         connection.execute(stories_tbl.insert().values(id=story_id, project_id=project_id, logline="Test", status="DRAFT", is_locked=False, created_at=now, updated_at=now))
         connection.execute(scenes_tbl.insert().values(id=scene_id, story_id=story_id, scene_number=1, heading="Test", is_locked=False, created_at=now, updated_at=now))
-        connection.execute(shots_tbl.insert().values(id=shot_id, scene_id=scene_id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=False, status="PENDING", created_at=now, updated_at=now))
+        for index, s_id in enumerate(shot_ids):
+            connection.execute(shots_tbl.insert().values(id=s_id, scene_id=scene_id, shot_number=index + 1, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=False, status="PENDING", created_at=now, updated_at=now))
     jobs = Table("generation_jobs", MetaData(), autoload_with=engine)
     jobs.c.id.type = Uuid()
     jobs.c.shot_id.type = Uuid()
@@ -80,7 +81,7 @@ def test_queue_safety_upgrade_preserves_clean_requests_and_quarantines_legacy(tm
     payload = {"prompt": "Clean prompt", "provider_specific_params": {"resolution": "720p"}}
     with engine.begin() as connection:
         for index, job_id in enumerate(ids):
-            connection.execute(jobs.insert().values(id=job_id, shot_id=shot_id, provider_name="vidu",
+            connection.execute(jobs.insert().values(id=job_id, shot_id=shot_ids[index], provider_name="vidu",
                 status="PROCESSING" if index == 1 else "PENDING",
                 payload={"nested": [{"api_key": "LEAK"}]} if index == 2 else payload,
                 result={"untrusted": {"secret": "LEAK"}}, error_message="LEAK",
@@ -432,15 +433,113 @@ def test_010_story_version_history_lifecycle(tmp_path, monkeypatch):
         assert row["title"] == "Initial Title"
         assert row["version_number"] == 1
 
-    # 3. Downgrade -1 (to 009)
-    command.downgrade(cfg, "-1")
+    # 3. Downgrade to 009
+    command.downgrade(cfg, "009_cost_ledger_and_budget")
     meta3 = MetaData()
     meta3.reflect(bind=engine)
     assert "story_versions" not in meta3.tables
 
-    # 4. Re-upgrade to head (010)
+    # 4. Re-upgrade to head
     command.upgrade(cfg, "head")
     meta4 = MetaData()
     meta4.reflect(bind=engine)
     assert "story_versions" in meta4.tables
+    engine.dispose()
+
+
+def test_011_batch_resume_runs_and_indexes_lifecycle(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+    url = f"sqlite:///{tmp_path / 'wp011_migration.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to 010
+    command.upgrade(cfg, "010_story_version_history")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "batch_runs" not in meta.tables
+    assert "batch_run_items" not in meta.tables
+
+    # 2. Upgrade to head (011)
+    command.upgrade(cfg, "head")
+    meta2 = MetaData()
+    meta2.reflect(bind=engine)
+    assert "batch_runs" in meta2.tables
+    assert "batch_run_items" in meta2.tables
+
+    projects_tbl = Table("projects", meta2, autoload_with=engine)
+    projects_tbl.c.id.type = Uuid()
+    scenes_tbl = Table("scenes", meta2, autoload_with=engine)
+    scenes_tbl.c.id.type = Uuid()
+    scenes_tbl.c.project_id.type = Uuid()
+    shots_tbl = Table("shots", meta2, autoload_with=engine)
+    shots_tbl.c.id.type = Uuid()
+    shots_tbl.c.scene_id.type = Uuid()
+    batch_runs_tbl = Table("batch_runs", meta2, autoload_with=engine)
+    batch_runs_tbl.c.id.type = Uuid()
+    batch_runs_tbl.c.project_id.type = Uuid()
+    batch_run_items_tbl = Table("batch_run_items", meta2, autoload_with=engine)
+    batch_run_items_tbl.c.id.type = Uuid()
+    batch_run_items_tbl.c.batch_run_id.type = Uuid()
+    batch_run_items_tbl.c.shot_id.type = Uuid()
+
+    now = datetime.now(timezone.utc)
+    p_id = uuid.uuid4()
+    sc_id = uuid.uuid4()
+    sh_id = uuid.uuid4()
+    br_id = uuid.uuid4()
+    bri_id = uuid.uuid4()
+
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(id=p_id, title="P1", status="SHOT_PLAN_APPROVED", created_at=now, updated_at=now))
+        conn.execute(scenes_tbl.insert().values(id=sc_id, project_id=p_id, scene_number=1, is_locked=False, created_at=now, updated_at=now))
+        conn.execute(shots_tbl.insert().values(id=sh_id, scene_id=sc_id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=False, status="PENDING", created_at=now, updated_at=now))
+        conn.execute(batch_runs_tbl.insert().values(
+            id=br_id,
+            project_id=p_id,
+            operation_type="CONTINUE_INCOMPLETE",
+            status="COMPLETED",
+            requested_count=1,
+            eligible_count=1,
+            queued_count=1,
+            skipped_count=0,
+            completed_count=0,
+            failed_count=0,
+            created_at=now,
+            updated_at=now,
+        ))
+        conn.execute(batch_run_items_tbl.insert().values(
+            id=bri_id,
+            batch_run_id=br_id,
+            shot_id=sh_id,
+            decision="QUEUED",
+            skip_reason=None,
+            created_at=now,
+        ))
+
+    with engine.connect() as conn:
+        r = conn.execute(select(batch_runs_tbl).where(batch_runs_tbl.c.id == br_id)).mappings().first()
+        assert r["operation_type"] == "CONTINUE_INCOMPLETE"
+        item = conn.execute(select(batch_run_items_tbl).where(batch_run_items_tbl.c.id == bri_id)).mappings().first()
+        assert item["decision"] == "QUEUED"
+
+    # 3. Downgrade to 010
+    command.downgrade(cfg, "010_story_version_history")
+    meta3 = MetaData()
+    meta3.reflect(bind=engine)
+    assert "batch_runs" not in meta3.tables
+    assert "batch_run_items" not in meta3.tables
+
+    # 4. Upgrade back to head
+    command.upgrade(cfg, "head")
+    meta4 = MetaData()
+    meta4.reflect(bind=engine)
+    assert "batch_runs" in meta4.tables
+    assert "batch_run_items" in meta4.tables
     engine.dispose()

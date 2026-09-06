@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, UniqueConstraint, Index, func
+from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, UniqueConstraint, Index, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -20,6 +20,13 @@ class GenerationJob(Base):
     __table_args__ = (
         UniqueConstraint("shot_id", "idempotency_key", name="uq_generation_jobs_shot_idempotency_key"),
         Index("ix_generation_jobs_status", "status"),
+        Index(
+            "uq_generation_jobs_active_shot",
+            "shot_id",
+            unique=True,
+            sqlite_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED')"),
+            postgresql_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED')"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

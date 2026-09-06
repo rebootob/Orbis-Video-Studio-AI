@@ -48,3 +48,62 @@ class ClaimResponse(JobResponse):
 
 class DispatchRequest(BaseModel):
     claim_token: str
+
+
+class BatchRunItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    batch_run_id: uuid.UUID
+    shot_id: uuid.UUID
+    job_id: Optional[uuid.UUID] = None
+    decision: str
+    skip_reason: Optional[str] = None
+    created_at: datetime
+
+
+class BatchRunSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    operation_type: str
+    status: str
+    requested_count: int
+    eligible_count: int
+    queued_count: int
+    skipped_count: int
+    completed_count: int
+    failed_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class BatchRunDetailResponse(BatchRunSummaryResponse):
+    items: List[BatchRunItemResponse]
+    items_total: int
+    item_limit: int
+    item_offset: int
+
+
+# Backward compatibility alias
+BatchRunResponse = BatchRunSummaryResponse
+
+
+from typing import Optional, List, Literal
+
+class BatchResumeRequest(BaseModel):
+    operation_type: Literal["CONTINUE_INCOMPLETE", "RETRY_FAILED", "GENERATE_SELECTED"] = "CONTINUE_INCOMPLETE"
+    shot_ids: Optional[List[uuid.UUID]] = None
+    provider_name: Optional[str] = None
+    only_incomplete: bool = True
+
+
+class BatchResumeEstimateResponse(BaseModel):
+    shot_count: int
+    skipped_count: int = 0
+    total_evaluated: int = 0
+    estimated_cost_total: Optional[float] = None
+    currency: str = "USD"
+    has_unknown_pricing: bool = False
+    warning_messages: List[str] = []

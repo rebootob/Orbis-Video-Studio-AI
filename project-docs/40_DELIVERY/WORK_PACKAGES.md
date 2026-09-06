@@ -73,43 +73,28 @@ graph TD
 
 ## 3. Active Work Package
 
-```text
-ACTIVE_WORK_PACKAGE = NONE
-CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
-```
+- **P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails**
+  - **Status:** **AUTHORIZED / IMPLEMENTED / WAITING CHATGPT REVIEW**
+  - **Issue:** #28
+  - **Branch:** `ai/p2-wp011-batch-resume`
+  - **Current gate:** ChatGPT independent review -> Owner merge decision.
 
-No active Work Package is currently authorized for execution.
-Do not implement or start the next Work Package without explicit Owner authorization.
+### WP011 Scope Delivered:
+- Canonical `BatchResumeService` supporting Generate Selected, Continue Incomplete, Retry Failed.
+- Shot-level deduplication (at most ONE new job per shot, even with multiple historical failed jobs).
+- Repeat-safe resume semantics (no duplicate active work, preservation of completed assets).
+- Lightweight `BatchRun` & `BatchRunItem` audit trail with truthful skip reasons.
+- Set-based candidate selection eliminating N+1 database queries.
+- Migration `011_batch_resume_runs_and_indexes.py` with targeted indexes.
+- Full frontend integration removing client-side retry loops.
 
 ---
 
-## 4. Remaining Roadmap — Direction After WP010
+## 4. Remaining Roadmap — Direction After WP011
 
 The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
 
 ### Phase 2 — Production Orchestration & Generation
-
-- **P2-WP011 — Selective / Batch Regeneration & Resume Service**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - Regenerate selected unlocked/failed/incomplete work only; preserve completed assets and history.
-  - **Planning Note for WP011:**
-    `PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
-    For WP011 planning specifically consider:
-    - selective/batch operations must avoid unbounded loading
-    - avoid N+1 database behavior
-    - pagination/chunking for large job/shot sets
-    - required DB indexes for batch/resume paths
-    - bounded concurrency
-    - truthful progress for large batches
-    - performance/load regression tests
-    *(Do not implement these items during documentation closure).*
-  - **Future-Performance Backlog Note (Preserved):**
-    - server-side Project pagination
-    - Asset/Job history pagination
-    - media thumbnail/lazy-loading
-    - streaming/multipart large-file upload
-    - media preview streaming
-    - frontend virtualization where needed
 
 - **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
   - **Status:** PROPOSED / NOT AUTHORIZED

@@ -1,11 +1,21 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
 from app.db.session import get_db
-from app.schemas.generation_job import JobCreateRequest, JobResponse, ClaimResponse, DispatchRequest
+from app.schemas.generation_job import (
+    JobCreateRequest,
+    JobResponse,
+    ClaimResponse,
+    DispatchRequest,
+    BatchRunResponse,
+    BatchRunSummaryResponse,
+    BatchRunDetailResponse,
+    BatchResumeRequest,
+    BatchResumeEstimateResponse,
+)
 from app.services.job_dispatch import JobDispatchService, ALLOWED_PRODUCTION_STATUSES, resolve_shot_project
 from app.services.pricing import ProviderPricingService, CostStatus
 from app.providers.factory import ProviderFactory
@@ -148,98 +158,27 @@ def list_project_jobs(
 
 
 class BatchJobCreateRequest(BaseModel):
+    operation_type: Literal["CONTINUE_INCOMPLETE", "RETRY_FAILED", "GENERATE_SELECTED"] = "CONTINUE_INCOMPLETE"
     shot_ids: Optional[List[uuid.UUID]] = None
     provider_name: Optional[str] = None
     only_incomplete: bool = True
 
 
-class BatchJobEstimateResponse(BaseModel):
-    shot_count: int
-    estimated_cost_total: Optional[float] = None
-    currency: str = "USD"
-    has_unknown_pricing: bool = False
-    warning_messages: List[str] = []
-
-
-@router.post("/projects/{project_id}/jobs/estimate", response_model=BatchJobEstimateResponse)
+@router.post("/projects/{project_id}/jobs/estimate", response_model=BatchResumeEstimateResponse)
 def estimate_project_batch_jobs(
     project_id: uuid.UUID,
     request: Optional[BatchJobCreateRequest] = None,
     db: Session = Depends(get_db),
 ):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{project_id}' not found",
-        )
-
     req = request or BatchJobCreateRequest()
-    scenes = (
-        db.query(Scene)
-        .filter((Scene.project_id == project_id) | (Scene.story.has(project_id=project_id)))
-        .all()
-    )
-
-    candidate_shots = []
-    for scene in scenes:
-        if (scene.scene_config or {}).get("archived"):
-            continue
-        shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
-        for shot in shots:
-            if shot.status == "ARCHIVED":
-                continue
-            if req.shot_ids is not None and shot.id not in req.shot_ids:
-                continue
-            if shot.is_locked:
-                continue
-            if shot.shot_type not in ("AI_GENERATED", "MIXED"):
-                continue
-            if req.only_incomplete:
-                completed_job = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.shot_id == shot.id,
-                        GenerationJob.status == "COMPLETED",
-                    )
-                    .first()
-                )
-                if completed_job:
-                    continue
-            candidate_shots.append(shot)
-
-    total_cost = 0.0
-    has_unknown = False
-    provider = req.provider_name or ProviderFactory.get_default_provider_name()
-
-    for shot in candidate_shots:
-        cost, curr, status_flag = ProviderPricingService.estimate_cost(
-            provider=provider,
-            operation="VIDEO_GENERATION",
-            params={"duration_seconds": shot.duration_seconds},
-        )
-        if status_flag == CostStatus.UNKNOWN or cost is None:
-            has_unknown = True
-        else:
-            total_cost += cost
-
-    warnings = []
-    if has_unknown:
-        warnings.append("Cost pricing is UNKNOWN for one or more candidate shots. Prices will not be fabricated.")
-    if project.budget_limit is not None:
-        from app.services.budget import BudgetService
-        summary = BudgetService.get_project_budget_summary(db, project_id)
-        if summary.hard_limit_exceeded:
-            warnings.append("Project is currently over hard budget limit. Dispatch will be rejected by safety gates.")
-        elif summary.soft_limit_exceeded:
-            warnings.append(f"Project spend has exceeded soft threshold ({project.budget_threshold_percentage}%).")
-
-    return BatchJobEstimateResponse(
-        shot_count=len(candidate_shots),
-        estimated_cost_total=round(total_cost, 4) if not has_unknown else None,
-        currency="USD",
-        has_unknown_pricing=has_unknown,
-        warning_messages=warnings,
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.estimate_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=req.provider_name,
+        only_incomplete=req.only_incomplete,
     )
 
 
@@ -250,69 +189,88 @@ def batch_generate_project_shots(
     provider_name: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{project_id}' not found",
-        )
-
-    if project.status not in ALLOWED_PRODUCTION_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Production generation requires 'SHOT_PLAN_APPROVED' stage, current project status is '{project.status}'.",
-        )
-
     req = request or BatchJobCreateRequest()
-    eff_provider = req.provider_name or provider_name or ProviderFactory.get_default_provider_name()
+    eff_provider = req.provider_name or provider_name
+    from app.services.batch_resume import BatchResumeService
 
-    scenes = (
-        db.query(Scene)
-        .filter((Scene.project_id == project_id) | (Scene.story.has(project_id=project_id)))
-        .all()
+    estimate = BatchResumeService.estimate_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=eff_provider,
+        only_incomplete=req.only_incomplete,
     )
-    created_jobs = []
-    for scene in scenes:
-        if (scene.scene_config or {}).get("archived"):
-            continue
-        shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
-        for shot in shots:
-            if shot.status == "ARCHIVED":
-                continue
-            if req.shot_ids is not None and shot.id not in req.shot_ids:
-                continue
-            if shot.is_locked:
-                continue
-            if shot.shot_type not in ("AI_GENERATED", "MIXED"):
-                continue
+    if estimate.get("shot_count", 0) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Batch operation exceeds legacy endpoint list capacity ({estimate['shot_count']} eligible shots > 100 limit). "
+                "Use canonical 'POST /projects/{project_id}/jobs/resume' for large or unbounded batch runs."
+            ),
+        )
 
-            if req.only_incomplete:
-                completed = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.shot_id == shot.id,
-                        GenerationJob.status == "COMPLETED",
-                    )
-                    .first()
-                )
-                if completed:
-                    continue
+    batch_run, jobs = BatchResumeService.execute_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=eff_provider,
+        only_incomplete=req.only_incomplete,
+        max_queued_jobs=100,
+    )
+    return jobs
 
-            active_job = (
-                db.query(GenerationJob)
-                .filter(
-                    GenerationJob.shot_id == shot.id,
-                    GenerationJob.status.in_(["PENDING", "CLAIMED", "SUBMITTED", "POLLING"]),
-                )
-                .first()
-            )
-            if active_job:
-                continue
 
-            job = JobDispatchService.create_and_dispatch_job(
-                db=db,
-                shot_id=shot.id,
-                provider_name=eff_provider,
-            )
-            created_jobs.append(job)
-    return created_jobs
+@router.post("/projects/{project_id}/jobs/resume", response_model=BatchRunSummaryResponse)
+def resume_project_jobs(
+    project_id: uuid.UUID,
+    request: Optional[BatchResumeRequest] = None,
+    db: Session = Depends(get_db),
+):
+    req = request or BatchResumeRequest()
+    from app.services.batch_resume import BatchResumeService
+    batch_run, jobs = BatchResumeService.execute_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=req.provider_name,
+        only_incomplete=req.only_incomplete,
+        accumulate_jobs=False,
+    )
+    return batch_run
+
+
+@router.get("/projects/{project_id}/batch-runs", response_model=List[BatchRunSummaryResponse])
+def list_project_batch_runs(
+    project_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.list_project_batch_runs(
+        db=db,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/projects/{project_id}/batch-runs/{run_id}", response_model=BatchRunDetailResponse)
+def get_batch_run_details(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    item_limit: int = Query(100, ge=1, le=500),
+    item_offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.get_batch_run_details(
+        db=db,
+        project_id=project_id,
+        run_id=run_id,
+        item_limit=item_limit,
+        item_offset=item_offset,
+    )

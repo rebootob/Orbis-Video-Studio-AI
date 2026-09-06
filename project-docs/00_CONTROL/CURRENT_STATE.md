@@ -35,9 +35,11 @@ P2-WP010_REVIEWED_HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
 P2-WP010_MERGE_COMMIT: 639e61fb69b6abee8598074add458035db906ceb
 P2-WP010_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124386306)
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: OWNER DECISION FOR NEXT WORK PACKAGE
-P2-WP011: PROPOSED / NOT AUTHORIZED
+ACTIVE_WORK_PACKAGE: P2-WP011
+P2-WP011_ISSUE: "#28"
+P2-WP011_BRANCH: ai/p2-wp011-batch-resume
+P2-WP011: AUTHORIZED / IMPLEMENTED / WAITING CHATGPT REVIEW
+CURRENT_GATE: CHATGPT INDEPENDENT REVIEW
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -90,7 +92,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | Hybrid shot engine, lock machine, Core V1 video modes and config inheritance complete. |
 | Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
 | Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
-| Selective / Batch Regeneration & Resume Service (P2-WP011) | PROPOSED / NOT AUTHORIZED | Next candidate WP; pending Owner authorization. |
+| Selective / Batch Regeneration & Resume Service (P2-WP011) | AUTHORIZED / IMPLEMENTED / WAITING CHATGPT REVIEW | Canonical candidate selection, shot deduplication, repeat-safe resume, set-based DB queries (no N+1), and BatchRun audit complete. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -139,9 +141,10 @@ Beautiful but not distracting
 ## Next Allowed Action
 
 1. Keep WP001-WP010 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE`.
-4. Antigravity = STOP / NONE.
-5. P2-WP011 remains PROPOSED / NOT AUTHORIZED. Do not start WP011 or any later WP without explicit Owner authorization.
+2. `ACTIVE_WORK_PACKAGE = P2-WP011`.
+3. `CURRENT_GATE = CHATGPT INDEPENDENT REVIEW`.
+4. Antigravity = STOP / WAITING REVIEW.
+5. Do not merge without Owner approval.
+6. Do not start WP012 or any later WP without explicit Owner authorization.
 
 Live GitHub/repository truth newer than this document is authoritative.
