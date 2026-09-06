@@ -293,7 +293,9 @@ export const App: React.FC = () => {
     }
     try {
       setAutomationStep('Dispatching Batch Generation Jobs...');
-      await api.batchGenerateProjectShots(selectedProject.id, {
+      const opType = shotIds && shotIds.length > 0 ? 'GENERATE_SELECTED' : 'CONTINUE_INCOMPLETE';
+      const run = await api.resumeProjectJobs(selectedProject.id, {
+        operation_type: opType,
         shot_ids: shotIds || undefined,
         only_incomplete: onlyIncomplete,
       });
@@ -301,6 +303,9 @@ export const App: React.FC = () => {
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
       await loadProjects();
+      if (run.skipped_count > 0) {
+        alert(`Batch operation summary:\n• Requested: ${run.requested_count}\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count} (due to locks, completed work, or active jobs)`);
+      }
     } catch (err: any) {
       alert(`Batch generation failed: ${err.message}`);
     } finally {
@@ -308,18 +313,34 @@ export const App: React.FC = () => {
     }
   };
 
-  // Retry Failed Jobs
+  // Retry Failed Jobs via Canonical Backend Service
   const handleRetryFailed = async () => {
     if (!selectedProject) return;
-    const failed = jobs.filter((j) => j.status === 'FAILED');
-    for (const j of failed) {
-      try {
-        await api.createJob(j.shot_id, j.provider_name);
-      } catch (err: any) {
-        console.error('Retry error', err);
-      }
+    const allowedStatuses = [
+      'SHOT_PLAN_APPROVED',
+      'IMAGES_GENERATED',
+      'VIDEO_IN_PROGRESS',
+      'FINAL_REVIEW',
+      'READY_FOR_REVIEW',
+      'COMPLETED',
+      'APPROVED',
+    ];
+    if (!allowedStatuses.includes(selectedProject.status)) {
+      alert("Shot Plan must be approved before retrying production jobs. Current stage is '" + selectedProject.status + "'.");
+      return;
     }
-    await loadWorkspaceData(selectedProject);
+    try {
+      setAutomationStep('Retrying failed jobs...');
+      const run = await api.resumeProjectJobs(selectedProject.id, {
+        operation_type: 'RETRY_FAILED',
+      });
+      await loadWorkspaceData(selectedProject);
+      alert(`Retry summary:\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count}`);
+    } catch (err: any) {
+      alert(`Retry failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
   };
 
   // Scene Operations

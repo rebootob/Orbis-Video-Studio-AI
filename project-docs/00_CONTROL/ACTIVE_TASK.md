@@ -7,91 +7,65 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails
 ```
 
 Status:
 
 ```text
-WP010 PASS / CLOSED / MERGED
-CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
+AUTHORIZED / IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
 ```
 
-Last Completed Work Package:
+Current Work Tracking:
 
 ```text
-P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
-Issue: #24
-PR: #25
-Final Reviewed HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
-Merge Commit: 639e61fb69b6abee8598074add458035db906ceb
-Final ChatGPT Independent Review: PASS / READY TO MERGE (Review ID 5124386306)
+Issue: #28
+Branch: ai/p2-wp011-batch-resume
+Gate: WAITING CHATGPT INDEPENDENT REVIEW
 ```
 
-Execution Engine:
+Execution Roles:
 
 ```text
-Antigravity = STOP / NONE
+Owner = final human authority / UAT / merge approval
+ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
+Antigravity = STOP / WAITING REVIEW (bounded low-credit Execution Plane)
 Codex = STOP
 Claude Code = STOP
 ```
 
-No active execution engine is authorized for application-code implementation.
-
 ---
 
-## Next Candidate Work Package (Proposed Only)
+## Scope Implemented in P2-WP011
 
-```text
-P2-WP011 — Selective / Batch Regeneration & Resume Service
-Status: PROPOSED / NOT AUTHORIZED
-```
-
-Do NOT implement WP011 without explicit Owner authorization.
-
-### Planning Note for Future WP011 Consideration
-
-`PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
-
-For WP011 planning specifically consider:
-- selective/batch operations must avoid unbounded loading
-- avoid N+1 database behavior
-- pagination/chunking for large job/shot sets
-- required DB indexes for batch/resume paths
-- bounded concurrency
-- truthful progress for large batches
-- performance/load regression tests
-
-*(Do not implement these items during documentation closure).*
-
-### Future-Performance Backlog Note (Preserved)
-
-- server-side Project pagination
-- Asset/Job history pagination
-- media thumbnail/lazy-loading
-- streaming/multipart large-file upload
-- media preview streaming
-- frontend virtualization where needed
-
----
-
-## Current Execution Roles
-
-```text
-Owner = final human authority / UAT / next WP authorization
-ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE
-Codex = STOP by default
-Claude Code = STOP
-```
-
-The local GitHub watcher/dispatcher remains PAUSED and must not be treated as a production execution dependency.
+1. **Canonical Backend Batch / Resume Service (`BatchResumeService`)**:
+   - Centralized candidate evaluation supporting `GENERATE_SELECTED`, `CONTINUE_INCOMPLETE`, `RETRY_FAILED`.
+   - Set-based DB queries (no N+1 loops per shot).
+   - Candidate rules enforce:
+     - Archived shots/scenes -> `ARCHIVED`
+     - Locked shots/scenes/scripts -> `LOCKED`
+     - Non-generatable shots -> `NOT_GENERATABLE`
+     - Completed jobs -> `ALREADY_COMPLETED`
+     - Active jobs -> `ACTIVE_JOB_EXISTS`
+     - Failed jobs without completed/active work -> `ELIGIBLE` for retry.
+2. **Shot-Level Deduplication**:
+   - Multiple failed jobs for one shot create at most ONE new retry job.
+   - Repeated resume calls do not duplicate active work.
+3. **Lightweight BatchRun Audit**:
+   - `BatchRun` and `BatchRunItem` models and migration `011_batch_resume_runs_and_indexes.py`.
+   - Records requested, eligible, queued, skipped counts with truthful skip reasons.
+4. **Performance & Scalability Guardrails**:
+   - Elimination of per-shot DB loops in candidate evaluation.
+   - Added `ix_shots_scene_id` and `ix_generation_jobs_shot_status`.
+5. **API & Frontend Integration**:
+   - Endpoints `/projects/{project_id}/jobs/estimate`, `/batch`, `/resume`, `/batch-runs`.
+   - Frontend `handleConfirmBatchGenerate` and `handleRetryFailed` wired to canonical endpoints.
 
 ---
 
 ## Next Allowed Action
 
-1. Keep WP001-WP010 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. Wait for Owner decision and authorization for the next Work Package.
-4. Do not start WP011 or any later WP automatically.
+1. Antigravity: STOP.
+2. Open PR targeting `main`.
+3. Do not merge without explicit Owner approval and ChatGPT independent PASS review.
+4. Do not start WP012.

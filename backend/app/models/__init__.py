@@ -17,6 +17,7 @@ from app.models.reference_library import (
 )
 from app.models.asset_lock import AssetLock
 from app.models.usage_ledger import UsageLedger, LedgerAdjustment
+from app.models.batch_run import BatchRun, BatchRunItem
 
 __all__ = [
     "Base",
@@ -37,5 +38,7 @@ __all__ = [
     "AssetLock",
     "UsageLedger",
     "LedgerAdjustment",
+    "BatchRun",
+    "BatchRunItem",
 ]
 

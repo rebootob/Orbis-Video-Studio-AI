@@ -5,7 +5,15 @@ from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
 from app.db.session import get_db
-from app.schemas.generation_job import JobCreateRequest, JobResponse, ClaimResponse, DispatchRequest
+from app.schemas.generation_job import (
+    JobCreateRequest,
+    JobResponse,
+    ClaimResponse,
+    DispatchRequest,
+    BatchRunResponse,
+    BatchResumeRequest,
+    BatchResumeEstimateResponse,
+)
 from app.services.job_dispatch import JobDispatchService, ALLOWED_PRODUCTION_STATUSES, resolve_shot_project
 from app.services.pricing import ProviderPricingService, CostStatus
 from app.providers.factory import ProviderFactory
@@ -153,93 +161,21 @@ class BatchJobCreateRequest(BaseModel):
     only_incomplete: bool = True
 
 
-class BatchJobEstimateResponse(BaseModel):
-    shot_count: int
-    estimated_cost_total: Optional[float] = None
-    currency: str = "USD"
-    has_unknown_pricing: bool = False
-    warning_messages: List[str] = []
-
-
-@router.post("/projects/{project_id}/jobs/estimate", response_model=BatchJobEstimateResponse)
+@router.post("/projects/{project_id}/jobs/estimate", response_model=BatchResumeEstimateResponse)
 def estimate_project_batch_jobs(
     project_id: uuid.UUID,
     request: Optional[BatchJobCreateRequest] = None,
     db: Session = Depends(get_db),
 ):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{project_id}' not found",
-        )
-
     req = request or BatchJobCreateRequest()
-    scenes = (
-        db.query(Scene)
-        .filter((Scene.project_id == project_id) | (Scene.story.has(project_id=project_id)))
-        .all()
-    )
-
-    candidate_shots = []
-    for scene in scenes:
-        if (scene.scene_config or {}).get("archived"):
-            continue
-        shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
-        for shot in shots:
-            if shot.status == "ARCHIVED":
-                continue
-            if req.shot_ids is not None and shot.id not in req.shot_ids:
-                continue
-            if shot.is_locked:
-                continue
-            if shot.shot_type not in ("AI_GENERATED", "MIXED"):
-                continue
-            if req.only_incomplete:
-                completed_job = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.shot_id == shot.id,
-                        GenerationJob.status == "COMPLETED",
-                    )
-                    .first()
-                )
-                if completed_job:
-                    continue
-            candidate_shots.append(shot)
-
-    total_cost = 0.0
-    has_unknown = False
-    provider = req.provider_name or ProviderFactory.get_default_provider_name()
-
-    for shot in candidate_shots:
-        cost, curr, status_flag = ProviderPricingService.estimate_cost(
-            provider=provider,
-            operation="VIDEO_GENERATION",
-            params={"duration_seconds": shot.duration_seconds},
-        )
-        if status_flag == CostStatus.UNKNOWN or cost is None:
-            has_unknown = True
-        else:
-            total_cost += cost
-
-    warnings = []
-    if has_unknown:
-        warnings.append("Cost pricing is UNKNOWN for one or more candidate shots. Prices will not be fabricated.")
-    if project.budget_limit is not None:
-        from app.services.budget import BudgetService
-        summary = BudgetService.get_project_budget_summary(db, project_id)
-        if summary.hard_limit_exceeded:
-            warnings.append("Project is currently over hard budget limit. Dispatch will be rejected by safety gates.")
-        elif summary.soft_limit_exceeded:
-            warnings.append(f"Project spend has exceeded soft threshold ({project.budget_threshold_percentage}%).")
-
-    return BatchJobEstimateResponse(
-        shot_count=len(candidate_shots),
-        estimated_cost_total=round(total_cost, 4) if not has_unknown else None,
-        currency="USD",
-        has_unknown_pricing=has_unknown,
-        warning_messages=warnings,
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.estimate_batch(
+        db=db,
+        project_id=project_id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=req.shot_ids,
+        provider_name=req.provider_name,
+        only_incomplete=req.only_incomplete,
     )
 
 
@@ -250,69 +186,69 @@ def batch_generate_project_shots(
     provider_name: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project '{project_id}' not found",
-        )
-
-    if project.status not in ALLOWED_PRODUCTION_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Production generation requires 'SHOT_PLAN_APPROVED' stage, current project status is '{project.status}'.",
-        )
-
     req = request or BatchJobCreateRequest()
-    eff_provider = req.provider_name or provider_name or ProviderFactory.get_default_provider_name()
+    eff_provider = req.provider_name or provider_name
+    from app.services.batch_resume import BatchResumeService
+    batch_run, jobs = BatchResumeService.execute_batch(
+        db=db,
+        project_id=project_id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=req.shot_ids,
+        provider_name=eff_provider,
+        only_incomplete=req.only_incomplete,
+    )
+    return jobs
 
-    scenes = (
-        db.query(Scene)
-        .filter((Scene.project_id == project_id) | (Scene.story.has(project_id=project_id)))
+
+@router.post("/projects/{project_id}/jobs/resume", response_model=BatchRunResponse)
+def resume_project_jobs(
+    project_id: uuid.UUID,
+    request: Optional[BatchResumeRequest] = None,
+    db: Session = Depends(get_db),
+):
+    req = request or BatchResumeRequest()
+    from app.services.batch_resume import BatchResumeService
+    batch_run, jobs = BatchResumeService.execute_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=req.provider_name,
+        only_incomplete=req.only_incomplete,
+    )
+    return batch_run
+
+
+@router.get("/projects/{project_id}/batch-runs", response_model=List[BatchRunResponse])
+def list_project_batch_runs(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    from app.models.batch_run import BatchRun
+    runs = (
+        db.query(BatchRun)
+        .filter(BatchRun.project_id == project_id)
+        .order_by(BatchRun.created_at.desc())
         .all()
     )
-    created_jobs = []
-    for scene in scenes:
-        if (scene.scene_config or {}).get("archived"):
-            continue
-        shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
-        for shot in shots:
-            if shot.status == "ARCHIVED":
-                continue
-            if req.shot_ids is not None and shot.id not in req.shot_ids:
-                continue
-            if shot.is_locked:
-                continue
-            if shot.shot_type not in ("AI_GENERATED", "MIXED"):
-                continue
+    return runs
 
-            if req.only_incomplete:
-                completed = (
-                    db.query(GenerationJob)
-                    .filter(
-                        GenerationJob.shot_id == shot.id,
-                        GenerationJob.status == "COMPLETED",
-                    )
-                    .first()
-                )
-                if completed:
-                    continue
 
-            active_job = (
-                db.query(GenerationJob)
-                .filter(
-                    GenerationJob.shot_id == shot.id,
-                    GenerationJob.status.in_(["PENDING", "CLAIMED", "SUBMITTED", "POLLING"]),
-                )
-                .first()
-            )
-            if active_job:
-                continue
-
-            job = JobDispatchService.create_and_dispatch_job(
-                db=db,
-                shot_id=shot.id,
-                provider_name=eff_provider,
-            )
-            created_jobs.append(job)
-    return created_jobs
+@router.get("/projects/{project_id}/batch-runs/{run_id}", response_model=BatchRunResponse)
+def get_batch_run_details(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    from app.models.batch_run import BatchRun
+    run = (
+        db.query(BatchRun)
+        .filter(BatchRun.id == run_id, BatchRun.project_id == project_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"BatchRun '{run_id}' not found for project '{project_id}'",
+        )
+    return run
