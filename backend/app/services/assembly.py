@@ -40,6 +40,74 @@ def _to_uuid(val: Any) -> uuid.UUID:
 class AssemblyService:
 
     @staticmethod
+    def _resolve_shot_visual_source(shot: Shot, asset_map: Dict[str, Asset]) -> Tuple[Optional[uuid.UUID], str, float]:
+        """
+        Resolves the visual asset for a shot adhering strictly to resolution order:
+        1. Approved/current VIDEO asset
+        2. Current VIDEO asset
+        3. Approved/current KEYFRAME / IMAGE asset
+        4. MISSING blocker
+
+        Also resolves known source duration from asset or metadata if present.
+        """
+        selected_asset_id: Optional[uuid.UUID] = None
+        source_type = "MISSING"
+        known_duration = float(shot.duration_seconds) if shot.duration_seconds else 4.0
+
+        def asset_category(a: Asset) -> str:
+            atype = (a.asset_type or "").upper()
+            ctype = (a.content_type or "").lower()
+            if atype == "VIDEO" or "video" in ctype:
+                return "VIDEO"
+            elif atype in ("KEYFRAME", "IMAGE", "PHOTO", "GRAPHIC") or "image" in ctype or "keyframe" in ctype:
+                return "KEYFRAME" if atype == "KEYFRAME" else "IMAGE"
+            return "UNKNOWN"
+
+        def get_asset_duration(a: Asset) -> Optional[float]:
+            if hasattr(a, "duration_seconds") and getattr(a, "duration_seconds") is not None:
+                return float(getattr(a, "duration_seconds"))
+            if hasattr(a, "duration") and getattr(a, "duration") is not None:
+                return float(getattr(a, "duration"))
+            if hasattr(a, "metadata") and isinstance(getattr(a, "metadata"), dict):
+                meta = getattr(a, "metadata")
+                if meta.get("duration_seconds"):
+                    return float(meta["duration_seconds"])
+                if meta.get("duration"):
+                    return float(meta["duration"])
+            return None
+
+        # Step 1 & 2: Check shot.source_asset_id
+        if shot.source_asset_id and str(shot.source_asset_id) in asset_map:
+            source_asset = asset_map[str(shot.source_asset_id)]
+            cat = asset_category(source_asset)
+
+            if cat == "VIDEO":
+                selected_asset_id = source_asset.id
+                source_type = "VIDEO"
+                a_dur = get_asset_duration(source_asset)
+                if a_dur is not None and a_dur > 0:
+                    known_duration = a_dur
+                elif isinstance(shot.source_metadata, dict) and shot.source_metadata.get("duration_seconds"):
+                    known_duration = float(shot.source_metadata["duration_seconds"])
+                return selected_asset_id, source_type, known_duration
+
+            elif cat in ("IMAGE", "KEYFRAME"):
+                # source_asset_id is an IMAGE/KEYFRAME asset -> MUST NOT BECOME VIDEO!
+                selected_asset_id = source_asset.id
+                source_type = "KEYFRAME" if cat == "KEYFRAME" else "IMAGE"
+                return selected_asset_id, source_type, known_duration
+
+        # Step 3: Check shot.keyframe_asset_id fallback
+        if shot.keyframe_asset_id and str(shot.keyframe_asset_id) in asset_map:
+            keyframe_asset = asset_map[str(shot.keyframe_asset_id)]
+            selected_asset_id = keyframe_asset.id
+            source_type = "KEYFRAME"
+            return selected_asset_id, source_type, known_duration
+
+        # Step 4: MISSING
+        return None, "MISSING", known_duration
+
+    @staticmethod
     def get_active_timeline(db: Session, project_id: str) -> Optional[AssemblyTimeline]:
         p_uuid = _to_uuid(project_id)
         return db.query(AssemblyTimeline).filter(
@@ -62,6 +130,12 @@ class AssemblyService:
             raise HTTPException(status_code=404, detail="Project not found")
 
         existing_timeline = cls.get_active_timeline(db, project_id)
+        existing_placements: Dict[str, AssemblyShotPlacement] = {}
+        if existing_timeline:
+            for scene in existing_timeline.scenes:
+                for placement in scene.shot_placements:
+                    existing_placements[str(placement.shot_id)] = placement
+
         new_version = (existing_timeline.version + 1) if existing_timeline else 1
 
         if existing_timeline:
@@ -91,7 +165,7 @@ class AssemblyService:
         assets = db.query(Asset).filter(Asset.project_id == p_uuid).all()
         asset_map: Dict[str, Asset] = {str(a.id): a for a in assets}
 
-        # Build assembly scenes and placements
+        # Build assembly scenes and placements preserving existing manual/locked edits
         for scene_idx, scene in enumerate(scenes):
             assembly_scene = AssemblyScene(
                 id=uuid.uuid4(),
@@ -104,27 +178,58 @@ class AssemblyService:
 
             scene_shots = [sh for sh in shots if sh.scene_id == scene.id]
             for shot_idx, shot in enumerate(scene_shots):
-                selected_asset_id: Optional[uuid.UUID] = None
-                source_type = "MISSING"
-                trim_in = 0.0
-                trim_out: Optional[float] = None
-                effective_duration = 4.0
-                still_duration = 4.0
+                existing_p = existing_placements.get(str(shot.id))
+                res_asset_id, res_source_type, res_dur = cls._resolve_shot_visual_source(shot, asset_map)
 
-                # 1. Approved/current video asset for shot
-                if shot.source_asset_id and str(shot.source_asset_id) in asset_map:
-                    v_asset = asset_map[str(shot.source_asset_id)]
-                    selected_asset_id = v_asset.id
-                    source_type = "VIDEO"
-                    trim_out = 4.0
-                    effective_duration = 4.0
-                # 2. Keyframe or Image asset fallback for shot
-                elif shot.keyframe_asset_id and str(shot.keyframe_asset_id) in asset_map:
-                    k_asset = asset_map[str(shot.keyframe_asset_id)]
-                    selected_asset_id = k_asset.id
-                    source_type = "KEYFRAME"
+                if existing_p:
+                    if existing_p.is_locked:
+                        # Fully preserve locked placement
+                        selected_asset_id = existing_p.visual_asset_id
+                        source_type = existing_p.source_type
+                        trim_in = existing_p.trim_in
+                        trim_out = existing_p.trim_out
+                        still_duration = existing_p.still_duration
+                        effective_duration = existing_p.effective_duration
+                        transition_to_next = existing_p.transition_to_next
+                        is_locked = True
+                        p_version = existing_p.version
+                    else:
+                        # Unlocked placement state preservation / reconciliation
+                        if str(res_asset_id) == str(existing_p.visual_asset_id) or existing_p.version > 1 or existing_p.visual_asset_id:
+                            selected_asset_id = existing_p.visual_asset_id if existing_p.visual_asset_id else res_asset_id
+                            source_type = existing_p.source_type if existing_p.visual_asset_id else res_source_type
+                            trim_in = existing_p.trim_in
+                            trim_out = existing_p.trim_out if existing_p.trim_out is not None else (res_dur if source_type == "VIDEO" else None)
+                            still_duration = existing_p.still_duration
+                            transition_to_next = existing_p.transition_to_next
+                            is_locked = False
+                            p_version = existing_p.version
+                        else:
+                            selected_asset_id = res_asset_id
+                            source_type = res_source_type
+                            trim_in = 0.0
+                            trim_out = res_dur if res_source_type == "VIDEO" else None
+                            still_duration = 4.0
+                            transition_to_next = existing_p.transition_to_next
+                            is_locked = False
+                            p_version = 1
+
+                        if source_type == "VIDEO":
+                            t_out = trim_out if trim_out is not None else res_dur
+                            effective_duration = max(0.1, t_out - trim_in)
+                        else:
+                            effective_duration = max(0.1, still_duration)
+                else:
+                    # New shot placement
+                    selected_asset_id = res_asset_id
+                    source_type = res_source_type
+                    trim_in = 0.0
+                    trim_out = res_dur if res_source_type == "VIDEO" else None
                     still_duration = 4.0
-                    effective_duration = 4.0
+                    effective_duration = res_dur if res_source_type == "VIDEO" else 4.0
+                    transition_to_next = "CUT"
+                    is_locked = False
+                    p_version = 1
 
                 placement = AssemblyShotPlacement(
                     id=uuid.uuid4(),
@@ -139,9 +244,9 @@ class AssemblyService:
                     trim_out=trim_out,
                     effective_duration=effective_duration,
                     still_duration=still_duration,
-                    transition_to_next="CUT",
-                    is_locked=False,
-                    version=1,
+                    transition_to_next=transition_to_next,
+                    is_locked=is_locked,
+                    version=p_version,
                 )
                 db.add(placement)
 
@@ -151,7 +256,7 @@ class AssemblyService:
             timeline_id=timeline.id,
             action="AUTO_ASSEMBLE",
             actor=actor,
-            change_reason="Automated initial timeline assembly",
+            change_reason="Automated timeline assembly with state preservation",
         )
         db.add(audit)
         db.commit()
@@ -160,6 +265,11 @@ class AssemblyService:
 
     @classmethod
     def reorder_scenes(cls, db: Session, project_id: str, scene_orders: List[Tuple[str, int]], actor: str = "USER") -> AssemblyTimeline:
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
@@ -172,7 +282,7 @@ class AssemblyService:
         timeline.version += 1
         audit = TimelineAudit(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=timeline.id,
             action="REORDER_SCENES",
             actor=actor,
@@ -185,6 +295,11 @@ class AssemblyService:
 
     @classmethod
     def reorder_shots_in_scene(cls, db: Session, project_id: str, scene_id: str, shot_orders: List[Tuple[str, int]], actor: str = "USER") -> AssemblyTimeline:
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
@@ -196,7 +311,7 @@ class AssemblyService:
         ).first()
 
         if not assembly_scene:
-            raise HTTPException(status_code=404, detail="Scene placement not found in timeline")
+            raise HTTPException(status_code=404, detail="Scene placement not found in active timeline")
 
         placement_map = {str(p.shot_id): p for p in assembly_scene.shot_placements}
         for shot_id, order in shot_orders:
@@ -206,7 +321,7 @@ class AssemblyService:
         timeline.version += 1
         audit = TimelineAudit(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=timeline.id,
             action="REORDER_SHOTS",
             actor=actor,
@@ -228,6 +343,11 @@ class AssemblyService:
         actor: str = "USER",
         reason: Optional[str] = None
     ) -> AssemblyTimeline:
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
@@ -239,7 +359,7 @@ class AssemblyService:
         ).first()
 
         if not placement:
-            raise HTTPException(status_code=404, detail="Shot placement not found")
+            raise HTTPException(status_code=404, detail="Shot placement not found in active timeline for project")
 
         if placement.is_locked:
             raise HTTPException(status_code=400, detail="Cannot move locked shot placement")
@@ -251,9 +371,8 @@ class AssemblyService:
         ).first()
 
         if not target_assembly_scene:
-            raise HTTPException(status_code=404, detail="Target scene not found in timeline")
+            raise HTTPException(status_code=404, detail="Target scene not found in active timeline for project")
 
-        # Update placement target scene
         placement.assembly_scene_id = target_assembly_scene.id
         placement.scene_id = target_sc_uuid
         placement.shot_order = target_position
@@ -262,7 +381,7 @@ class AssemblyService:
         timeline.version += 1
         audit = TimelineAudit(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=timeline.id,
             action="MOVE_SHOT_TO_SCENE",
             actor=actor,
@@ -287,25 +406,53 @@ class AssemblyService:
         reason: Optional[str] = None,
         actor: str = "USER",
     ) -> AssemblyShotPlacement:
+        # Ownership validation
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        active_timeline = cls.get_active_timeline(db, project_id)
+        if not active_timeline:
+            raise HTTPException(status_code=404, detail="No active timeline found for project")
+
         pl_uuid = _to_uuid(placement_id)
         placement = db.query(AssemblyShotPlacement).filter(
-            AssemblyShotPlacement.id == pl_uuid
+            AssemblyShotPlacement.id == pl_uuid,
+            AssemblyShotPlacement.timeline_id == active_timeline.id
         ).first()
 
         if not placement:
-            raise HTTPException(status_code=404, detail="Placement not found")
+            raise HTTPException(status_code=404, detail="Placement not found in active timeline for project")
 
-        if placement.is_locked and is_locked is not True and (
-            trim_in is not None or trim_out is not None or still_duration is not None or transition_to_next is not None
-        ):
-            if is_locked is False:
-                # Explicit unlock allowed
-                placement.is_locked = False
-            else:
-                raise HTTPException(status_code=400, detail="Cannot modify locked placement. Unlock first.")
+        has_modifications = (
+            trim_in is not None
+            or trim_out is not None
+            or still_duration is not None
+            or transition_to_next is not None
+        )
 
+        # Lock Safety Rule: Reject mixed unlock + modify in a single request
+        if is_locked is False and has_modifications:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot combine unlock (is_locked=false) with placement modifications. Unlock placement first in an isolated request."
+            )
+
+        # Reject modifying a locked placement without unlocking first in a prior request
+        if placement.is_locked and has_modifications:
+            raise HTTPException(
+                status_code=400,
+                detail="Placement is locked. Unlock placement first before making modifications."
+            )
+
+        audit_action = "UPDATE_PLACEMENT"
+
+        # Explicit lock / unlock handling
         if is_locked is not None:
-            placement.is_locked = is_locked
+            if is_locked != placement.is_locked:
+                placement.is_locked = is_locked
+                audit_action = "UNLOCK_PLACEMENT" if not is_locked else "LOCK_PLACEMENT"
 
         if trim_in is not None:
             placement.trim_in = max(0.0, trim_in)
@@ -332,9 +479,9 @@ class AssemblyService:
 
         audit = TimelineAudit(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=placement.timeline_id,
-            action="UPDATE_PLACEMENT",
+            action=audit_action,
             actor=actor,
             change_reason=reason or f"Updated placement {placement_id}",
         )
@@ -345,11 +492,15 @@ class AssemblyService:
 
     @classmethod
     def create_checkpoint(cls, db: Session, project_id: str, label: str, actor: str = "USER") -> TimelineCheckpoint:
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
 
-        # Build snapshot data
         snapshot_data = cls._build_timeline_snapshot(db, timeline)
 
         last_ckpt = db.query(TimelineCheckpoint).filter(
@@ -360,7 +511,7 @@ class AssemblyService:
 
         checkpoint = TimelineCheckpoint(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=timeline.id,
             checkpoint_number=next_number,
             label=label,
@@ -371,7 +522,7 @@ class AssemblyService:
 
         audit = TimelineAudit(
             id=uuid.uuid4(),
-            project_id=_to_uuid(project_id),
+            project_id=p_uuid,
             timeline_id=timeline.id,
             action="CREATE_CHECKPOINT",
             actor=actor,
@@ -386,6 +537,10 @@ class AssemblyService:
     @classmethod
     def list_checkpoints(cls, db: Session, project_id: str, limit: int = 50, offset: int = 0) -> List[TimelineCheckpoint]:
         p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         return db.query(TimelineCheckpoint).filter(
             TimelineCheckpoint.project_id == p_uuid
         ).order_by(TimelineCheckpoint.checkpoint_number.desc()).offset(offset).limit(limit).all()
@@ -394,13 +549,17 @@ class AssemblyService:
     def restore_checkpoint(cls, db: Session, project_id: str, checkpoint_id: str, actor: str = "USER", reason: Optional[str] = None) -> AssemblyTimeline:
         ckpt_uuid = _to_uuid(checkpoint_id)
         p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         checkpoint = db.query(TimelineCheckpoint).filter(
             TimelineCheckpoint.id == ckpt_uuid,
             TimelineCheckpoint.project_id == p_uuid
         ).first()
 
         if not checkpoint:
-            raise HTTPException(status_code=404, detail="Checkpoint not found")
+            raise HTTPException(status_code=404, detail="Checkpoint not found for this project")
 
         active_timeline = cls.get_active_timeline(db, project_id)
         if active_timeline:
@@ -408,7 +567,6 @@ class AssemblyService:
 
         new_version = (active_timeline.version + 1) if active_timeline else 1
 
-        # Re-create timeline from snapshot data (NO_SILENT_HISTORY_LOSS)
         new_timeline = AssemblyTimeline(
             id=uuid.uuid4(),
             project_id=p_uuid,
@@ -490,7 +648,6 @@ class AssemblyService:
         for scene in timeline.scenes:
             for placement in scene.shot_placements:
                 if placement.source_type == "MISSING" or not placement.visual_asset_id:
-                    # Check if keyframe asset exists for shot
                     shot = db.query(Shot).filter(Shot.id == placement.shot_id).first()
                     fixes = [
                         RecommendedFix(
@@ -543,13 +700,25 @@ class AssemblyService:
 
     @classmethod
     def apply_recommended_fix(cls, db: Session, project_id: str, blocker_code: str, target_id: Optional[str], fix_code: str) -> Dict[str, Any]:
+        p_uuid = _to_uuid(project_id)
+        project = db.query(Project).filter(Project.id == p_uuid).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         if fix_code == "auto_assemble":
             t = cls.auto_assemble_timeline(db, project_id)
             return {"status": "SUCCESS", "message": "Auto assembled timeline", "timeline_id": str(t.id)}
 
         if fix_code == "use_keyframe_still" and target_id:
+            active_timeline = cls.get_active_timeline(db, project_id)
+            if not active_timeline:
+                raise HTTPException(status_code=404, detail="No active timeline found")
+
             t_uuid = _to_uuid(target_id)
-            placement = db.query(AssemblyShotPlacement).filter(AssemblyShotPlacement.id == t_uuid).first()
+            placement = db.query(AssemblyShotPlacement).filter(
+                AssemblyShotPlacement.id == t_uuid,
+                AssemblyShotPlacement.timeline_id == active_timeline.id
+            ).first()
             if placement:
                 shot = db.query(Shot).filter(Shot.id == placement.shot_id).first()
                 if shot and shot.keyframe_asset_id:

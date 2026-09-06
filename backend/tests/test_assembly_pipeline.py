@@ -17,7 +17,7 @@ from app.models.assembly import (
     TimelineCheckpoint,
     TimelineAudit,
 )
-from app.services.assembly import AssemblyService
+from app.services.assembly import AssemblyService, _to_uuid
 
 client = TestClient(app)
 
@@ -187,7 +187,7 @@ def test_update_placement_trim_and_transition(db_session: Session, test_setup):
     p1 = timeline.shot_placements[0]
 
     updated_p1 = AssemblyService.update_shot_placement(
-        db_session, proj_id, placement_id=p1.id, trim_in=1.0, trim_out=4.5, transition_to_next="FADE"
+        db_session, proj_id, placement_id=str(p1.id), trim_in=1.0, trim_out=4.5, transition_to_next="FADE"
     )
     assert updated_p1.trim_in == 1.0
     assert updated_p1.trim_out == 4.5
@@ -201,11 +201,11 @@ def test_lock_safety_prevents_unauthorized_edits(db_session: Session, test_setup
     p1 = timeline.shot_placements[0]
 
     # Lock placement
-    AssemblyService.update_shot_placement(db_session, proj_id, p1.id, is_locked=True)
+    AssemblyService.update_shot_placement(db_session, proj_id, str(p1.id), is_locked=True)
 
     # Attempt trim on locked placement -> fail closed
     with pytest.raises(Exception):
-        AssemblyService.update_shot_placement(db_session, proj_id, p1.id, trim_in=2.0)
+        AssemblyService.update_shot_placement(db_session, proj_id, str(p1.id), trim_in=2.0)
 
 
 def test_checkpoint_creation_and_restore(db_session: Session, test_setup):
@@ -216,7 +216,7 @@ def test_checkpoint_creation_and_restore(db_session: Session, test_setup):
     assert ckpt.checkpoint_number == 1
     assert ckpt.label == "Cut 1 Alpha"
 
-    restored = AssemblyService.restore_checkpoint(db_session, proj_id, ckpt.id)
+    restored = AssemblyService.restore_checkpoint(db_session, proj_id, str(ckpt.id))
     assert restored.version == 2
     assert restored.is_active is True
 
@@ -230,6 +230,158 @@ def test_blockers_and_recommended_fixes(db_session: Session, test_setup):
     missing_b = [b for b in blockers if b.code == "MISSING_VISUAL"]
     assert len(missing_b) == 1
     assert len(missing_b[0].recommended_fixes) > 0
+
+
+# =====================================================================
+# REGRESSION TESTS FOR REVIEW 5127013489 FINDINGS
+# =====================================================================
+
+def test_auto_assembly_idempotency_manual_trim_and_transition_survive(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1 = t1.shot_placements[0]
+
+    # Apply manual trim and transition edits
+    updated_p1 = AssemblyService.update_shot_placement(
+        db_session, proj_id, placement_id=str(p1.id), trim_in=1.5, trim_out=3.8, transition_to_next="FADE"
+    )
+    assert updated_p1.trim_in == 1.5
+    assert updated_p1.trim_out == 3.8
+    assert updated_p1.transition_to_next == "FADE"
+
+    # Re-run Auto Assembly on unchanged project truth
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    assert t2.version == t1.version + 1
+    assert len(t2.shot_placements) == 3
+
+    p1_new = [p for p in t2.shot_placements if str(p.shot_id) == str(test_setup["shot1"].id)][0]
+    assert p1_new.trim_in == 1.5
+    assert p1_new.trim_out == 3.8
+    assert p1_new.transition_to_next == "FADE"
+    assert p1_new.effective_duration == 2.3
+
+
+def test_auto_assembly_idempotency_locked_placement_survives(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1 = t1.shot_placements[0]
+
+    # Lock placement
+    AssemblyService.update_shot_placement(db_session, proj_id, placement_id=str(p1.id), is_locked=True)
+
+    # Re-run Auto Assembly
+    t2 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1_new = [p for p in t2.shot_placements if str(p.shot_id) == str(test_setup["shot1"].id)][0]
+    assert p1_new.is_locked is True
+
+
+def test_lock_safety_mixed_unlock_and_modify_rejected(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p1 = t1.shot_placements[0]
+
+    # Lock placement
+    AssemblyService.update_shot_placement(db_session, proj_id, placement_id=str(p1.id), is_locked=True)
+
+    # Attempt combined unlock + trim modification -> must be REJECTED (400)
+    with pytest.raises(Exception) as exc_info:
+        AssemblyService.update_shot_placement(
+            db_session, proj_id, placement_id=str(p1.id), is_locked=False, trim_in=2.0
+        )
+    assert "400" in str(exc_info.value) or "Unlock placement first" in str(exc_info.value)
+
+    # Isolated unlock request -> must succeed
+    unlocked = AssemblyService.update_shot_placement(
+        db_session, proj_id, placement_id=str(p1.id), is_locked=False
+    )
+    assert unlocked.is_locked is False
+
+    # Subsequent trim request -> must succeed
+    trimmed = AssemblyService.update_shot_placement(
+        db_session, proj_id, placement_id=str(p1.id), trim_in=2.0
+    )
+    assert trimmed.trim_in == 2.0
+
+
+def test_cross_project_ownership_validation_fails_closed(db_session: Session, test_setup):
+    proj1_id = str(test_setup["project"].id)
+    t1 = AssemblyService.auto_assemble_timeline(db_session, proj1_id)
+    p1_id = str(t1.shot_placements[0].id)
+
+    # Create project 2
+    proj2 = Project(id=uuid.uuid4(), title="Project 2", video_mode="STORY")
+    db_session.add(proj2)
+    db_session.commit()
+    proj2_id = str(proj2.id)
+
+    # Attempt to update placement from project 1 under project 2 -> must fail closed (404)
+    with pytest.raises(Exception) as exc_info:
+        AssemblyService.update_shot_placement(db_session, project_id=proj2_id, placement_id=p1_id, trim_in=1.0)
+    assert "404" in str(exc_info.value) or "Placement not found" in str(exc_info.value) or "Project not found" in str(exc_info.value)
+
+
+def test_image_source_asset_must_not_become_video(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+
+    # Create an IMAGE asset and attach to shot3.source_asset_id
+    img_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=_to_uuid(proj_id),
+        name="Image Asset 3",
+        original_filename="image3.png",
+        asset_type="IMAGE",
+        content_type="image/png",
+        file_size_bytes=512,
+        checksum_sha256="dummy_sha3",
+        storage_bucket="default",
+        storage_key="image3.png",
+    )
+    db_session.add(img_asset)
+    db_session.flush()
+
+    shot3 = test_setup["shot3"]
+    shot3.source_asset_id = img_asset.id
+    db_session.commit()
+
+    timeline = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p3 = [p for p in timeline.shot_placements if str(p.shot_id) == str(shot3.id)][0]
+
+    # Must NOT become VIDEO! Must be KEYFRAME or IMAGE!
+    assert p3.source_type != "VIDEO"
+    assert p3.source_type in ("KEYFRAME", "IMAGE")
+    assert str(p3.visual_asset_id) == str(img_asset.id)
+
+
+def test_known_video_duration_used_for_trim_bounds(db_session: Session, test_setup):
+    proj_id = str(test_setup["project"].id)
+
+    # Create VIDEO asset with known duration metadata (7.5s)
+    vid_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=_to_uuid(proj_id),
+        name="Video Asset 7.5s",
+        original_filename="vid75.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=2048,
+        checksum_sha256="dummy_sha75",
+        storage_bucket="default",
+        storage_key="vid75.mp4",
+    )
+    setattr(vid_asset, "duration_seconds", 7.5)
+    db_session.add(vid_asset)
+    db_session.flush()
+
+    shot3 = test_setup["shot3"]
+    shot3.source_asset_id = vid_asset.id
+    db_session.commit()
+
+    timeline = AssemblyService.auto_assemble_timeline(db_session, proj_id)
+    p3 = [p for p in timeline.shot_placements if str(p.shot_id) == str(shot3.id)][0]
+
+    assert p3.source_type == "VIDEO"
+    assert p3.trim_out == 7.5
+    assert p3.effective_duration == 7.5
 
 
 from app.db.session import get_db
