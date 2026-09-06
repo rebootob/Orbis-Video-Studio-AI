@@ -826,3 +826,192 @@ def test_batch_keyframe_no_per_shot_generation_job_queries(db_session):
         assert len(job_select_queries) == 1
     finally:
         event.remove(engine, "before_cursor_execute", before_cursor_execute)
+
+
+def test_concurrent_shot_keyframe_claims_invoke_provider_at_most_once(tmp_path):
+    """
+    CONCURRENCY / ATOMIC PRE-PROVIDER CLAIM:
+    - Two concurrent submissions for the same shot atomically compete for SUBMITTING claim.
+    - Provider is invoked AT MOST ONCE (the winner).
+    - The losing caller receives 409 Conflict.
+    - Exactly one GenerationJob exists for the shot.
+    - Exactly one UsageLedger entry exists for the shot.
+    """
+    import threading
+    from unittest.mock import patch
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = tmp_path / "concurrent_keyframe_claim.db"
+    file_engine = create_engine(f"sqlite:///{db_file}", connect_args={"timeout": 30})
+    Base.metadata.create_all(file_engine)
+    FileSessionLocal = sessionmaker(bind=file_engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+    shot_id = uuid.uuid4()
+
+    with FileSessionLocal() as init_db:
+        p = Project(id=project_id, title="Conc Keyframe Test", status="SHOT_PLAN_APPROVED", video_mode="STORY")
+        sc = Scene(id=scene_id, project_id=project_id, scene_number=1)
+        sh = Shot(id=shot_id, scene_id=scene_id, shot_number=1, shot_type="AI_GENERATED", visual_prompt="A heroic cyberpunk cat")
+        init_db.add_all([p, sc, sh])
+        init_db.commit()
+
+    provider_calls = []
+    original_generate_image = MockImageProviderAdapter.generate_image
+
+    async def tracked_generate_image(self, params):
+        provider_calls.append(params)
+        await asyncio.sleep(0.05)
+        return await original_generate_image(self, params)
+
+    barrier = threading.Barrier(2)
+    results = []
+    exceptions = []
+
+    def worker():
+        with FileSessionLocal() as session:
+            try:
+                barrier.wait()
+                asset, job = KeyframeGenerationService.generate_shot_keyframe(
+                    db=session,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    cost_authorized=True,
+                )
+                results.append((asset, job))
+            except HTTPException as e:
+                exceptions.append(e)
+            except Exception as e:
+                exceptions.append(e)
+
+    with patch.object(MockImageProviderAdapter, "generate_image", tracked_generate_image):
+        t1 = threading.Thread(target=worker)
+        t2 = threading.Thread(target=worker)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    # 1. Exactly one worker succeeded and one failed with 409 Conflict
+    assert len(results) == 1
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], HTTPException)
+    assert exceptions[0].status_code == 409
+    assert "already has an active generation job" in exceptions[0].detail.lower()
+
+    # 2. Provider was invoked AT MOST ONCE (exactly once)
+    assert len(provider_calls) == 1
+
+    # 3. Only one GenerationJob exists in DB
+    with FileSessionLocal() as verify_db:
+        jobs = verify_db.query(GenerationJob).filter(GenerationJob.shot_id == shot_id).all()
+        assert len(jobs) == 1
+        assert jobs[0].status == "COMPLETED"
+
+        # 4. Only one UsageLedger entry exists in DB
+        ledger_entries = verify_db.query(UsageLedger).filter(UsageLedger.shot_id == shot_id).all()
+        assert len(ledger_entries) == 1
+        assert ledger_entries[0].cost_status == CostStatus.CONFIRMED
+
+    file_engine.dispose()
+
+
+def test_concurrent_submissions_near_hard_budget_cannot_overspend(tmp_path):
+    """
+    BUDGET RACE / OVERSPEND PREVENTION:
+    - Pre-provider reservation in UsageLedger prevents concurrent submissions near budget limit from overspending.
+    - When budget allows only 1 shot ($0.05 limit, $0.04 per shot), racing two different shots:
+      - The first claim reserves $0.04 immediately.
+      - The second claim detects in-flight reservation and is rejected (402 Budget limit exceeded).
+      - Provider is invoked at most once.
+      - Total committed cost never exceeds the hard budget limit.
+    """
+    import threading
+    from unittest.mock import patch
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = tmp_path / "concurrent_budget_race.db"
+    file_engine = create_engine(f"sqlite:///{db_file}", connect_args={"timeout": 30})
+    Base.metadata.create_all(file_engine)
+    FileSessionLocal = sessionmaker(bind=file_engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+    shot1_id = uuid.uuid4()
+    shot2_id = uuid.uuid4()
+
+    with FileSessionLocal() as init_db:
+        p = Project(
+            id=project_id,
+            title="Budget Race Test",
+            status="SHOT_PLAN_APPROVED",
+            video_mode="STORY",
+            budget_limit=0.05,
+            budget_currency="USD",
+        )
+        sc = Scene(id=scene_id, project_id=project_id, scene_number=1)
+        s1 = Shot(id=shot1_id, scene_id=scene_id, shot_number=1, shot_type="AI_GENERATED", visual_prompt="Shot 1")
+        s2 = Shot(id=shot2_id, scene_id=scene_id, shot_number=2, shot_type="AI_GENERATED", visual_prompt="Shot 2")
+        init_db.add_all([p, sc, s1, s2])
+        init_db.commit()
+
+    provider_calls = []
+    original_generate_image = MockImageProviderAdapter.generate_image
+
+    async def tracked_generate_image(self, params):
+        provider_calls.append(params)
+        return await original_generate_image(self, params)
+
+    barrier = threading.Barrier(2)
+    results = []
+    exceptions = []
+
+    def worker(target_shot_id):
+        with FileSessionLocal() as session:
+            try:
+                barrier.wait()
+                asset, job = KeyframeGenerationService.generate_shot_keyframe(
+                    db=session,
+                    project_id=project_id,
+                    shot_id=target_shot_id,
+                    cost_authorized=True,
+                )
+                results.append((target_shot_id, asset, job))
+            except HTTPException as e:
+                exceptions.append((target_shot_id, e))
+            except Exception as e:
+                exceptions.append((target_shot_id, e))
+
+    with patch.object(MockImageProviderAdapter, "generate_image", tracked_generate_image):
+        t1 = threading.Thread(target=worker, args=(shot1_id,))
+        t2 = threading.Thread(target=worker, args=(shot2_id,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+    # Exactly one succeeded and one was blocked by budget limit
+    assert len(results) == 1
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0][1], HTTPException)
+    assert exceptions[0][1].status_code == 402
+    assert "budget limit exceeded" in exceptions[0][1].detail.lower()
+
+    # Provider was invoked exactly once
+    assert len(provider_calls) == 1
+
+    # Budget in DB was never overspent
+    with FileSessionLocal() as verify_db:
+        committed_cost = BudgetService.get_project_committed_cost(verify_db, project_id)
+        assert committed_cost == 0.04
+        assert committed_cost <= 0.05
+
+        ledger_entries = verify_db.query(UsageLedger).filter(UsageLedger.project_id == project_id).all()
+        assert len(ledger_entries) == 1
+
+    file_engine.dispose()

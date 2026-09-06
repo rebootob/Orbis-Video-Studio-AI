@@ -258,7 +258,17 @@ class KeyframeGenerationService:
         project_id = project.id
         eff_provider_name = provider_name or ImageProviderFactory.get_default_provider_name()
 
-        # 1. Hard Budget Check (accounting for current committed + in-flight + estimated cost)
+        # 1. Project lock for atomic budget check & reservation
+        project = db.query(Project).filter(Project.id == project_id).with_for_update().first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # In SQLite, touch row to acquire immediate write lock so concurrent budget checks serialize
+        if db.bind and db.bind.dialect.name == "sqlite":
+            project.updated_at = datetime.now(timezone.utc)
+            db.flush()
+
+        # Hard Budget Check (accounting for current committed + in-flight + estimated cost)
         est_cost, _, _ = ProviderPricingService.estimate_cost(
             provider=eff_provider_name,
             operation="IMAGE_GENERATION",
@@ -300,10 +310,77 @@ class KeyframeGenerationService:
             provider_specific_params=provider_specific_params,
         )
 
-        # 4. Execute generation via ImageProvider
-        provider = ImageProviderFactory.get_provider(eff_provider_name)
+        now = datetime.now(timezone.utc)
+        job_id = uuid.uuid4()
 
-        # Run async generation in sync context
+        # 4. ATOMIC PRE-PROVIDER CLAIM & COST RESERVATION
+        # Create and commit GenerationJob in active SUBMITTING state BEFORE invoking provider.
+        # This protects against duplicate paid external calls via uq_generation_jobs_active_shot.
+        job = GenerationJob(
+            id=job_id,
+            shot_id=shot.id,
+            job_type="IMAGE",
+            provider_name=eff_provider_name,
+            status="SUBMITTING",
+            cost_usd=estimated_cost,
+            payload=params.model_dump(),
+            output_asset_id=None,
+            next_poll_at=None,
+            poll_count=0,
+            max_polls=60,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            with db.begin_nested():
+                db.add(job)
+                db.flush()
+
+            CostLedgerService.record_entry(
+                db,
+                project_id=project_id,
+                shot_id=shot.id,
+                job_id=job.id,
+                provider=eff_provider_name,
+                operation="IMAGE_GENERATION",
+                model=None,
+                usage_units={"aspect_ratio": params.aspect_ratio},
+                estimated_cost=estimated_cost,
+                currency="USD",
+                cost_status=CostStatus.ESTIMATED,
+                idempotency_key=f"image_job_{job.id}",
+                description=f"Keyframe generation for Shot {shot.shot_number}",
+                commit=False,
+            )
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            # Active job already exists or concurrent claim won race
+            active_job = (
+                db.query(GenerationJob)
+                .filter(
+                    GenerationJob.shot_id == shot.id,
+                    GenerationJob.status.in_(ACTIVE_JOB_STATUSES),
+                )
+                .first()
+            )
+            if active_job:
+                if active_job.status == "RECONCILIATION_REQUIRED":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Shot '{shot.id}' has a job requiring reconciliation. Resolve ambiguous outcome first.",
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Shot '{shot.id}' already has an active generation job ('{active_job.id}', status: {active_job.status}).",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Shot '{shot.id}' already has an active generation job.",
+            )
+
+        # 5. EXECUTE GENERATION VIA PROVIDER (Only the winning claimer reaches here!)
+        provider = ImageProviderFactory.get_provider(eff_provider_name)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -313,105 +390,63 @@ class KeyframeGenerationService:
             else:
                 result = loop.run_until_complete(provider.generate_image(params))
         except RuntimeError:
-            result = asyncio.run(provider.generate_image(params))
+            try:
+                result = asyncio.run(provider.generate_image(params))
+            except Exception as exc:
+                now_err = datetime.now(timezone.utc)
+                job.status = "FAILED"
+                job.error_message = f"Local failure before provider acceptance: {str(exc)}"
+                job.updated_at = now_err
+                CostLedgerService.confirm_job_cost(db, job_id=job.id, actual_cost=0.0)
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Image generation failed: {str(exc)}",
+                )
+        except Exception as exc:
+            now_err = datetime.now(timezone.utc)
+            job.status = "FAILED"
+            job.error_message = f"Local failure before provider acceptance: {str(exc)}"
+            job.updated_at = now_err
+            CostLedgerService.confirm_job_cost(db, job_id=job.id, actual_cost=0.0)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Image generation failed: {str(exc)}",
+            )
 
         now = datetime.now(timezone.utc)
 
-        # 5. Handle fail-closed reconciliation
+        # 6. PROVIDER RESULT TRANSITIONS (Update the SAME GenerationJob claim)
+        # 6a. Ambiguous submission
         if result.submission_uncertain:
             cost = result.cost_usd if result.cost_usd is not None else estimated_cost
-            job = GenerationJob(
-                id=uuid.uuid4(),
-                shot_id=shot.id,
-                job_type="IMAGE",
-                provider_name=provider.provider_id,
-                provider_job_id=result.provider_job_id,
-                status="RECONCILIATION_REQUIRED",
-                error_message=result.error_message or "Ambiguous provider submission",
-                cost_usd=cost,
-                payload=params.model_dump(),
-                result=result.raw_response,
-                created_at=now,
-                updated_at=now,
-            )
-            try:
-                with db.begin_nested():
-                    db.add(job)
-                    db.flush()
-            except IntegrityError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Shot '{shot.id}' already has an active generation job.",
-                )
-
-            # Preserve reservation in ledger fail-closed
-            CostLedgerService.record_entry(
-                db,
-                project_id=project_id,
-                shot_id=shot.id,
-                job_id=job.id,
-                provider=provider.provider_id,
-                operation="IMAGE_GENERATION",
-                model=None,
-                usage_units={"aspect_ratio": params.aspect_ratio},
-                estimated_cost=cost,
-                currency="USD",
-                cost_status=CostStatus.ESTIMATED,
-                idempotency_key=f"image_job_{job.id}",
-                description=f"Keyframe generation for Shot {shot.shot_number}",
-                commit=False,
-            )
+            job.status = "RECONCILIATION_REQUIRED"
+            job.provider_job_id = result.provider_job_id
+            job.error_message = result.error_message or "Ambiguous provider submission"
+            job.cost_usd = cost
+            job.result = result.raw_response
+            job.updated_at = now
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Provider response was ambiguous. Job placed in RECONCILIATION_REQUIRED.",
             )
 
-        # 6. Handle provider failure
+        # 6b. Provider failure
         if result.status == "FAILED":
             cost = result.cost_usd or 0.0
-            job = GenerationJob(
-                id=uuid.uuid4(),
-                shot_id=shot.id,
-                job_type="IMAGE",
-                provider_name=provider.provider_id,
-                provider_job_id=result.provider_job_id,
-                status="FAILED",
-                error_message=result.error_message or "Image generation failed",
-                cost_usd=cost,
-                payload=params.model_dump(),
-                result=result.raw_response,
-                created_at=now,
-                updated_at=now,
-            )
-            try:
-                with db.begin_nested():
-                    db.add(job)
-                    db.flush()
-            except IntegrityError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Shot '{shot.id}' already has an active generation job.",
-                )
-
-            CostLedgerService.record_entry(
+            job.status = "FAILED"
+            job.provider_job_id = result.provider_job_id
+            job.error_message = result.error_message or "Image generation failed"
+            job.cost_usd = cost
+            job.result = result.raw_response
+            job.updated_at = now
+            CostLedgerService.confirm_job_cost(
                 db,
-                project_id=project_id,
-                shot_id=shot.id,
                 job_id=job.id,
-                provider=provider.provider_id,
-                operation="IMAGE_GENERATION",
-                model=None,
-                usage_units={"aspect_ratio": params.aspect_ratio},
-                estimated_cost=cost,
                 actual_cost=cost,
-                currency="USD",
-                cost_status=CostStatus.CONFIRMED,
-                idempotency_key=f"image_job_{job.id}",
-                description=f"Keyframe generation failed for Shot {shot.shot_number}",
-                commit=False,
+                provider_event_id=result.provider_job_id,
             )
             db.commit()
             raise HTTPException(
@@ -419,56 +454,14 @@ class KeyframeGenerationService:
                 detail=f"Image generation failed: {result.error_message}",
             )
 
-        # 7. Handle asynchronous pending statuses (QUEUED, PROCESSING, SUBMITTED, PENDING)
-        # CRITICAL: Do NOT create a fake completed Asset or link keyframe_asset_id!
+        # 6c. Asynchronous pending statuses (QUEUED, PROCESSING, SUBMITTED, PENDING)
         if result.status in ("QUEUED", "PROCESSING", "SUBMITTED", "PENDING"):
             cost = result.cost_usd if result.cost_usd is not None else estimated_cost
-            job = GenerationJob(
-                id=uuid.uuid4(),
-                shot_id=shot.id,
-                job_type="IMAGE",
-                provider_name=provider.provider_id,
-                provider_job_id=result.provider_job_id,
-                status=result.status,
-                cost_usd=cost,
-                payload=params.model_dump(),
-                result=result.raw_response,
-                output_asset_id=None,
-                next_poll_at=None,
-                poll_count=0,
-                max_polls=60,
-                created_at=now,
-                updated_at=now,
-            )
-            try:
-                with db.begin_nested():
-                    db.add(job)
-                    db.flush()
-            except IntegrityError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Shot '{shot.id}' already has an active generation job.",
-                )
-
-            # In-flight reservation in UsageLedger immediately so budget accounts for it
-            CostLedgerService.record_entry(
-                db,
-                project_id=project_id,
-                shot_id=shot.id,
-                job_id=job.id,
-                provider=provider.provider_id,
-                operation="IMAGE_GENERATION",
-                model=None,
-                usage_units={"aspect_ratio": params.aspect_ratio},
-                estimated_cost=cost,
-                currency="USD",
-                cost_status=CostStatus.ESTIMATED,
-                idempotency_key=f"image_job_{job.id}",
-                description=f"Keyframe generation for Shot {shot.shot_number}",
-                commit=False,
-            )
-
+            job.status = result.status
+            job.provider_job_id = result.provider_job_id
+            job.cost_usd = cost
+            job.result = result.raw_response
+            job.updated_at = now
             if project.status == "SHOT_PLAN_APPROVED":
                 project.status = "IMAGES_IN_PROGRESS"
                 project.updated_at = now
@@ -477,7 +470,7 @@ class KeyframeGenerationService:
                 db.refresh(job)
             return None, job
 
-        # 8. Completed result: verified completed asset creation
+        # 6d. Completed result: verified completed asset creation
         image_bytes = result.image_data or b""
         if not image_bytes and result.image_url:
             try:
@@ -489,30 +482,12 @@ class KeyframeGenerationService:
                 pass
 
         if not image_bytes:
-            job = GenerationJob(
-                id=uuid.uuid4(),
-                shot_id=shot.id,
-                job_type="IMAGE",
-                provider_name=provider.provider_id,
-                provider_job_id=result.provider_job_id,
-                status="FAILED",
-                error_message="Provider completed result missing image content",
-                cost_usd=result.cost_usd or 0.0,
-                payload=params.model_dump(),
-                result=result.raw_response,
-                created_at=now,
-                updated_at=now,
-            )
-            try:
-                with db.begin_nested():
-                    db.add(job)
-                    db.flush()
-            except IntegrityError:
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Shot '{shot.id}' already has an active generation job.",
-                )
+            job.status = "FAILED"
+            job.provider_job_id = result.provider_job_id
+            job.error_message = "Provider completed result missing image content"
+            job.cost_usd = result.cost_usd or 0.0
+            job.result = result.raw_response
+            job.updated_at = now
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -551,50 +526,23 @@ class KeyframeGenerationService:
         db.flush()
 
         cost = result.cost_usd if result.cost_usd is not None else estimated_cost
-        job = GenerationJob(
-            id=uuid.uuid4(),
-            shot_id=shot.id,
-            job_type="IMAGE",
-            provider_name=provider.provider_id,
-            provider_job_id=result.provider_job_id,
-            status="COMPLETED",
-            cost_usd=cost,
-            payload=params.model_dump(),
-            result=result.raw_response,
-            output_asset_id=asset.id,
-            created_at=now,
-            updated_at=now,
-        )
-        try:
-            with db.begin_nested():
-                db.add(job)
-                db.flush()
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Shot '{shot.id}' already has an active generation job.",
-            )
+
+        # Update the SAME GenerationJob
+        job.status = "COMPLETED"
+        job.provider_job_id = result.provider_job_id
+        job.cost_usd = cost
+        job.result = result.raw_response
+        job.output_asset_id = asset.id
+        job.updated_at = now
 
         shot.keyframe_asset_id = asset.id
         shot.updated_at = now
 
-        CostLedgerService.record_entry(
+        CostLedgerService.confirm_job_cost(
             db,
-            project_id=project_id,
-            shot_id=shot.id,
             job_id=job.id,
-            provider=provider.provider_id,
-            operation="IMAGE_GENERATION",
-            model=None,
-            usage_units={"aspect_ratio": params.aspect_ratio},
-            estimated_cost=cost,
             actual_cost=cost,
-            currency="USD",
-            cost_status=CostStatus.CONFIRMED,
-            idempotency_key=f"image_job_{job.id}",
-            description=f"Keyframe generation for Shot {shot.shot_number}",
-            commit=False,
+            provider_event_id=result.provider_job_id,
         )
 
         db.commit()
