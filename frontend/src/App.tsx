@@ -347,15 +347,42 @@ export const App: React.FC = () => {
       await handleGenerateShotPlan();
       return;
     }
-    if (action.action === 'START_VIDEO_GENERATION' || action.action === 'CONTINUE_INCOMPLETE') {
-      handleBatchGenerateShots();
+    if (
+      action.action === 'START_VIDEO_GENERATION' ||
+      action.action === 'CONTINUE_INCOMPLETE' ||
+      action.action === 'RETRY_FAILED' ||
+      action.action === 'GENERATE_SELECTED_SHOTS'
+    ) {
+      try {
+        setAutomationStep(`Executing ${action.display_name}...`);
+        const res = await api.executeOrchestrationAction(selectedProject.id, {
+          action: action.action,
+          parameters: action.parameters || undefined,
+        });
+        if (res.to_stage) {
+          setSelectedProject((prev) => (prev ? { ...prev, status: res.to_stage } : prev));
+        }
+        await loadProjects();
+        await loadWorkspaceData(selectedProject);
+        await loadOrchestrationData(selectedProject.id);
+      } catch (err: any) {
+        alert(`Execution failed: ${err.message}`);
+      } finally {
+        setAutomationStep(null);
+      }
       return;
     }
     // Generic execute fallback
     try {
       setAutomationStep(`Executing ${action.display_name}...`);
       if (api.executeOrchestrationAction) {
-        await api.executeOrchestrationAction(selectedProject.id, { action: action.action });
+        const res = await api.executeOrchestrationAction(selectedProject.id, {
+          action: action.action,
+          parameters: action.parameters || undefined,
+        });
+        if (res.to_stage) {
+          setSelectedProject((prev) => (prev ? { ...prev, status: res.to_stage } : prev));
+        }
       }
       await loadWorkspaceData(selectedProject);
       await loadProjects();
@@ -370,19 +397,6 @@ export const App: React.FC = () => {
   // Automation: Batch Generate Shots (Selected or All Incomplete)
   const handleBatchGenerateShots = async (shotIds?: string[] | null, onlyIncomplete = true) => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before batch generating video. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Dispatching Batch Generation Jobs...');
       const opType = shotIds && shotIds.length > 0 ? 'GENERATE_SELECTED' : 'CONTINUE_INCOMPLETE';
@@ -410,19 +424,6 @@ export const App: React.FC = () => {
   // Retry Failed Jobs via Canonical Backend Service
   const handleRetryFailed = async () => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before retrying production jobs. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Retrying failed jobs...');
       const run = await api.resumeProjectJobs(selectedProject.id, {
@@ -521,19 +522,6 @@ export const App: React.FC = () => {
 
   const handleGenerateShot = async (shotId: string) => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before production generation. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       await api.createJob(shotId);
       await loadWorkspaceData(selectedProject);

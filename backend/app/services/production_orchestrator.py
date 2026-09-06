@@ -704,6 +704,7 @@ class ProductionOrchestrator:
         project_id: uuid.UUID,
         stage: Optional[str] = None,
         notes: Optional[str] = None,
+        cost_authorized: bool = False,
         actor: str = "USER",
         provider: Optional[CreativeGenerationProvider] = None,
     ) -> ApproveStageResponse:
@@ -808,13 +809,39 @@ class ProductionOrchestrator:
         db.commit()
 
         # Real AUTO mode behavior:
-        # Automatically cascade creative planning steps only if budget limits are respected,
-        # but ALWAYS STOP at mandatory human review gates or chargeable video generation gates.
+        # GENERATE_STORY / GENERATE_STORYBOARD / GENERATE_SHOT_PLAN are chargeable provider actions.
+        # AUTO must NOT silently execute a chargeable action after approval.
+        # Unless explicit persisted or one-shot cost authorization exists, AUTO must STOP and recommend the chargeable next action.
+        # Video generation gates always require explicit human confirmation.
+        default_cfg = getattr(project, "default_config", None) or {}
+        mode_cfg = getattr(project, "mode_config", None) or {}
+        has_persisted_cost_auth = False
+        if isinstance(default_cfg, dict):
+            has_persisted_cost_auth = bool(
+                default_cfg.get("auto_cost_authorized") or default_cfg.get("cost_authorized")
+            )
+        if not has_persisted_cost_auth and isinstance(mode_cfg, dict):
+            has_persisted_cost_auth = bool(
+                mode_cfg.get("auto_cost_authorized") or mode_cfg.get("cost_authorized")
+            )
+        has_cost_authorization = cost_authorized or has_persisted_cost_auth
+
         auto_mode = getattr(project, "automation_mode", "MANUAL")
         if auto_mode == "AUTO":
             b_summary = BudgetService.get_budget_status(db, project_id)
             if b_summary.get("is_hard_limit_exceeded"):
-                # Stop auto cascade: hard limit exceeded
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=target_stage,
+                    to_state=target_stage,
+                    action="AUTO_HALTED",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="HARD_BUDGET_LIMIT_EXCEEDED",
+                    detail="Auto-cascade halted: project hard budget limit exceeded.",
+                )
+                db.commit()
                 updated_state = cls.evaluate_state(db, project_id)
                 return ApproveStageResponse(
                     success=True,
@@ -825,6 +852,32 @@ class ProductionOrchestrator:
                     orchestration_state=updated_state,
                 )
 
+            if not has_cost_authorization:
+                # AUTO must NOT silently execute a chargeable action after approval.
+                # It must STOP and recommend the chargeable next action.
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=target_stage,
+                    to_state=target_stage,
+                    action="AUTO_STOPPED_AWAITING_COST_AUTHORIZATION",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.NO_OP,
+                    reason_code="CHARGEABLE_ACTION_REQUIRES_AUTHORIZATION",
+                    detail=f"Auto-cascade stopped after '{target_stage}': next action is chargeable and requires explicit cost authorization.",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ApproveStageResponse(
+                    success=True,
+                    from_stage=current,
+                    to_stage=project.status,
+                    result=OrchestrationActionResult.APPLIED,
+                    message=f"Stage successfully approved: transitioned to '{project.status}'. Auto-cascade stopped: next action is chargeable and requires cost authorization.",
+                    orchestration_state=updated_state,
+                )
+
+            # Explicit cost authorization exists: execute the downstream creative stage
             if target_stage == "STORY_APPROVED":
                 cls.execute_action(
                     db=db,
@@ -842,7 +895,7 @@ class ProductionOrchestrator:
                     provider=provider,
                 )
             elif target_stage == "SHOT_PLAN_APPROVED":
-                # Mandatory STOP: Video generation requires explicit human confirmation!
+                # Mandatory STOP: Video generation ALWAYS requires explicit human confirmation!
                 pass
 
         updated_state = cls.evaluate_state(db, project_id)
@@ -915,11 +968,13 @@ class ProductionOrchestrator:
                 "APPROVE_FINAL": "COMPLETED",
             }[action_upper]
 
+            cost_auth = bool(params.get("cost_authorized", False))
             approval_res = cls.approve_stage(
                 db=db,
                 project_id=project_id,
                 stage=target_stage_for_action,
                 notes=params.get("notes"),
+                cost_authorized=cost_auth,
                 actor=actor,
                 provider=creative_prov,
             )
@@ -1986,6 +2041,7 @@ class ProductionOrchestrator:
         db: Session,
         project_id: uuid.UUID,
         automation_mode: Optional[AutomationMode] = None,
+        auto_cost_authorized: Optional[bool] = None,
         actor: str = "USER",
     ) -> OrchestrationStateResponse:
         project = db.get(Project, project_id)
@@ -2008,6 +2064,22 @@ class ProductionOrchestrator:
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
                 detail=f"Changed automation mode from {old_mode} to {automation_mode.value}",
+            )
+            db.commit()
+
+        if auto_cost_authorized is not None:
+            cfg = dict(project.default_config or {})
+            cfg["auto_cost_authorized"] = auto_cost_authorized
+            project.default_config = cfg
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state=current,
+                action="UPDATE_AUTO_COST_AUTHORIZATION",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail=f"Set auto_cost_authorized to {auto_cost_authorized}",
             )
             db.commit()
 

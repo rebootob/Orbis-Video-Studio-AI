@@ -75,6 +75,7 @@ def approve_production_stage(
         project_id=project_id,
         stage=req.stage,
         notes=req.notes,
+        cost_authorized=bool(req.cost_authorized),
         actor="USER",
         provider=provider,
     )
@@ -95,6 +96,7 @@ def update_orchestration_settings(
         db=db,
         project_id=project_id,
         automation_mode=request.automation_mode,
+        auto_cost_authorized=request.auto_cost_authorized,
         actor="USER",
     )
 

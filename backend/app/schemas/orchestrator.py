@@ -76,6 +76,7 @@ class ExecuteActionResponse(BaseModel):
 class ApproveStageRequest(BaseModel):
     stage: Optional[str] = None
     notes: Optional[str] = None
+    cost_authorized: Optional[bool] = False
 
 
 class ApproveStageResponse(BaseModel):
@@ -91,6 +92,7 @@ class ApproveStageResponse(BaseModel):
 
 class OrchestrationSettingsUpdateRequest(BaseModel):
     automation_mode: Optional[AutomationMode] = None
+    auto_cost_authorized: Optional[bool] = None
 
 
 class OrchestrationAuditResponse(BaseModel):

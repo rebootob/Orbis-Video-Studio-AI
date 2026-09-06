@@ -46,10 +46,6 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
     'SHOT_PLAN_APPROVED',
     'IMAGES_GENERATED',
     'VIDEO_IN_PROGRESS',
-    'FINAL_REVIEW',
-    'READY_FOR_REVIEW',
-    'COMPLETED',
-    'APPROVED',
   ];
   const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
 

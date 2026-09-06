@@ -247,36 +247,50 @@ def test_auto_mode_safe_continuation_and_mandatory_stops(client, db_session):
     assert state["current_stage"] == "STORY_GENERATED"
     assert state["is_approval_required"] is True
 
-    # 2. Human approves STORY_GENERATED
-    # In AUTO mode, approving story automatically continues to GENERATE_STORYBOARD
-    # and reaches STORYBOARD_GENERATED, then stops for human review!
+    # 2. Human approves STORY_GENERATED WITHOUT cost authorization
+    # In AUTO mode, approving story without explicit cost authorization must NOT silently execute GENERATE_STORYBOARD!
+    # It must STOP at STORY_APPROVED and recommend GENERATE_STORYBOARD (is_chargeable=True)
     appr_resp = client.post(
         f"/api/v1/projects/{p_id}/orchestration/approve",
         json={"stage": "STORY_GENERATED"},
     )
     assert appr_resp.status_code == 200
     appr_state = appr_resp.json()["orchestration_state"]
-    assert appr_state["current_stage"] == "STORYBOARD_GENERATED"
-    assert appr_state["is_approval_required"] is True
+    assert appr_state["current_stage"] == "STORY_APPROVED"
+    assert appr_state["recommended_action"]["action"] == "GENERATE_STORYBOARD"
+    assert appr_state["recommended_action"]["is_chargeable"] is True
+    # Verify no scenes were silently created without cost authorization
+    db_session.refresh(p)
+    assert p.status == "STORY_APPROVED"
+    assert len(p.scenes) == 0
 
-    # 3. Human approves STORYBOARD_GENERATED
-    # In AUTO mode, approving storyboard automatically continues to GENERATE_SHOT_PLAN
+    # 3. Now test one-shot cost authorization:
+    # First, let's revert or execute GENERATE_STORYBOARD manually to reach STORYBOARD_GENERATED
+    gen_sb = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "GENERATE_STORYBOARD"},
+    )
+    assert gen_sb.status_code == 200
+    assert gen_sb.json()["orchestration_state"]["current_stage"] == "STORYBOARD_GENERATED"
+
+    # Human approves STORYBOARD_GENERATED WITH explicit one-shot cost authorization:
+    # With cost_authorized=True, AUTO automatically cascades to GENERATE_SHOT_PLAN
     # and reaches SHOT_PLAN_GENERATED, then stops for human review!
     appr_sb = client.post(
         f"/api/v1/projects/{p_id}/orchestration/approve",
-        json={"stage": "STORYBOARD_GENERATED"},
+        json={"stage": "STORYBOARD_GENERATED", "cost_authorized": True},
     )
     assert appr_sb.status_code == 200
     sb_state = appr_sb.json()["orchestration_state"]
     assert sb_state["current_stage"] == "SHOT_PLAN_GENERATED"
     assert sb_state["is_approval_required"] is True
 
-    # 4. Human approves SHOT_PLAN_GENERATED
-    # In AUTO mode, approving shot plan reaches SHOT_PLAN_APPROVED.
-    # It MUST STOP at SHOT_PLAN_APPROVED because video generation is CHARGEABLE!
+    # 4. Human approves SHOT_PLAN_GENERATED (even with cost_authorized=True)
+    # Approving shot plan reaches SHOT_PLAN_APPROVED.
+    # It MUST ALWAYS STOP at SHOT_PLAN_APPROVED because video generation is never auto-cascaded!
     appr_sp = client.post(
         f"/api/v1/projects/{p_id}/orchestration/approve",
-        json={"stage": "SHOT_PLAN_GENERATED"},
+        json={"stage": "SHOT_PLAN_GENERATED", "cost_authorized": True},
     )
     assert appr_sp.status_code == 200
     sp_state = appr_sp.json()["orchestration_state"]
@@ -286,6 +300,15 @@ def test_auto_mode_safe_continuation_and_mandatory_stops(client, db_session):
     # Verify it did not silently dispatch video generation jobs
     db_session.refresh(p)
     assert p.status == "SHOT_PLAN_APPROVED"
+
+    # 5. Verify persisted cost authorization via settings
+    patch_resp = client.patch(
+        f"/api/v1/projects/{p_id}/orchestration/settings",
+        json={"auto_cost_authorized": True},
+    )
+    assert patch_resp.status_code == 200
+    db_session.refresh(p)
+    assert (p.default_config or {}).get("auto_cost_authorized") is True
 
 
 def test_assisted_mode_does_not_silently_charge(client, db_session):
@@ -973,3 +996,105 @@ def test_legacy_generation_endpoints_fail_closed_on_completed_project(client, db
     # Legacy storyboard generation rejects
     res_sb = client.post(f"/api/v1/projects/{p_id}/storyboard/generate", json={})
     assert res_sb.status_code == 409
+
+
+def test_auto_mode_does_not_invoke_provider_silently_without_cost_authorization(client, db_session):
+    """
+    AUTO COST SAFETY:
+    GENERATE_STORY / GENERATE_STORYBOARD / GENERATE_SHOT_PLAN are chargeable provider actions.
+    AUTO must NOT silently execute a chargeable action after approval.
+    Unless explicit persisted/one-shot cost authorization exists, AUTO must STOP and recommend the chargeable next action.
+    """
+    class SpyProvider(FakeCreativeGenerationProvider):
+        def __init__(self):
+            super().__init__()
+            self.generate_story_called = 0
+            self.generate_scenes_called = 0
+            self.generate_shots_called = 0
+
+        def generate_story(self, prompt, **kwargs):
+            self.generate_story_called += 1
+            return super().generate_story(prompt, **kwargs)
+
+        def generate_scenes(self, prompt="", **kwargs):
+            self.generate_scenes_called += 1
+            return super().generate_scenes(prompt=prompt, **kwargs)
+
+        def generate_shots(self, scene_heading, scene_description, **kwargs):
+            self.generate_shots_called += 1
+            return super().generate_shots(scene_heading, scene_description, **kwargs)
+
+    spy_provider = SpyProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: spy_provider
+
+    # Create project in STORY_GENERATED stage with AUTO mode
+    p = Project(
+        title="Auto Cost Safety Project",
+        video_mode="STORY",
+        status="STORY_GENERATED",
+        automation_mode="AUTO",
+    )
+    db_session.add(p)
+    db_session.commit()
+    story = Story(project_id=p.id, logline="Outline prompt", title="Story Title", synopsis="Story outline")
+    db_session.add(story)
+    db_session.commit()
+    p_id = str(p.id)
+
+    # 1. User approves STORY_GENERATED WITHOUT cost authorization
+    resp = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/approve",
+        json={"stage": "STORY_GENERATED"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["to_stage"] == "STORY_APPROVED"
+    assert "cost authorization" in data["message"].lower()
+
+    # CRITICAL: Verify provider was NOT silently invoked to generate scenes
+    assert spy_provider.generate_scenes_called == 0
+    state = data["orchestration_state"]
+    assert state["current_stage"] == "STORY_APPROVED"
+    assert state["recommended_action"]["action"] == "GENERATE_STORYBOARD"
+    assert state["recommended_action"]["is_chargeable"] is True
+
+    # 2. If hard limit exceeded, even with cost_authorized=True, AUTO must halt
+    p.budget_limit = 10.0
+    db_session.commit()
+    # Add ledger entry exceeding limit
+    ledger = UsageLedger(
+        project_id=p.id,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        model="vidu-q1",
+        cost_status=CostStatus.CONFIRMED,
+        actual_cost=15.0,
+    )
+    db_session.add(ledger)
+    db_session.commit()
+
+    # Revert to STORY_GENERATED to test approval under hard limit exceeded
+    p.status = "STORY_GENERATED"
+    db_session.commit()
+
+    resp_hard = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/approve",
+        json={"stage": "STORY_GENERATED", "cost_authorized": True},
+    )
+    assert resp_hard.status_code == 200
+    assert "hard budget limit exceeded" in resp_hard.json()["message"].lower()
+    # Provider still not called
+    assert spy_provider.generate_scenes_called == 0
+
+    # 3. Clear hard limit and approve with explicit cost authorization -> provider IS called
+    p.budget_limit = 100.0
+    p.status = "STORY_GENERATED"
+    db_session.commit()
+
+    resp_authorized = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/approve",
+        json={"stage": "STORY_GENERATED", "cost_authorized": True},
+    )
+    assert resp_authorized.status_code == 200
+    assert spy_provider.generate_scenes_called == 1
+    assert resp_authorized.json()["orchestration_state"]["current_stage"] == "STORYBOARD_GENERATED"

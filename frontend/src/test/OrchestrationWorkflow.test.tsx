@@ -1,8 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { App } from '../App';
+import { api } from '../api/client';
 import { AutomationBar } from '../components/storyboard/AutomationBar';
 import { QCHistoryPanel } from '../components/qc/QCHistoryPanel';
-import type { OrchestrationStateResponse, OrchestrationAuditResponse, Project } from '../api/types';
+import type { OrchestrationStateResponse, OrchestrationAuditResponse, Project, Scene, Shot } from '../api/types';
+
+vi.mock('../api/client', () => ({
+  api: {
+    listProjects: vi.fn(),
+    listProviders: vi.fn(),
+    listProjectScenes: vi.fn(),
+    listSceneShots: vi.fn(),
+    listProjectStories: vi.fn(),
+    getProjectStory: vi.fn(),
+    listProjectJobs: vi.fn(),
+    listProjectReferences: vi.fn(),
+    getProjectBudget: vi.fn(),
+    listProjectLedger: vi.fn(),
+    resumeProjectJobs: vi.fn(),
+    updateProject: vi.fn(),
+    estimateBatchJobs: vi.fn(),
+    listBatchRuns: vi.fn(),
+    getOrchestrationState: vi.fn(),
+    executeOrchestrationAction: vi.fn(),
+    approveProductionStage: vi.fn(),
+    updateOrchestrationSettings: vi.fn(),
+    getOrchestrationHistory: vi.fn(),
+  },
+}));
 
 describe('Orchestration UI Components and Stage Transitions', () => {
   beforeEach(() => {
@@ -268,5 +294,288 @@ describe('Orchestration UI Components and Stage Transitions', () => {
     expect(actionBtn).toHaveTextContent('Monitor Active Generation Jobs');
     fireEvent.click(actionBtn);
     expect(onExecuteMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Recommended Action Canonical Execution via Orchestration API', () => {
+  const testProject: Project = {
+    id: 'proj-orch-test',
+    title: 'Orchestration Test Project',
+    description: 'Testing canonical execute API routing',
+    status: 'SHOT_PLAN_APPROVED',
+    video_mode: 'STORY',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const testScene: Scene = {
+    id: 'scene-test-1',
+    project_id: 'proj-orch-test',
+    scene_number: 1,
+    heading: 'EXT. LAB - DAY',
+    duration_seconds: 5.0,
+    is_locked: false,
+  };
+
+  const testShot: Shot = {
+    id: 'shot-test-1',
+    scene_id: 'scene-test-1',
+    shot_number: 1,
+    shot_type: 'AI_GENERATED',
+    duration_seconds: 4.0,
+    visual_prompt: 'Scientist at desk',
+    is_locked: false,
+    status: 'PENDING',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.alert = vi.fn();
+
+    (api.listProjects as any).mockResolvedValue([testProject]);
+    (api.listProviders as any).mockResolvedValue([]);
+    (api.listProjectScenes as any).mockResolvedValue([testScene]);
+    (api.listSceneShots as any).mockResolvedValue([testShot]);
+    (api.getProjectStory as any).mockResolvedValue(null);
+    (api.listProjectJobs as any).mockResolvedValue([]);
+    (api.listProjectReferences as any).mockResolvedValue([]);
+    (api.getProjectBudget as any).mockResolvedValue({
+      project_id: 'proj-orch-test',
+      budget_limit: 100,
+      currency: 'USD',
+      confirmed_cost: 0,
+      estimated_cost: 0,
+      total_committed_cost: 0,
+      soft_limit_exceeded: false,
+      hard_limit_exceeded: false,
+      has_unknown_costs: false,
+    });
+    (api.listProjectLedger as any).mockResolvedValue([]);
+    (api.estimateBatchJobs as any).mockResolvedValue({
+      shot_count: 1,
+      skipped_count: 0,
+      total_evaluated: 1,
+      estimated_cost_total: 0.1,
+      currency: 'USD',
+      has_unknown_pricing: false,
+      warning_messages: [],
+    });
+    (api.listBatchRuns as any).mockResolvedValue([]);
+    (api.getOrchestrationHistory as any).mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+  });
+
+  it('routes START_VIDEO_GENERATION recommended action to executeOrchestrationAction (NOT resumeProjectJobs)', async () => {
+    const orchState: OrchestrationStateResponse = {
+      project_id: 'proj-orch-test',
+      current_stage: 'SHOT_PLAN_APPROVED',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      stage_display_name: 'Shot Plan Approved',
+      stage_description: 'Shot plan approved. Ready for video generation.',
+      is_approval_required: false,
+      is_blocked: false,
+      blocked_reasons: [],
+      recommended_action: {
+        action: 'START_VIDEO_GENERATION',
+        display_name: 'Start Video Generation',
+        description: 'Dispatch video generation jobs to the provider queue.',
+        action_type: 'GENERATION',
+        is_chargeable: true,
+        is_blocked: false,
+      },
+      available_actions: [],
+      summary: {},
+    };
+
+    (api.getOrchestrationState as any).mockResolvedValue(orchState);
+    (api.executeOrchestrationAction as any).mockResolvedValue({
+      success: true,
+      action: 'START_VIDEO_GENERATION',
+      from_stage: 'SHOT_PLAN_APPROVED',
+      to_stage: 'VIDEO_IN_PROGRESS',
+      result: 'APPLIED',
+      message: 'Batch generation started',
+      orchestration_state: { ...orchState, current_stage: 'VIDEO_IN_PROGRESS' },
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    const recActionBtn = await screen.findByTestId('orchestration-recommended-action-btn');
+    expect(recActionBtn).toHaveTextContent('Start Video Generation');
+
+    fireEvent.click(recActionBtn);
+
+    await waitFor(() => {
+      expect(api.executeOrchestrationAction).toHaveBeenCalledWith('proj-orch-test', {
+        action: 'START_VIDEO_GENERATION',
+        parameters: undefined,
+      });
+    });
+    expect(api.resumeProjectJobs).not.toHaveBeenCalled();
+  });
+
+  it('routes CONTINUE_INCOMPLETE recommended action to executeOrchestrationAction (NOT resumeProjectJobs)', async () => {
+    const orchState: OrchestrationStateResponse = {
+      project_id: 'proj-orch-test',
+      current_stage: 'VIDEO_IN_PROGRESS',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      stage_display_name: 'Video In Progress',
+      stage_description: 'Some shots incomplete.',
+      is_approval_required: false,
+      is_blocked: false,
+      blocked_reasons: [],
+      recommended_action: {
+        action: 'CONTINUE_INCOMPLETE',
+        display_name: 'Continue Incomplete Generation',
+        description: 'Dispatch remaining shots.',
+        action_type: 'GENERATION',
+        is_chargeable: true,
+        is_blocked: false,
+      },
+      available_actions: [],
+      summary: {},
+    };
+
+    (api.getOrchestrationState as any).mockResolvedValue(orchState);
+    (api.executeOrchestrationAction as any).mockResolvedValue({
+      success: true,
+      action: 'CONTINUE_INCOMPLETE',
+      from_stage: 'VIDEO_IN_PROGRESS',
+      to_stage: 'VIDEO_IN_PROGRESS',
+      result: 'APPLIED',
+      message: 'Continued incomplete jobs',
+      orchestration_state: orchState,
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    const recActionBtn = await screen.findByTestId('orchestration-recommended-action-btn');
+    expect(recActionBtn).toHaveTextContent('Continue Incomplete Generation');
+
+    fireEvent.click(recActionBtn);
+
+    await waitFor(() => {
+      expect(api.executeOrchestrationAction).toHaveBeenCalledWith('proj-orch-test', {
+        action: 'CONTINUE_INCOMPLETE',
+        parameters: undefined,
+      });
+    });
+    expect(api.resumeProjectJobs).not.toHaveBeenCalled();
+  });
+
+  it('routes RETRY_FAILED recommended action to executeOrchestrationAction (NOT resumeProjectJobs)', async () => {
+    const orchState: OrchestrationStateResponse = {
+      project_id: 'proj-orch-test',
+      current_stage: 'VIDEO_IN_PROGRESS',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      stage_display_name: 'Video In Progress',
+      stage_description: 'Failed jobs detected.',
+      is_approval_required: false,
+      is_blocked: false,
+      blocked_reasons: [],
+      recommended_action: {
+        action: 'RETRY_FAILED',
+        display_name: 'Retry Failed Jobs',
+        description: 'Retry failed generation jobs.',
+        action_type: 'RECOVERY',
+        is_chargeable: true,
+        is_blocked: false,
+      },
+      available_actions: [],
+      summary: {},
+    };
+
+    (api.getOrchestrationState as any).mockResolvedValue(orchState);
+    (api.executeOrchestrationAction as any).mockResolvedValue({
+      success: true,
+      action: 'RETRY_FAILED',
+      from_stage: 'VIDEO_IN_PROGRESS',
+      to_stage: 'VIDEO_IN_PROGRESS',
+      result: 'APPLIED',
+      message: 'Retried failed jobs',
+      orchestration_state: orchState,
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    const recActionBtn = await screen.findByTestId('orchestration-recommended-action-btn');
+    expect(recActionBtn).toHaveTextContent('Retry Failed Jobs');
+
+    fireEvent.click(recActionBtn);
+
+    await waitFor(() => {
+      expect(api.executeOrchestrationAction).toHaveBeenCalledWith('proj-orch-test', {
+        action: 'RETRY_FAILED',
+        parameters: undefined,
+      });
+    });
+    expect(api.resumeProjectJobs).not.toHaveBeenCalled();
+  });
+
+  it('routes GENERATE_SELECTED_SHOTS recommended action to executeOrchestrationAction with parameters', async () => {
+    const orchState: OrchestrationStateResponse = {
+      project_id: 'proj-orch-test',
+      current_stage: 'SHOT_PLAN_APPROVED',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      stage_display_name: 'Shot Plan Approved',
+      stage_description: 'Ready for generation.',
+      is_approval_required: false,
+      is_blocked: false,
+      blocked_reasons: [],
+      recommended_action: {
+        action: 'GENERATE_SELECTED_SHOTS',
+        display_name: 'Generate Selected Shots',
+        description: 'Dispatch selected shots.',
+        action_type: 'GENERATION',
+        parameters: { shot_ids: ['shot-test-1'] },
+        is_chargeable: true,
+        is_blocked: false,
+      },
+      available_actions: [],
+      summary: {},
+    };
+
+    (api.getOrchestrationState as any).mockResolvedValue(orchState);
+    (api.executeOrchestrationAction as any).mockResolvedValue({
+      success: true,
+      action: 'GENERATE_SELECTED_SHOTS',
+      from_stage: 'SHOT_PLAN_APPROVED',
+      to_stage: 'VIDEO_IN_PROGRESS',
+      result: 'APPLIED',
+      message: 'Dispatched selected shots',
+      orchestration_state: { ...orchState, current_stage: 'VIDEO_IN_PROGRESS' },
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    const recActionBtn = await screen.findByTestId('orchestration-recommended-action-btn');
+    expect(recActionBtn).toHaveTextContent('Generate Selected Shots');
+
+    fireEvent.click(recActionBtn);
+
+    await waitFor(() => {
+      expect(api.executeOrchestrationAction).toHaveBeenCalledWith('proj-orch-test', {
+        action: 'GENERATE_SELECTED_SHOTS',
+        parameters: { shot_ids: ['shot-test-1'] },
+      });
+    });
+    expect(api.resumeProjectJobs).not.toHaveBeenCalled();
   });
 });
