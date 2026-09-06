@@ -11,6 +11,8 @@ from app.schemas.generation_job import (
     ClaimResponse,
     DispatchRequest,
     BatchRunResponse,
+    BatchRunSummaryResponse,
+    BatchRunDetailResponse,
     BatchResumeRequest,
     BatchResumeEstimateResponse,
 )
@@ -201,7 +203,7 @@ def batch_generate_project_shots(
     return jobs
 
 
-@router.post("/projects/{project_id}/jobs/resume", response_model=BatchRunResponse)
+@router.post("/projects/{project_id}/jobs/resume", response_model=BatchRunSummaryResponse)
 def resume_project_jobs(
     project_id: uuid.UUID,
     request: Optional[BatchResumeRequest] = None,
@@ -220,7 +222,7 @@ def resume_project_jobs(
     return batch_run
 
 
-@router.get("/projects/{project_id}/batch-runs", response_model=List[BatchRunResponse])
+@router.get("/projects/{project_id}/batch-runs", response_model=List[BatchRunSummaryResponse])
 def list_project_batch_runs(
     project_id: uuid.UUID,
     limit: int = Query(50, ge=1, le=100),
@@ -236,7 +238,7 @@ def list_project_batch_runs(
     )
 
 
-@router.get("/projects/{project_id}/batch-runs/{run_id}", response_model=BatchRunResponse)
+@router.get("/projects/{project_id}/batch-runs/{run_id}", response_model=BatchRunDetailResponse)
 def get_batch_run_details(
     project_id: uuid.UUID,
     run_id: uuid.UUID,

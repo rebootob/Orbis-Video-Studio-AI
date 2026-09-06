@@ -62,7 +62,7 @@ class BatchRunItemResponse(BaseModel):
     created_at: datetime
 
 
-class BatchRunResponse(BaseModel):
+class BatchRunSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -77,7 +77,17 @@ class BatchRunResponse(BaseModel):
     failed_count: int
     created_at: datetime
     updated_at: datetime
-    items: Optional[List[BatchRunItemResponse]] = None
+
+
+class BatchRunDetailResponse(BatchRunSummaryResponse):
+    items: List[BatchRunItemResponse]
+    items_total: int
+    item_limit: int
+    item_offset: int
+
+
+# Backward compatibility alias
+BatchRunResponse = BatchRunSummaryResponse
 
 
 from typing import Optional, List, Literal

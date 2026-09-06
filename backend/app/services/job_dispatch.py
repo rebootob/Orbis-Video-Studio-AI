@@ -273,24 +273,26 @@ class JobDispatchService:
             else:
                 return job
         except IntegrityError:
-            db.rollback()
-            if idempotency_key:
-                existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
-                if existing:
-                    return existing
-            existing_active = (
-                db.query(Job)
-                .filter(Job.shot_id == shot_id, Job.status.in_(ACTIVE_JOB_STATUSES))
-                .first()
-            )
-            if existing_active:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Active generation job '{existing_active.id}' already exists for Shot '{shot_id}'.",
+            if commit:
+                db.rollback()
+                if idempotency_key:
+                    existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
+                    if existing:
+                        return existing
+                existing_active = (
+                    db.query(Job)
+                    .filter(Job.shot_id == shot_id, Job.status.in_(ACTIVE_JOB_STATUSES))
+                    .first()
                 )
+                if existing_active:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Active generation job '{existing_active.id}' already exists for Shot '{shot_id}'.",
+                    )
             raise
         except Exception:
-            db.rollback()
+            if commit:
+                db.rollback()
             raise
 
     @staticmethod

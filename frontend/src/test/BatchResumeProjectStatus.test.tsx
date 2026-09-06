@@ -170,4 +170,103 @@ describe('Batch Generation Status Advancement Safety', () => {
       });
     });
   });
+
+  it('does NOT transition Project status to VIDEO_IN_PROGRESS when handleRetryFailed queues 0 jobs', async () => {
+    (api.listProjectJobs as any).mockResolvedValue([
+      {
+        id: 'job-failed-1',
+        shot_id: 'shot-1',
+        provider_name: 'vidu',
+        status: 'FAILED',
+        error_message: 'Provider timed out',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    (api.resumeProjectJobs as any).mockResolvedValue({
+      id: 'run-retry-0',
+      project_id: 'proj-batch-1',
+      operation_type: 'RETRY_FAILED',
+      status: 'NO_OP',
+      requested_count: 1,
+      eligible_count: 0,
+      queued_count: 0,
+      skipped_count: 1,
+      completed_count: 0,
+      failed_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Batch Safety Project');
+    fireEvent.click(projectCard);
+
+    const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
+    fireEvent.click(retryBtn);
+
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(api.resumeProjectJobs).toHaveBeenCalledWith('proj-batch-1', {
+        operation_type: 'RETRY_FAILED',
+      });
+    });
+
+    expect(api.updateProject).not.toHaveBeenCalledWith(
+      'proj-batch-1',
+      expect.objectContaining({ status: 'VIDEO_IN_PROGRESS' })
+    );
+  });
+
+  it('transitions Project status to VIDEO_IN_PROGRESS when handleRetryFailed queues > 0 jobs', async () => {
+    (api.listProjectJobs as any).mockResolvedValue([
+      {
+        id: 'job-failed-2',
+        shot_id: 'shot-1',
+        provider_name: 'vidu',
+        status: 'FAILED',
+        error_message: 'Provider timed out',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    (api.resumeProjectJobs as any).mockResolvedValue({
+      id: 'run-retry-1',
+      project_id: 'proj-batch-1',
+      operation_type: 'RETRY_FAILED',
+      status: 'DISPATCHED',
+      requested_count: 1,
+      eligible_count: 1,
+      queued_count: 1,
+      skipped_count: 0,
+      completed_count: 0,
+      failed_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Batch Safety Project');
+    fireEvent.click(projectCard);
+
+    const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
+    fireEvent.click(retryBtn);
+
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(api.resumeProjectJobs).toHaveBeenCalledWith('proj-batch-1', {
+        operation_type: 'RETRY_FAILED',
+      });
+    });
+
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('proj-batch-1', {
+        status: 'VIDEO_IN_PROGRESS',
+      });
+    });
+  });
 });

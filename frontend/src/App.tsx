@@ -336,6 +336,11 @@ export const App: React.FC = () => {
       const run = await api.resumeProjectJobs(selectedProject.id, {
         operation_type: 'RETRY_FAILED',
       });
+      if (run.queued_count > 0) {
+        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
+        setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
+        await loadProjects();
+      }
       await loadWorkspaceData(selectedProject);
       alert(`Retry summary:\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count}`);
     } catch (err: any) {

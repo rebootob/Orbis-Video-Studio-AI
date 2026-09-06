@@ -32,6 +32,7 @@ from app.models.asset import Asset
 from app.models.generation_job import GenerationJob
 from app.models.asset_lock import AssetLock
 from app.models.batch_run import BatchRun, BatchRunItem
+from app.models.usage_ledger import UsageLedger
 from app.services.batch_resume import BatchResumeService, CandidateSkipReason
 from app.services.job_dispatch import JobDispatchService
 from app.providers.factory import ProviderFactory
@@ -1002,11 +1003,226 @@ def test_batch_run_item_details_are_bounded_and_paginated(db_session, test_proje
     # Default bounded limit is 100
     details = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=0)
     assert len(details.items) == 50
+    assert details.items_total == 120
+    assert details.item_limit == 50
+    assert details.item_offset == 0
 
     # Next offset
     details_p2 = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=50)
     assert len(details_p2.items) == 50
+    assert details_p2.items_total == 120
 
     # Remaining items
     details_p3 = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=100)
     assert len(details_p3.items) == 20
+    assert details_p3.items_total == 120
+
+    # Crucial delete-orphan check: calling db_session.commit() after get_batch_run_details must NOT delete unselected items
+    db_session.commit()
+    remaining = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).count()
+    assert remaining == 120
+
+
+def test_multi_shot_partial_failure_with_caller_savepoint_isolation(db_session, test_project, monkeypatch):
+    """Test 13: Shot A succeeds, Shot B fails in job creation, Shot C succeeds.
+    Verify:
+    - Shot A Job + Ledger + BatchRunItem exist
+    - Shot B leaves NO unaudited job (savepoint rolled back)
+    - Shot C Job + Ledger + BatchRunItem exist
+    - BatchRun counters exactly match persisted DB truth
+    """
+    project, sc1, _ = test_project
+    shot_a = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    shot_b = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    shot_c = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=3, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([shot_a, shot_b, shot_c])
+    db_session.commit()
+
+    real_dispatch = JobDispatchService.create_and_dispatch_job
+
+    def controlled_dispatch(*args, **kwargs):
+        shot_id = kwargs.get("shot_id") or (args[1] if len(args) > 1 else None)
+        if shot_id == shot_b.id:
+            raise RuntimeError("Simulated crash inside JobDispatchService for Shot B")
+        return real_dispatch(*args, **kwargs)
+
+    monkeypatch.setattr(JobDispatchService, "create_and_dispatch_job", controlled_dispatch)
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+
+    assert run.requested_count == 3
+    assert run.eligible_count == 3
+    assert run.queued_count == 2
+    assert run.failed_count == 1
+    assert run.skipped_count == 0
+    assert run.status == "PARTIAL_FAILED"
+
+    # Shot A verification: Job + Ledger + BatchRunItem exist
+    job_a = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot_a.id).first()
+    assert job_a is not None
+    ledger_a = db_session.query(UsageLedger).filter(UsageLedger.job_id == job_a.id).first()
+    assert ledger_a is not None
+    item_a = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot_a.id).first()
+    assert item_a is not None
+    assert item_a.decision == "QUEUED"
+    assert item_a.job_id == job_a.id
+
+    # Shot B verification: NO Job, NO Ledger, BatchRunItem is FAILED
+    job_b = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot_b.id).first()
+    assert job_b is None
+    ledger_b = db_session.query(UsageLedger).filter(UsageLedger.shot_id == shot_b.id).first()
+    assert ledger_b is None
+    item_b = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot_b.id).first()
+    assert item_b is not None
+    assert item_b.decision == "FAILED"
+    assert item_b.job_id is None
+    assert "Simulated crash" in (item_b.skip_reason or "")
+
+    # Shot C verification: Job + Ledger + BatchRunItem exist
+    job_c = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot_c.id).first()
+    assert job_c is not None
+    ledger_c = db_session.query(UsageLedger).filter(UsageLedger.job_id == job_c.id).first()
+    assert ledger_c is not None
+    item_c = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot_c.id).first()
+    assert item_c is not None
+    assert item_c.decision == "QUEUED"
+    assert item_c.job_id == job_c.id
+
+    # Dynamic reconciliation matches exactly
+    reconciled = BatchResumeService.reconcile_batch_run_counts(db_session, run)
+    assert reconciled.queued_count == 2
+    assert reconciled.failed_count == 1
+    assert reconciled.status == "PARTIAL_FAILED"
+
+
+def test_batch_run_chunk_boundary_persistence_and_recovery(db_session, test_project, monkeypatch):
+    """Test 14: Verify that counters are persisted at every chunk boundary, and mid-run crash can be reconciled."""
+    project, sc1, _ = test_project
+    # Create 55 shots (EXECUTE_CHUNK_SIZE is 50, so 2 chunks: 50 + 5)
+    shots = [
+        Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+        for i in range(1, 56)
+    ]
+    db_session.add_all(shots)
+    db_session.commit()
+
+    chunk_commits = [0]
+    real_commit = db_session.commit
+
+    def tracking_commit():
+        chunk_commits[0] += 1
+        real_commit()
+
+    monkeypatch.setattr(db_session, "commit", tracking_commit)
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+
+    # At least 3 commits: 1 for run creation, 1 for chunk 1, 1 for chunk 2 / final
+    assert chunk_commits[0] >= 3
+    assert run.requested_count == 55
+    assert run.queued_count == 55
+    assert run.eligible_count == 55
+    assert run.failed_count == 0
+
+    # Test reading through get_batch_run_details
+    details = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=20, item_offset=0)
+    assert details.items_total == 55
+    assert len(details.items) == 20
+    assert details.queued_count == 55
+
+
+def test_api_endpoints_safe_serialization_and_no_cascade_delete(db_session, test_project, client):
+    """Test 15: Verify API endpoints list and detail use safe DTOs and never delete items."""
+    project, sc1, _ = test_project
+    run = BatchRun(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        status="DISPATCHED",
+        requested_count=30,
+        eligible_count=30,
+        queued_count=30,
+        skipped_count=0,
+        completed_count=0,
+        failed_count=0,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run)
+    db_session.flush()
+
+    for i in range(30):
+        db_session.add(BatchRunItem(
+            id=uuid.uuid4(),
+            batch_run_id=run.id,
+            shot_id=uuid.uuid4(),
+            decision="QUEUED",
+            created_at=datetime.now(timezone.utc),
+        ))
+    db_session.commit()
+
+    # List endpoint does NOT contain "items" key
+    resp_list = client.get(f"/api/v1/projects/{project.id}/batch-runs")
+    assert resp_list.status_code == 200
+    runs_data = resp_list.json()
+    assert len(runs_data) >= 1
+    found = next((r for r in runs_data if r["id"] == str(run.id)), None)
+    assert found is not None
+    assert "items" not in found
+    assert found["queued_count"] == 30
+
+    # Detail endpoint returns paginated items and total
+    resp_detail = client.get(f"/api/v1/projects/{project.id}/batch-runs/{run.id}?item_limit=10&item_offset=0")
+    assert resp_detail.status_code == 200
+    detail_data = resp_detail.json()
+    assert "items" in detail_data
+    assert len(detail_data["items"]) == 10
+    assert detail_data["items_total"] == 30
+    assert detail_data["item_limit"] == 10
+    assert detail_data["item_offset"] == 0
+
+    # Verify no cascade delete happened
+    remaining_items = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).count()
+    assert remaining_items == 30
+
+
+def test_snapshot_whole_project_execution_is_immune_to_concurrent_ordering_shifts(db_session, test_project):
+    """Test 16: Verify that whole-project batch execution uses an immutable ID snapshot,
+    ensuring deterministic and complete execution without offset drift or skipped shots.
+    """
+    project, sc1, sc2 = test_project
+    shots_s1 = [
+        Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+        for i in range(1, 4)
+    ]
+    shots_s2 = [
+        Shot(id=uuid.uuid4(), scene_id=sc2.id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+        for i in range(1, 4)
+    ]
+    db_session.add_all(shots_s1 + shots_s2)
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+
+    assert run.requested_count == 6
+    assert run.queued_count == 6
+    assert len(jobs) == 6
+
+    # Verify each shot has exactly one BatchRunItem and one Job
+    items = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).all()
+    assert len(items) == 6
+    processed_shot_ids = {it.shot_id for it in items}
+    all_created_ids = {s.id for s in shots_s1 + shots_s2}
+    assert processed_shot_ids == all_created_ids

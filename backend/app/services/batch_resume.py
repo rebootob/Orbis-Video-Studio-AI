@@ -25,6 +25,7 @@ from app.services.job_dispatch import JobDispatchService, ALLOWED_PRODUCTION_STA
 from app.services.pricing import ProviderPricingService, CostStatus
 from app.services.budget import BudgetService
 from app.providers.factory import ProviderFactory
+from app.schemas.generation_job import BatchRunDetailResponse, BatchRunItemResponse
 
 
 class CandidateSkipReason(str, Enum):
@@ -527,129 +528,82 @@ class BatchResumeService:
         has_unknown = False
 
         if shot_ids is not None:
-            requested_ids = list(dict.fromkeys(shot_ids))
-            for i in range(0, len(requested_ids), EXECUTE_CHUNK_SIZE):
-                chunk_req_ids = requested_ids[i:i + EXECUTE_CHUNK_SIZE]
-                chunk_shots = (
-                    db.query(Shot)
-                    .filter(
-                        Shot.scene_id.in_(all_scene_ids),
-                        Shot.id.in_(chunk_req_ids),
-                    )
-                    .all()
-                ) if all_scene_ids else []
-                shots_by_id = {s.id: s for s in chunk_shots}
-
-                job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
-                    .filter(GenerationJob.shot_id.in_(chunk_req_ids))
-                    .all()
-                )
-                (
-                    shot_has_completed,
-                    shot_has_cancelling,
-                    shot_has_reconciliation,
-                    shot_has_active,
-                    shot_has_failed,
-                ) = cls._categorize_job_rows(job_rows)
-
-                for req_id in chunk_req_ids:
-                    total_evaluated += 1
-                    if req_id not in shots_by_id:
-                        skipped_count += 1
-                        continue
-
-                    shot = shots_by_id[req_id]
-                    is_eligible, _ = cls._evaluate_shot_decision(
-                        shot=shot,
-                        archived_scene_ids=archived_scene_ids,
-                        scene_story_map=scene_story_map,
-                        locked_shot_ids=locked_shot_ids,
-                        locked_scene_ids=locked_scene_ids,
-                        locked_story_ids=locked_story_ids,
-                        shot_has_completed=shot_has_completed,
-                        shot_has_cancelling=shot_has_cancelling,
-                        shot_has_reconciliation=shot_has_reconciliation,
-                        shot_has_active=shot_has_active,
-                        shot_has_failed=shot_has_failed,
-                        op_enum=op_enum,
-                        only_incomplete=only_incomplete,
-                    )
-                    if is_eligible:
-                        eligible_count += 1
-                        cost, curr, status_flag = ProviderPricingService.estimate_cost(
-                            provider=eff_provider,
-                            operation="VIDEO_GENERATION",
-                            params={"duration_seconds": shot.duration_seconds},
-                        )
-                        if status_flag == CostStatus.UNKNOWN or cost is None:
-                            has_unknown = True
-                        else:
-                            total_cost += cost
-                    else:
-                        skipped_count += 1
+            candidate_shot_ids = list(dict.fromkeys(shot_ids))
         else:
             if all_scene_ids:
-                offset = 0
-                while True:
-                    chunk_shots = (
-                        db.query(Shot)
+                candidate_shot_ids = [
+                    row[0]
+                    for row in (
+                        db.query(Shot.id)
                         .join(Scene, Shot.scene_id == Scene.id)
                         .filter(Scene.id.in_(all_scene_ids))
                         .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
-                        .offset(offset)
-                        .limit(EXECUTE_CHUNK_SIZE)
                         .all()
                     )
-                    if not chunk_shots:
-                        break
+                ]
+            else:
+                candidate_shot_ids = []
 
-                    chunk_shot_ids = [s.id for s in chunk_shots]
-                    job_rows = (
-                        db.query(GenerationJob.shot_id, GenerationJob.status)
-                        .filter(GenerationJob.shot_id.in_(chunk_shot_ids))
-                        .all()
+        for i in range(0, len(candidate_shot_ids), EXECUTE_CHUNK_SIZE):
+            chunk_req_ids = candidate_shot_ids[i:i + EXECUTE_CHUNK_SIZE]
+            chunk_shots = (
+                db.query(Shot)
+                .filter(
+                    Shot.scene_id.in_(all_scene_ids),
+                    Shot.id.in_(chunk_req_ids),
+                )
+                .all()
+            ) if all_scene_ids else []
+            shots_by_id = {s.id: s for s in chunk_shots}
+
+            job_rows = (
+                db.query(GenerationJob.shot_id, GenerationJob.status)
+                .filter(GenerationJob.shot_id.in_(chunk_req_ids))
+                .all()
+            )
+            (
+                shot_has_completed,
+                shot_has_cancelling,
+                shot_has_reconciliation,
+                shot_has_active,
+                shot_has_failed,
+            ) = cls._categorize_job_rows(job_rows)
+
+            for req_id in chunk_req_ids:
+                total_evaluated += 1
+                if req_id not in shots_by_id:
+                    skipped_count += 1
+                    continue
+
+                shot = shots_by_id[req_id]
+                is_eligible, _ = cls._evaluate_shot_decision(
+                    shot=shot,
+                    archived_scene_ids=archived_scene_ids,
+                    scene_story_map=scene_story_map,
+                    locked_shot_ids=locked_shot_ids,
+                    locked_scene_ids=locked_scene_ids,
+                    locked_story_ids=locked_story_ids,
+                    shot_has_completed=shot_has_completed,
+                    shot_has_cancelling=shot_has_cancelling,
+                    shot_has_reconciliation=shot_has_reconciliation,
+                    shot_has_active=shot_has_active,
+                    shot_has_failed=shot_has_failed,
+                    op_enum=op_enum,
+                    only_incomplete=only_incomplete,
+                )
+                if is_eligible:
+                    eligible_count += 1
+                    cost, curr, status_flag = ProviderPricingService.estimate_cost(
+                        provider=eff_provider,
+                        operation="VIDEO_GENERATION",
+                        params={"duration_seconds": shot.duration_seconds},
                     )
-                    (
-                        shot_has_completed,
-                        shot_has_cancelling,
-                        shot_has_reconciliation,
-                        shot_has_active,
-                        shot_has_failed,
-                    ) = cls._categorize_job_rows(job_rows)
-
-                    for shot in chunk_shots:
-                        total_evaluated += 1
-                        is_eligible, _ = cls._evaluate_shot_decision(
-                            shot=shot,
-                            archived_scene_ids=archived_scene_ids,
-                            scene_story_map=scene_story_map,
-                            locked_shot_ids=locked_shot_ids,
-                            locked_scene_ids=locked_scene_ids,
-                            locked_story_ids=locked_story_ids,
-                            shot_has_completed=shot_has_completed,
-                            shot_has_cancelling=shot_has_cancelling,
-                            shot_has_reconciliation=shot_has_reconciliation,
-                            shot_has_active=shot_has_active,
-                            shot_has_failed=shot_has_failed,
-                            op_enum=op_enum,
-                            only_incomplete=only_incomplete,
-                        )
-                        if is_eligible:
-                            eligible_count += 1
-                            cost, curr, status_flag = ProviderPricingService.estimate_cost(
-                                provider=eff_provider,
-                                operation="VIDEO_GENERATION",
-                                params={"duration_seconds": shot.duration_seconds},
-                            )
-                            if status_flag == CostStatus.UNKNOWN or cost is None:
-                                has_unknown = True
-                            else:
-                                total_cost += cost
-                        else:
-                            skipped_count += 1
-
-                    offset += EXECUTE_CHUNK_SIZE
+                    if status_flag == CostStatus.UNKNOWN or cost is None:
+                        has_unknown = True
+                    else:
+                        total_cost += cost
+                else:
+                    skipped_count += 1
 
         warnings = []
         if has_unknown:
@@ -763,151 +717,118 @@ class BatchResumeService:
         has_dispatch_failure = False
         created_jobs: List[GenerationJob] = []
 
-        # 3. Stream processing in chunks
+        # 3. Stream processing in chunks using immutable candidate shot ID snapshot
         if shot_ids is not None:
-            requested_ids = list(dict.fromkeys(shot_ids))
-            for i in range(0, len(requested_ids), EXECUTE_CHUNK_SIZE):
-                chunk_req_ids = requested_ids[i:i + EXECUTE_CHUNK_SIZE]
-                chunk_shots = (
-                    db.query(Shot)
-                    .filter(
-                        Shot.scene_id.in_(all_scene_ids),
-                        Shot.id.in_(chunk_req_ids),
+            candidate_shot_ids = list(dict.fromkeys(shot_ids))
+        else:
+            if all_scene_ids:
+                candidate_shot_ids = [
+                    row[0]
+                    for row in (
+                        db.query(Shot.id)
+                        .join(Scene, Shot.scene_id == Scene.id)
+                        .filter(Scene.id.in_(all_scene_ids))
+                        .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
+                        .all()
                     )
-                    .all()
-                ) if all_scene_ids else []
-                shots_by_id = {s.id: s for s in chunk_shots}
+                ]
+            else:
+                candidate_shot_ids = []
 
-                job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
-                    .filter(GenerationJob.shot_id.in_(chunk_req_ids))
-                    .all()
+        for i in range(0, len(candidate_shot_ids), EXECUTE_CHUNK_SIZE):
+            chunk_req_ids = candidate_shot_ids[i:i + EXECUTE_CHUNK_SIZE]
+            chunk_shots = (
+                db.query(Shot)
+                .filter(
+                    Shot.scene_id.in_(all_scene_ids),
+                    Shot.id.in_(chunk_req_ids),
                 )
-                (
-                    shot_has_completed,
-                    shot_has_cancelling,
-                    shot_has_reconciliation,
-                    shot_has_active,
-                    shot_has_failed,
-                ) = cls._categorize_job_rows(job_rows)
+                .all()
+            ) if all_scene_ids else []
+            shots_by_id = {s.id: s for s in chunk_shots}
 
-                for req_id in chunk_req_ids:
-                    total_evaluated += 1
-                    if req_id not in shots_by_id:
-                        skipped_count += 1
-                        db.add(BatchRunItem(
-                            id=uuid.uuid4(),
-                            batch_run_id=batch_run.id,
-                            shot_id=req_id,
-                            job_id=None,
-                            decision="SKIPPED",
-                            skip_reason=CandidateSkipReason.NOT_FOUND.value,
-                            created_at=now,
-                        ))
-                        continue
+            job_rows = (
+                db.query(GenerationJob.shot_id, GenerationJob.status)
+                .filter(GenerationJob.shot_id.in_(chunk_req_ids))
+                .all()
+            )
+            (
+                shot_has_completed,
+                shot_has_cancelling,
+                shot_has_reconciliation,
+                shot_has_active,
+                shot_has_failed,
+            ) = cls._categorize_job_rows(job_rows)
 
-                    shot = shots_by_id[req_id]
-                    is_eligible, skip_reason = cls._evaluate_shot_decision(
-                        shot=shot,
-                        archived_scene_ids=archived_scene_ids,
-                        scene_story_map=scene_story_map,
-                        locked_shot_ids=locked_shot_ids,
-                        locked_scene_ids=locked_scene_ids,
-                        locked_story_ids=locked_story_ids,
-                        shot_has_completed=shot_has_completed,
-                        shot_has_cancelling=shot_has_cancelling,
-                        shot_has_reconciliation=shot_has_reconciliation,
-                        shot_has_active=shot_has_active,
-                        shot_has_failed=shot_has_failed,
-                        op_enum=op_enum,
-                        only_incomplete=only_incomplete,
-                    )
-                    if not is_eligible:
-                        skipped_count += 1
-                        db.add(BatchRunItem(
-                            id=uuid.uuid4(),
-                            batch_run_id=batch_run.id,
-                            shot_id=shot.id,
-                            job_id=None,
-                            decision="SKIPPED",
-                            skip_reason=skip_reason.value if skip_reason else None,
-                            created_at=now,
-                        ))
-                    else:
-                        eligible_count += 1
-                        try:
-                            with db.begin_nested():
-                                job = JobDispatchService.create_and_dispatch_job(
-                                    db=db,
-                                    shot_id=shot.id,
-                                    provider_name=eff_provider,
-                                    lock_shot=True,
-                                    commit=False,
-                                )
-                                item = BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=job.id,
-                                    decision="QUEUED",
-                                    skip_reason=None,
-                                    created_at=now,
-                                )
-                                db.add(item)
-                                db.flush()
+            for req_id in chunk_req_ids:
+                total_evaluated += 1
+                if req_id not in shots_by_id:
+                    skipped_count += 1
+                    db.add(BatchRunItem(
+                        id=uuid.uuid4(),
+                        batch_run_id=batch_run.id,
+                        shot_id=req_id,
+                        job_id=None,
+                        decision="SKIPPED",
+                        skip_reason=CandidateSkipReason.NOT_FOUND.value,
+                        created_at=now,
+                    ))
+                    continue
+
+                shot = shots_by_id[req_id]
+                is_eligible, skip_reason = cls._evaluate_shot_decision(
+                    shot=shot,
+                    archived_scene_ids=archived_scene_ids,
+                    scene_story_map=scene_story_map,
+                    locked_shot_ids=locked_shot_ids,
+                    locked_scene_ids=locked_scene_ids,
+                    locked_story_ids=locked_story_ids,
+                    shot_has_completed=shot_has_completed,
+                    shot_has_cancelling=shot_has_cancelling,
+                    shot_has_reconciliation=shot_has_reconciliation,
+                    shot_has_active=shot_has_active,
+                    shot_has_failed=shot_has_failed,
+                    op_enum=op_enum,
+                    only_incomplete=only_incomplete,
+                )
+                if not is_eligible:
+                    skipped_count += 1
+                    db.add(BatchRunItem(
+                        id=uuid.uuid4(),
+                        batch_run_id=batch_run.id,
+                        shot_id=shot.id,
+                        job_id=None,
+                        decision="SKIPPED",
+                        skip_reason=skip_reason.value if skip_reason else None,
+                        created_at=now,
+                    ))
+                else:
+                    eligible_count += 1
+                    try:
+                        with db.begin_nested():
+                            job = JobDispatchService.create_and_dispatch_job(
+                                db=db,
+                                shot_id=shot.id,
+                                provider_name=eff_provider,
+                                lock_shot=True,
+                                commit=False,
+                            )
+                            item = BatchRunItem(
+                                id=uuid.uuid4(),
+                                batch_run_id=batch_run.id,
+                                shot_id=shot.id,
+                                job_id=job.id,
+                                decision="QUEUED",
+                                skip_reason=None,
+                                created_at=now,
+                            )
+                            db.add(item)
+                            db.flush()
+                        if len(created_jobs) < 100:
                             created_jobs.append(job)
-                            queued_count += 1
-                        except HTTPException as http_exc:
-                            if http_exc.status_code == 409 and "Active generation job" in str(http_exc.detail):
-                                skipped_count += 1
-                                eligible_count -= 1
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="SKIPPED",
-                                    skip_reason=CandidateSkipReason.ACTIVE_JOB_EXISTS.value,
-                                    created_at=now,
-                                ))
-                            elif http_exc.status_code == 409 and "RECONCILIATION_REQUIRED" in str(http_exc.detail):
-                                skipped_count += 1
-                                eligible_count -= 1
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="SKIPPED",
-                                    skip_reason=CandidateSkipReason.RECONCILIATION_REQUIRED.value,
-                                    created_at=now,
-                                ))
-                            elif http_exc.status_code == 409 and "CANCELLING" in str(http_exc.detail):
-                                skipped_count += 1
-                                eligible_count -= 1
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="SKIPPED",
-                                    skip_reason=CandidateSkipReason.CANCELLATION_IN_PROGRESS.value,
-                                    created_at=now,
-                                ))
-                            else:
-                                has_dispatch_failure = True
-                                dispatch_failed_count += 1
-                                err_msg = http_exc.detail if hasattr(http_exc, "detail") else str(http_exc)
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="FAILED",
-                                    skip_reason=str(err_msg)[:100],
-                                    created_at=now,
-                                ))
-                        except IntegrityError:
+                        queued_count += 1
+                    except HTTPException as http_exc:
+                        if http_exc.status_code == 409 and "Active generation job" in str(http_exc.detail):
                             skipped_count += 1
                             eligible_count -= 1
                             db.add(BatchRunItem(
@@ -919,177 +840,80 @@ class BatchResumeService:
                                 skip_reason=CandidateSkipReason.ACTIVE_JOB_EXISTS.value,
                                 created_at=now,
                             ))
-                        except Exception as exc:
-                            has_dispatch_failure = True
-                            dispatch_failed_count += 1
-                            db.add(BatchRunItem(
-                                id=uuid.uuid4(),
-                                batch_run_id=batch_run.id,
-                                shot_id=shot.id,
-                                job_id=None,
-                                decision="FAILED",
-                                skip_reason=str(exc)[:100],
-                                created_at=now,
-                            ))
-                db.commit()
-        else:
-            if all_scene_ids:
-                offset = 0
-                while True:
-                    chunk_shots = (
-                        db.query(Shot)
-                        .join(Scene, Shot.scene_id == Scene.id)
-                        .filter(Scene.id.in_(all_scene_ids))
-                        .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
-                        .offset(offset)
-                        .limit(EXECUTE_CHUNK_SIZE)
-                        .all()
-                    )
-                    if not chunk_shots:
-                        break
-
-                    chunk_shot_ids = [s.id for s in chunk_shots]
-                    job_rows = (
-                        db.query(GenerationJob.shot_id, GenerationJob.status)
-                        .filter(GenerationJob.shot_id.in_(chunk_shot_ids))
-                        .all()
-                    )
-                    (
-                        shot_has_completed,
-                        shot_has_cancelling,
-                        shot_has_reconciliation,
-                        shot_has_active,
-                        shot_has_failed,
-                    ) = cls._categorize_job_rows(job_rows)
-
-                    for shot in chunk_shots:
-                        total_evaluated += 1
-                        is_eligible, skip_reason = cls._evaluate_shot_decision(
-                            shot=shot,
-                            archived_scene_ids=archived_scene_ids,
-                            scene_story_map=scene_story_map,
-                            locked_shot_ids=locked_shot_ids,
-                            locked_scene_ids=locked_scene_ids,
-                            locked_story_ids=locked_story_ids,
-                            shot_has_completed=shot_has_completed,
-                            shot_has_cancelling=shot_has_cancelling,
-                            shot_has_reconciliation=shot_has_reconciliation,
-                            shot_has_active=shot_has_active,
-                            shot_has_failed=shot_has_failed,
-                            op_enum=op_enum,
-                            only_incomplete=only_incomplete,
-                        )
-                        if not is_eligible:
+                        elif http_exc.status_code == 409 and "RECONCILIATION_REQUIRED" in str(http_exc.detail):
                             skipped_count += 1
+                            eligible_count -= 1
                             db.add(BatchRunItem(
                                 id=uuid.uuid4(),
                                 batch_run_id=batch_run.id,
                                 shot_id=shot.id,
                                 job_id=None,
                                 decision="SKIPPED",
-                                skip_reason=skip_reason.value if skip_reason else None,
+                                skip_reason=CandidateSkipReason.RECONCILIATION_REQUIRED.value,
+                                created_at=now,
+                            ))
+                        elif http_exc.status_code == 409 and "CANCELLING" in str(http_exc.detail):
+                            skipped_count += 1
+                            eligible_count -= 1
+                            db.add(BatchRunItem(
+                                id=uuid.uuid4(),
+                                batch_run_id=batch_run.id,
+                                shot_id=shot.id,
+                                job_id=None,
+                                decision="SKIPPED",
+                                skip_reason=CandidateSkipReason.CANCELLATION_IN_PROGRESS.value,
                                 created_at=now,
                             ))
                         else:
-                            eligible_count += 1
-                            try:
-                                with db.begin_nested():
-                                    job = JobDispatchService.create_and_dispatch_job(
-                                        db=db,
-                                        shot_id=shot.id,
-                                        provider_name=eff_provider,
-                                        lock_shot=True,
-                                        commit=False,
-                                    )
-                                    item = BatchRunItem(
-                                        id=uuid.uuid4(),
-                                        batch_run_id=batch_run.id,
-                                        shot_id=shot.id,
-                                        job_id=job.id,
-                                        decision="QUEUED",
-                                        skip_reason=None,
-                                        created_at=now,
-                                    )
-                                    db.add(item)
-                                    db.flush()
-                                created_jobs.append(job)
-                                queued_count += 1
-                            except HTTPException as http_exc:
-                                if http_exc.status_code == 409 and "Active generation job" in str(http_exc.detail):
-                                    skipped_count += 1
-                                    eligible_count -= 1
-                                    db.add(BatchRunItem(
-                                        id=uuid.uuid4(),
-                                        batch_run_id=batch_run.id,
-                                        shot_id=shot.id,
-                                        job_id=None,
-                                        decision="SKIPPED",
-                                        skip_reason=CandidateSkipReason.ACTIVE_JOB_EXISTS.value,
-                                        created_at=now,
-                                    ))
-                                elif http_exc.status_code == 409 and "RECONCILIATION_REQUIRED" in str(http_exc.detail):
-                                    skipped_count += 1
-                                    eligible_count -= 1
-                                    db.add(BatchRunItem(
-                                        id=uuid.uuid4(),
-                                        batch_run_id=batch_run.id,
-                                        shot_id=shot.id,
-                                        job_id=None,
-                                        decision="SKIPPED",
-                                        skip_reason=CandidateSkipReason.RECONCILIATION_REQUIRED.value,
-                                        created_at=now,
-                                    ))
-                                elif http_exc.status_code == 409 and "CANCELLING" in str(http_exc.detail):
-                                    skipped_count += 1
-                                    eligible_count -= 1
-                                    db.add(BatchRunItem(
-                                        id=uuid.uuid4(),
-                                        batch_run_id=batch_run.id,
-                                        shot_id=shot.id,
-                                        job_id=None,
-                                        decision="SKIPPED",
-                                        skip_reason=CandidateSkipReason.CANCELLATION_IN_PROGRESS.value,
-                                        created_at=now,
-                                    ))
-                                else:
-                                    has_dispatch_failure = True
-                                    dispatch_failed_count += 1
-                                    err_msg = http_exc.detail if hasattr(http_exc, "detail") else str(http_exc)
-                                    db.add(BatchRunItem(
-                                        id=uuid.uuid4(),
-                                        batch_run_id=batch_run.id,
-                                        shot_id=shot.id,
-                                        job_id=None,
-                                        decision="FAILED",
-                                        skip_reason=str(err_msg)[:100],
-                                        created_at=now,
-                                    ))
-                            except IntegrityError:
-                                skipped_count += 1
-                                eligible_count -= 1
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="SKIPPED",
-                                    skip_reason=CandidateSkipReason.ACTIVE_JOB_EXISTS.value,
-                                    created_at=now,
-                                ))
-                            except Exception as exc:
-                                has_dispatch_failure = True
-                                dispatch_failed_count += 1
-                                db.add(BatchRunItem(
-                                    id=uuid.uuid4(),
-                                    batch_run_id=batch_run.id,
-                                    shot_id=shot.id,
-                                    job_id=None,
-                                    decision="FAILED",
-                                    skip_reason=str(exc)[:100],
-                                    created_at=now,
-                                ))
-                    db.commit()
-                    offset += EXECUTE_CHUNK_SIZE
+                            has_dispatch_failure = True
+                            dispatch_failed_count += 1
+                            err_msg = http_exc.detail if hasattr(http_exc, "detail") else str(http_exc)
+                            db.add(BatchRunItem(
+                                id=uuid.uuid4(),
+                                batch_run_id=batch_run.id,
+                                shot_id=shot.id,
+                                job_id=None,
+                                decision="FAILED",
+                                skip_reason=str(err_msg)[:100],
+                                created_at=now,
+                            ))
+                    except IntegrityError:
+                        skipped_count += 1
+                        eligible_count -= 1
+                        db.add(BatchRunItem(
+                            id=uuid.uuid4(),
+                            batch_run_id=batch_run.id,
+                            shot_id=shot.id,
+                            job_id=None,
+                            decision="SKIPPED",
+                            skip_reason=CandidateSkipReason.ACTIVE_JOB_EXISTS.value,
+                            created_at=now,
+                        ))
+                    except Exception as exc:
+                        has_dispatch_failure = True
+                        dispatch_failed_count += 1
+                        db.add(BatchRunItem(
+                            id=uuid.uuid4(),
+                            batch_run_id=batch_run.id,
+                            shot_id=shot.id,
+                            job_id=None,
+                            decision="FAILED",
+                            skip_reason=str(exc)[:100],
+                            created_at=now,
+                        ))
+
+            # Persist batch_run counters at every committed chunk boundary
+            batch_run.requested_count = total_evaluated
+            batch_run.eligible_count = eligible_count
+            batch_run.queued_count = queued_count
+            batch_run.skipped_count = skipped_count
+            batch_run.failed_count = dispatch_failed_count
+            batch_run.updated_at = datetime.now(timezone.utc)
+            if has_dispatch_failure:
+                batch_run.status = "PARTIAL_FAILED" if queued_count > 0 else "FAILED"
+            else:
+                batch_run.status = "DISPATCHED"
+            db.commit()
 
         # 4. Finalize BatchRun totals and truthful status
         batch_run.requested_count = total_evaluated
@@ -1109,19 +933,56 @@ class BatchResumeService:
 
     @classmethod
     def reconcile_batch_run_counts(cls, db: Session, batch_run: BatchRun) -> BatchRun:
-        """Dynamically derive truthful completed_count and failed_count from linked generation jobs and dispatch failures."""
+        """Dynamically derive truthful counters and lifecycle status from linked items and generation jobs."""
         stats = (
             db.query(
+                func.count(BatchRunItem.id).label("total_items"),
+                func.count().filter(BatchRunItem.decision == "QUEUED").label("queued_items"),
+                func.count().filter(BatchRunItem.decision == "SKIPPED").label("skipped_items"),
+                func.count().filter(BatchRunItem.decision == "FAILED").label("dispatch_failures"),
                 func.count().filter(GenerationJob.status == "COMPLETED").label("completed_jobs"),
                 func.count().filter(GenerationJob.status.in_(["FAILED", "RECONCILIATION_REQUIRED"])).label("failed_jobs"),
-                func.count().filter(BatchRunItem.decision == "FAILED").label("dispatch_failures"),
+                func.count().filter(GenerationJob.status.in_(ACTIVE_JOB_STATUSES)).label("running_jobs"),
             )
             .outerjoin(GenerationJob, BatchRunItem.job_id == GenerationJob.id)
             .filter(BatchRunItem.batch_run_id == batch_run.id)
             .one()
         )
-        batch_run.completed_count = stats.completed_jobs or 0
-        batch_run.failed_count = (stats.failed_jobs or 0) + (stats.dispatch_failures or 0)
+        total_items = stats.total_items or 0
+        queued_items = stats.queued_items or 0
+        skipped_items = stats.skipped_items or 0
+        dispatch_failures = stats.dispatch_failures or 0
+        completed_jobs = stats.completed_jobs or 0
+        failed_jobs = stats.failed_jobs or 0
+        running_jobs = stats.running_jobs or 0
+
+        if total_items > 0:
+            batch_run.requested_count = total_items
+            batch_run.eligible_count = queued_items + dispatch_failures
+            batch_run.queued_count = queued_items
+            batch_run.skipped_count = skipped_items
+            batch_run.completed_count = completed_jobs
+            batch_run.failed_count = failed_jobs + dispatch_failures
+
+            if queued_items == 0:
+                batch_run.status = "FAILED" if dispatch_failures > 0 else "DISPATCHED"
+            else:
+                total_terminal = completed_jobs + failed_jobs
+                has_failures = (failed_jobs + dispatch_failures) > 0
+                if running_jobs > 0:
+                    batch_run.status = "PARTIAL_FAILED" if has_failures else "RUNNING"
+                elif total_terminal >= queued_items:
+                    if completed_jobs == queued_items and not has_failures:
+                        batch_run.status = "COMPLETED"
+                    elif completed_jobs > 0 and has_failures:
+                        batch_run.status = "PARTIAL_FAILED"
+                    elif completed_jobs == 0 and has_failures:
+                        batch_run.status = "FAILED"
+                    else:
+                        batch_run.status = "COMPLETED"
+                else:
+                    batch_run.status = "PARTIAL_FAILED" if has_failures else "DISPATCHED"
+
         return batch_run
 
     @classmethod
@@ -1148,9 +1009,13 @@ class BatchResumeService:
         stats_rows = (
             db.query(
                 BatchRunItem.batch_run_id,
+                func.count(BatchRunItem.id).label("total_items"),
+                func.count().filter(BatchRunItem.decision == "QUEUED").label("queued_items"),
+                func.count().filter(BatchRunItem.decision == "SKIPPED").label("skipped_items"),
+                func.count().filter(BatchRunItem.decision == "FAILED").label("dispatch_failures"),
                 func.count().filter(GenerationJob.status == "COMPLETED").label("completed_jobs"),
                 func.count().filter(GenerationJob.status.in_(["FAILED", "RECONCILIATION_REQUIRED"])).label("failed_jobs"),
-                func.count().filter(BatchRunItem.decision == "FAILED").label("dispatch_failures"),
+                func.count().filter(GenerationJob.status.in_(ACTIVE_JOB_STATUSES)).label("running_jobs"),
             )
             .outerjoin(GenerationJob, BatchRunItem.job_id == GenerationJob.id)
             .filter(BatchRunItem.batch_run_id.in_(run_ids))
@@ -1158,16 +1023,45 @@ class BatchResumeService:
             .all()
         )
         stats_by_run = {
-            row.batch_run_id: (
-                row.completed_jobs or 0,
-                (row.failed_jobs or 0) + (row.dispatch_failures or 0),
-            )
+            row.batch_run_id: row
             for row in stats_rows
         }
         for r in runs:
-            completed, failed = stats_by_run.get(r.id, (0, 0))
-            r.completed_count = completed
-            r.failed_count = failed
+            stats = stats_by_run.get(r.id)
+            if stats and (stats.total_items or 0) > 0:
+                total_items = stats.total_items or 0
+                queued_items = stats.queued_items or 0
+                skipped_items = stats.skipped_items or 0
+                dispatch_failures = stats.dispatch_failures or 0
+                completed_jobs = stats.completed_jobs or 0
+                failed_jobs = stats.failed_jobs or 0
+                running_jobs = stats.running_jobs or 0
+
+                r.requested_count = total_items
+                r.eligible_count = queued_items + dispatch_failures
+                r.queued_count = queued_items
+                r.skipped_count = skipped_items
+                r.completed_count = completed_jobs
+                r.failed_count = failed_jobs + dispatch_failures
+
+                if queued_items == 0:
+                    r.status = "FAILED" if dispatch_failures > 0 else "DISPATCHED"
+                else:
+                    total_terminal = completed_jobs + failed_jobs
+                    has_failures = (failed_jobs + dispatch_failures) > 0
+                    if running_jobs > 0:
+                        r.status = "PARTIAL_FAILED" if has_failures else "RUNNING"
+                    elif total_terminal >= queued_items:
+                        if completed_jobs == queued_items and not has_failures:
+                            r.status = "COMPLETED"
+                        elif completed_jobs > 0 and has_failures:
+                            r.status = "PARTIAL_FAILED"
+                        elif completed_jobs == 0 and has_failures:
+                            r.status = "FAILED"
+                        else:
+                            r.status = "COMPLETED"
+                    else:
+                        r.status = "PARTIAL_FAILED" if has_failures else "DISPATCHED"
         return runs
 
     @classmethod
@@ -1178,8 +1072,8 @@ class BatchResumeService:
         run_id: uuid.UUID,
         item_limit: int = 100,
         item_offset: int = 0,
-    ) -> BatchRun:
-        """Get single batch run with bounded item pagination."""
+    ) -> BatchRunDetailResponse:
+        """Get single batch run with bounded item pagination without ORM collection mutation."""
         run = (
             db.query(BatchRun)
             .filter(BatchRun.id == run_id, BatchRun.project_id == project_id)
@@ -1191,7 +1085,12 @@ class BatchResumeService:
                 detail=f"BatchRun '{run_id}' not found for project '{project_id}'",
             )
         cls.reconcile_batch_run_counts(db, run)
-        # Bounded item retrieval
+
+        items_total = (
+            db.query(func.count(BatchRunItem.id))
+            .filter(BatchRunItem.batch_run_id == run_id)
+            .scalar() or 0
+        )
         bounded_items = (
             db.query(BatchRunItem)
             .filter(BatchRunItem.batch_run_id == run_id)
@@ -1200,5 +1099,21 @@ class BatchResumeService:
             .limit(item_limit)
             .all()
         )
-        run.items = bounded_items
-        return run
+        return BatchRunDetailResponse(
+            id=run.id,
+            project_id=run.project_id,
+            operation_type=run.operation_type,
+            status=run.status,
+            requested_count=run.requested_count,
+            eligible_count=run.eligible_count,
+            queued_count=run.queued_count,
+            skipped_count=run.skipped_count,
+            completed_count=run.completed_count,
+            failed_count=run.failed_count,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            items=[BatchRunItemResponse.model_validate(it) for it in bounded_items],
+            items_total=items_total,
+            item_limit=item_limit,
+            item_offset=item_offset,
+        )
