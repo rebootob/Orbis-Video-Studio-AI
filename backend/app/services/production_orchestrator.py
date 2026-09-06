@@ -697,315 +697,6 @@ class ProductionOrchestrator:
 
         return recommended, available
 
-        if current_stage in ("COMPLETED", "APPROVED"):
-            recommended = OrchestrationActionModel(
-                action="VIEW_SUMMARY",
-                display_name="Production Complete",
-                description="All production stages have been successfully approved and completed.",
-                action_type=OrchestrationActionType.NAVIGATION,
-                is_chargeable=False,
-            )
-            return recommended, available
-
-        # ----------------- Mode: STORY -----------------
-        if video_mode == "STORY":
-            if current_stage == "DRAFT":
-                if not has_story:
-                    recommended = OrchestrationActionModel(
-                        action="GENERATE_STORY",
-                        display_name="Generate Story Outline",
-                        description="Create initial narrative arc, character profiles, and scene outline.",
-                        action_type=OrchestrationActionType.GENERATION,
-                        is_chargeable=False,
-                    )
-                else:
-                    # Story already exists; transition was not finalized or needs re-approval
-                    recommended = OrchestrationActionModel(
-                        action="APPROVE_STORY",
-                        display_name="Approve Story Outline & Proceed",
-                        description="Lock story narrative outline and proceed to storyboard generation.",
-                        action_type=OrchestrationActionType.APPROVAL,
-                        is_chargeable=False,
-                        parameters={"stage": "STORY_GENERATED"},
-                    )
-                    available.append(OrchestrationActionModel(
-                        action="REVISE_STORY",
-                        display_name="Revise Story Outline",
-                        description="Edit narrative prompt and regenerate outline.",
-                        action_type=OrchestrationActionType.REVISION,
-                    ))
-
-            elif current_stage == "STORY_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_STORY",
-                    display_name="Approve Story Outline & Proceed",
-                    description="Lock story narrative outline and proceed to storyboard generation.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "STORY_GENERATED"},
-                )
-                available.append(OrchestrationActionModel(
-                    action="REVISE_STORY",
-                    display_name="Revise Story Outline",
-                    description="Edit narrative prompt and regenerate outline.",
-                    action_type=OrchestrationActionType.REVISION,
-                ))
-
-            elif current_stage == "STORY_APPROVED":
-                if scene_count == 0:
-                    recommended = OrchestrationActionModel(
-                        action="GENERATE_STORYBOARD",
-                        display_name="Generate Storyboard Scenes",
-                        description="Generate storyboard scenes from the approved story outline.",
-                        action_type=OrchestrationActionType.GENERATION,
-                        is_chargeable=False,
-                    )
-                else:
-                    recommended = OrchestrationActionModel(
-                        action="APPROVE_STORYBOARD",
-                        display_name="Approve Storyboard & Proceed",
-                        description="Lock storyboard scenes and proceed to detailed shot planning.",
-                        action_type=OrchestrationActionType.APPROVAL,
-                        is_chargeable=False,
-                        parameters={"stage": "STORYBOARD_GENERATED"},
-                    )
-                    available.append(OrchestrationActionModel(
-                        action="REVISE_STORYBOARD",
-                        display_name="Revise Storyboard",
-                        description="Modify scene headings and descriptions.",
-                        action_type=OrchestrationActionType.REVISION,
-                    ))
-
-            elif current_stage == "STORYBOARD_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_STORYBOARD",
-                    display_name="Approve Storyboard & Proceed",
-                    description="Lock storyboard scenes and proceed to detailed shot planning.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "STORYBOARD_GENERATED"},
-                )
-                available.append(OrchestrationActionModel(
-                    action="REVISE_STORYBOARD",
-                    display_name="Revise Storyboard",
-                    description="Modify scene headings and descriptions.",
-                    action_type=OrchestrationActionType.REVISION,
-                ))
-
-            elif current_stage == "STORYBOARD_APPROVED":
-                if shot_count == 0:
-                    recommended = OrchestrationActionModel(
-                        action="GENERATE_SHOT_PLAN",
-                        display_name="Generate Shot Plan & Prompts",
-                        description="Generate camera shots, durations, and AI visual prompts.",
-                        action_type=OrchestrationActionType.GENERATION,
-                        is_chargeable=False,
-                    )
-                else:
-                    recommended = OrchestrationActionModel(
-                        action="APPROVE_SHOT_PLAN",
-                        display_name="Approve Shot Plan & Proceed",
-                        description="Lock visual shot plans and AI prompts for production video generation.",
-                        action_type=OrchestrationActionType.APPROVAL,
-                        is_chargeable=False,
-                        parameters={"stage": "SHOT_PLAN_GENERATED"},
-                    )
-                    available.append(OrchestrationActionModel(
-                        action="REVISE_SHOT_PLAN",
-                        display_name="Revise Shot Plan",
-                        description="Edit shot prompts, camera angles, or durations.",
-                        action_type=OrchestrationActionType.REVISION,
-                    ))
-
-            elif current_stage == "SHOT_PLAN_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_SHOT_PLAN",
-                    display_name="Approve Shot Plan & Proceed",
-                    description="Lock visual shot plans and AI prompts for production video generation.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "SHOT_PLAN_GENERATED"},
-                )
-                available.append(OrchestrationActionModel(
-                    action="REVISE_SHOT_PLAN",
-                    display_name="Revise Shot Plan",
-                    description="Edit shot prompts, camera angles, or durations.",
-                    action_type=OrchestrationActionType.REVISION,
-                ))
-
-        # ----------------- Modes: SHORT & SCENE (No Story outline) -----------------
-        elif video_mode in ("SHORT", "SCENE"):
-            if current_stage == "DRAFT":
-                if scene_count == 0:
-                    recommended = OrchestrationActionModel(
-                        action="GENERATE_STORYBOARD",
-                        display_name="Create Storyboard Scenes",
-                        description="Initialize scene structure for short-form production.",
-                        action_type=OrchestrationActionType.GENERATION,
-                        is_chargeable=False,
-                    )
-                else:
-                    recommended = OrchestrationActionModel(
-                        action="APPROVE_STORYBOARD",
-                        display_name="Approve Storyboard & Proceed",
-                        description="Approve scenes and proceed to shot planning.",
-                        action_type=OrchestrationActionType.APPROVAL,
-                        is_chargeable=False,
-                        parameters={"stage": "STORYBOARD_GENERATED"},
-                    )
-            elif current_stage == "STORYBOARD_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_STORYBOARD",
-                    display_name="Approve Storyboard & Proceed",
-                    description="Approve scenes and proceed to shot planning.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "STORYBOARD_GENERATED"},
-                )
-            elif current_stage == "STORYBOARD_APPROVED":
-                if shot_count == 0:
-                    recommended = OrchestrationActionModel(
-                        action="GENERATE_SHOT_PLAN",
-                        display_name="Generate Shot Plan & Prompts",
-                        description="Generate camera shots and AI prompts for scenes.",
-                        action_type=OrchestrationActionType.GENERATION,
-                        is_chargeable=False,
-                    )
-                else:
-                    recommended = OrchestrationActionModel(
-                        action="APPROVE_SHOT_PLAN",
-                        display_name="Approve Shot Plan & Proceed",
-                        description="Approve shot plan and proceed to video generation.",
-                        action_type=OrchestrationActionType.APPROVAL,
-                        is_chargeable=False,
-                        parameters={"stage": "SHOT_PLAN_GENERATED"},
-                    )
-            elif current_stage == "SHOT_PLAN_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_SHOT_PLAN",
-                    display_name="Approve Shot Plan & Proceed",
-                    description="Approve shot plan and proceed to video generation.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "SHOT_PLAN_GENERATED"},
-                )
-
-        # ----------------- Mode: LOOP (No Story or Scene outline) -----------------
-        elif video_mode == "LOOP":
-            if current_stage == "DRAFT":
-                recommended = OrchestrationActionModel(
-                    action="GENERATE_SHOT_PLAN",
-                    display_name="Configure Loop Shot Plan",
-                    description="Set up loop shot duration and seamless visual prompt.",
-                    action_type=OrchestrationActionType.GENERATION,
-                    is_chargeable=False,
-                )
-            elif current_stage == "SHOT_PLAN_GENERATED":
-                recommended = OrchestrationActionModel(
-                    action="APPROVE_SHOT_PLAN",
-                    display_name="Approve Loop Shot Plan & Proceed",
-                    description="Approve loop parameters and proceed to generation.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                    parameters={"stage": "SHOT_PLAN_GENERATED"},
-                )
-
-        # ----------------- Downstream Stages (All modes) -----------------
-        if current_stage == "SHOT_PLAN_APPROVED":
-            all_locked = shot_count > 0 and locked_shot_count == shot_count
-            is_gen_blocked = hard_limit_exceeded or all_locked
-            blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
-                "All candidate shots are locked" if all_locked else None
-            )
-
-            recommended = OrchestrationActionModel(
-                action="START_VIDEO_GENERATION",
-                display_name="Start Video Generation",
-                description="Dispatch eligible AI video generation jobs to the provider queue.",
-                action_type=OrchestrationActionType.GENERATION,
-                is_chargeable=True,
-                is_blocked=is_gen_blocked,
-                blocked_reason=blocked_msg,
-            )
-            available.append(OrchestrationActionModel(
-                action="GENERATE_SELECTED_SHOTS",
-                display_name="Generate Selected Shots",
-                description="Dispatch selected shots only.",
-                action_type=OrchestrationActionType.GENERATION,
-                is_chargeable=True,
-                is_blocked=is_gen_blocked,
-            ))
-            available.append(OrchestrationActionModel(
-                action="REVISE_SHOT_PLAN",
-                display_name="Revise Shot Plan",
-                description="Make adjustments to shot prompts or camera instructions.",
-                action_type=OrchestrationActionType.REVISION,
-            ))
-
-        elif current_stage == "VIDEO_IN_PROGRESS":
-            if active_jobs > 0:
-                recommended = OrchestrationActionModel(
-                    action="POLL_STATUS",
-                    display_name="Monitor Active Generation Jobs",
-                    description=f"{active_jobs} job(s) actively processing in queue.",
-                    action_type=OrchestrationActionType.NAVIGATION,
-                    is_chargeable=False,
-                )
-            elif shot_count > 0 and completed_jobs >= shot_count:
-                recommended = OrchestrationActionModel(
-                    action="TRANSITION_TO_FINAL_REVIEW",
-                    display_name="Proceed to Final Review",
-                    description="All shots generated successfully. Inspect final cut assembly.",
-                    action_type=OrchestrationActionType.APPROVAL,
-                    is_chargeable=False,
-                )
-            elif failed_jobs > 0:
-                recommended = OrchestrationActionModel(
-                    action="RETRY_FAILED",
-                    display_name="Retry Failed Jobs",
-                    description=f"Retry {failed_jobs} failed generation job(s).",
-                    action_type=OrchestrationActionType.RECOVERY,
-                    is_chargeable=True,
-                    is_blocked=hard_limit_exceeded,
-                )
-            elif completed_jobs < shot_count:
-                recommended = OrchestrationActionModel(
-                    action="CONTINUE_INCOMPLETE",
-                    display_name="Continue Incomplete Generation",
-                    description="Dispatch remaining ungenerated shots.",
-                    action_type=OrchestrationActionType.GENERATION,
-                    is_chargeable=True,
-                    is_blocked=hard_limit_exceeded,
-                )
-
-        elif current_stage in ("FINAL_REVIEW", "READY_FOR_REVIEW"):
-            recommended = OrchestrationActionModel(
-                action="APPROVE_FINAL",
-                display_name="Approve Final Cut & Complete Project",
-                description="Approve assembly and mark project completed.",
-                action_type=OrchestrationActionType.APPROVAL,
-                is_chargeable=False,
-                parameters={"stage": "FINAL_REVIEW"},
-            )
-            if failed_jobs > 0:
-                available.append(OrchestrationActionModel(
-                    action="RETRY_FAILED",
-                    display_name="Retry Failed Jobs",
-                    description="Retry failed shots.",
-                    action_type=OrchestrationActionType.RECOVERY,
-                    is_chargeable=True,
-                ))
-            if completed_jobs < shot_count:
-                available.append(OrchestrationActionModel(
-                    action="CONTINUE_INCOMPLETE",
-                    display_name="Generate Incomplete Shots",
-                    description="Complete remaining shots.",
-                    action_type=OrchestrationActionType.GENERATION,
-                    is_chargeable=True,
-                ))
-
-        return recommended, available
-
     @classmethod
     def approve_stage(
         cls,
@@ -1532,6 +1223,38 @@ class ProductionOrchestrator:
                     detail=f"START_VIDEO_GENERATION requires 'SHOT_PLAN_APPROVED' stage, current project status is '{current}'.",
                 )
 
+            # Check reconciliation safety: fail closed if any job requires reconciliation
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_count = (
+                db.query(func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .scalar()
+                or 0
+            )
+            if recon_count > 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="RECONCILIATION_REQUIRED",
+                    detail=f"Cannot dispatch generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot dispatch generation jobs: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+
             # Check budget hard limit
             b_summary = BudgetService.get_budget_status(db, project_id)
             if b_summary.get("is_hard_limit_exceeded"):
@@ -1627,6 +1350,38 @@ class ProductionOrchestrator:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"CONTINUE_INCOMPLETE requires 'SHOT_PLAN_APPROVED' or 'VIDEO_IN_PROGRESS' stage, current project status is '{current}'.",
+                )
+
+            # Check reconciliation safety: fail closed if any job requires reconciliation
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_count = (
+                db.query(func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .scalar()
+                or 0
+            )
+            if recon_count > 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="RECONCILIATION_REQUIRED",
+                    detail=f"Cannot dispatch generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot dispatch generation jobs: {recon_count} job(s) require reconciliation before workflow continuation.",
                 )
 
             # Check budget hard limit
@@ -1725,9 +1480,37 @@ class ProductionOrchestrator:
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"GENERATE_SELECTED_SHOTS requires 'SHOT_PLAN_APPROVED' or 'VIDEO_IN_PROGRESS' stage, current status is '{current}'.",
                 )
+
+            # Check reconciliation safety: fail closed if any job requires reconciliation
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_count = (
+                db.query(func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .scalar()
+                or 0
+            )
+            if recon_count > 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="RECONCILIATION_REQUIRED",
+                    detail=f"Cannot dispatch generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+                db.commit()
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Production generation requires 'SHOT_PLAN_APPROVED' stage, current status is '{current}'.",
+                    detail=f"Cannot dispatch generation jobs: {recon_count} job(s) require reconciliation before workflow continuation.",
                 )
             shot_ids = params.get("shot_ids")
             if not shot_ids:
@@ -1813,6 +1596,38 @@ class ProductionOrchestrator:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"RETRY_FAILED requires 'VIDEO_IN_PROGRESS' or 'NEEDS_ATTENTION' stage, current project status is '{current}'.",
+                )
+
+            # Check reconciliation safety: fail closed if any job requires reconciliation
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_count = (
+                db.query(func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .scalar()
+                or 0
+            )
+            if recon_count > 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="RECONCILIATION_REQUIRED",
+                    detail=f"Cannot dispatch generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot dispatch generation jobs: {recon_count} job(s) require reconciliation before workflow continuation.",
                 )
             batch_run, _ = BatchResumeService.execute_batch(
                 db=db,
@@ -2097,7 +1912,7 @@ class ProductionOrchestrator:
                         detail=f"Cannot revise storyboard from stage '{current}'.",
                     )
                 new_stage = "STORY_APPROVED" if video_mode == "STORY" else "DRAFT"
-                # Soft-archive downstream shots
+                # Soft-archive downstream scenes and shots
                 scenes_to_clear = (
                     db.query(Scene)
                     .filter(
@@ -2107,9 +1922,12 @@ class ProductionOrchestrator:
                     .all()
                 )
                 for sc in scenes_to_clear:
-                    for sh in sc.shots:
-                        if not sh.is_locked:
-                            sh.status = "ARCHIVED"
+                    if not sc.is_locked:
+                        sc.scene_config = dict(sc.scene_config or {})
+                        sc.scene_config["archived"] = True
+                        for sh in sc.shots:
+                            if not sh.is_locked:
+                                sh.status = "ARCHIVED"
 
             elif action_upper == "REVISE_SHOT_PLAN":
                 if current not in ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"):
