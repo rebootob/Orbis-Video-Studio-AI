@@ -6,42 +6,60 @@
 
 ## 1. Release Gate Architecture
 
-Prior to merging any Work Package or cutting a release tag, the submission MUST pass four sequential release gates.
+Before merging any Work Package into `main`, all gates must pass.
 
 ```mermaid
 graph LR
-    Sub[WP Submission / PR] --> Gate1{Gate 1: Architectural Compliance}
-    Gate1 -- Pass --> Gate2{Gate 2: Quality & Test Pass}
-    Gate2 -- Pass --> Gate3{Gate 3: Security & Cost Guard}
-    Gate3 -- Pass --> Gate4{Gate 4: ChatGPT Review & Owner Sign-off}
-    Gate4 -- Pass --> Merge[Merge PR into main]
-    
-    Gate1 -- Fail --> Reject[Reject Submission & Request Revisions]
-    Gate2 -- Fail --> Reject
-    Gate3 -- Fail --> Reject
-    Gate4 -- Fail --> Reject
+    Sub[WP Submission / PR] --> G0{Gate 0: Git Governance}
+    G0 -- Pass --> G1{Gate 1: Architecture / Scope}
+    G1 -- Pass --> G2{Gate 2: Tests / CI}
+    G2 -- Pass --> G3{Gate 3: Security / Cost / History}
+    G3 -- Pass --> G4{Gate 4: ChatGPT PASS + Owner Approval}
+    G4 -- Pass --> Merge[Merge PR into protected main]
+
+    G0 -- Fail --> Reject[Corrective Required]
+    G1 -- Fail --> Reject
+    G2 -- Fail --> Reject
+    G3 -- Fail --> Reject
+    G4 -- Fail --> Reject
 ```
 
 ---
 
-## 2. Release Gate Checklist Specs
+## 2. Gate Checklist
 
-### Gate 1: Architectural & Governance Compliance
-- [ ] Code/docs strictly conform to locked architectural principles in [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](project-docs/10_GOVERNANCE/SCOPE_LOCK.md).
-- [ ] Zero workstation-specific absolute file paths (`file:///c:/...`) exist in documentation.
-- [ ] No unauthorized out-of-scope features introduced.
-- [ ] All new topics or schema modifications updated in canonical documentation files.
+### Gate 0 — Git Governance
+- [ ] Work is on the authorized WP branch, not `main`.
+- [ ] One WP = one branch = one PR.
+- [ ] Corrective stayed in the same WP branch/PR unless Owner explicitly authorized otherwise.
+- [ ] No force push / protected-branch bypass.
+- [ ] Review conversations are resolved before merge.
 
-### Gate 2: Quality & Automated Test Pass
-- [ ] 100% pass rate on unit test suite.
-- [ ] 100% pass rate on provider adapter mock tests (zero live billing).
-- [ ] Zero linting errors or build warnings.
+### Gate 1 — Architectural & Scope Compliance
+- [ ] Code/docs conform to locked architecture and current WP contract.
+- [ ] No unauthorized future WP/features introduced.
+- [ ] Provider-neutral boundaries are preserved.
+- [ ] Canonical documentation is synchronized with repository truth.
 
-### Gate 3: Security & Financial Guard
-- [ ] Zero hardcoded API keys, secrets, or passwords in repository code or documentation.
-- [ ] Idempotency key validation enforced on all new external integration endpoints.
-- [ ] Cost audit logging verified for all provider API call sites.
+### Gate 2 — Quality & Automated Tests
+- [ ] Focused tests for changed behavior pass.
+- [ ] Required final backend regression passes.
+- [ ] Migration upgrade -> downgrade -> upgrade passes when schema changed.
+- [ ] `git diff --check` is clean.
+- [ ] Required GitHub `backend-tests` check passes.
+- [ ] Frontend-changing PRs pass `frontend-tests` lint/build/tests when the workflow applies.
+- [ ] No live paid provider testing unless explicitly authorized.
 
-### Gate 4: Independent Review & Human Sign-off
-- [ ] ChatGPT Independent Review completed with recommendation to merge.
-- [ ] Project Owner approval received and documented in PR discussion.
+### Gate 3 — Security, Cost, History & Truthfulness
+- [ ] No hardcoded secrets or unsafe provider payload persistence.
+- [ ] Cost/idempotency/budget boundaries remain correct for chargeable actions.
+- [ ] Locked entities cannot be bypassed.
+- [ ] No silent destructive history loss.
+- [ ] UI states, QC, cost, provider/config, progress and readiness claims reflect backend truth or explicitly say unknown/not checked.
+
+### Gate 4 — Independent Review & Human Sign-off
+- [ ] ChatGPT independent review is explicitly **PASS / READY TO MERGE** at the exact final HEAD.
+- [ ] No unresolved blocking findings remain.
+- [ ] Project Owner explicitly approves merge.
+
+**Important:** Green CI alone is never sufficient to merge a PR that has not passed independent review at its exact current HEAD.

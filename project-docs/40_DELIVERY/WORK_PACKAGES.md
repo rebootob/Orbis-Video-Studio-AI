@@ -4,18 +4,11 @@
 
 ---
 
-## 1. Roadmap Overview
+## 1. Roadmap Rule
 
 Orbis Video Studio AI is delivered through discrete, bounded Work Packages. Every WP requires explicit Owner authorization before implementation. Completion of one WP never auto-authorizes the next.
 
-```mermaid
-graph TD
-    P0["P0 Foundation & Governance"] --> P1["P1 Core Architecture & Data Engine"]
-    P1 --> P2["P2 Generation & Production Pipeline"]
-    P2 --> P3["P3 Audio, Timeline & Cloud Render"]
-    P3 --> P4["P4 Multi-Output, Export & Core V1"]
-    P4 -.-> PX["Post-Core V1 / V1.x Integrations"]
-```
+One WP = one feature branch = one PR. Corrective work stays in the same branch/PR.
 
 ---
 
@@ -42,42 +35,44 @@ graph TD
 - **P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue**
   - **Status:** PASS / CLOSED / MERGED
   - **PR:** #15
-  - **Reviewed Head:** `5a03d4d7f56ac8ae39a78914276610c0512da78b`
-  - **Merge Commit:** `9cb098dea7fc2948b023ad48163c729f566573a7`
-  - **Scope delivered:** provider-neutral Vidu adapter, durable DB-backed queue/worker, idempotency, claim/lease fencing, bounded retry/poll scheduling, cancellation, ambiguous-submission reconciliation, secret/result safety, migration lifecycle and mocked provider tests.
+
+- **P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Modes**
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #19
+
+- **P2-WP009 — Cost Control & Granular Usage Audit Ledger**
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #23
+  - **Merge commit:** `9f094a5cbe9a4faeb5741231d0a819da0da283c1`
 
 ---
 
-## 3. Next Candidate Work Package
+## 3. Active Work Package
 
-- **P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration**
-  - **Status:** **PROPOSED / NOT AUTHORIZED**
-  - **Proposal:** [`P2_WP008_PROPOSAL.md`](P2_WP008_PROPOSAL.md)
-  - **Candidate scope:**
-    - hybrid shot sources: AI generated / imported video / imported image / recorded / stock / mixed
-    - granular lock state machine
-    - base provider-neutral `video_mode` configuration
-    - initial V1 modes: STORY / SHORT / LOOP / SCENE
-    - Story optional at Project level when mode does not require it
-    - preserve WP006 references and WP007 provider/queue boundaries
+### P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
+
+- **Issue:** #24
+- **PR:** #25
+- **Branch:** `ai/p2-wp010-mode-aware-web-workspace`
+- **Initial reviewed HEAD:** `291ea773681831a0a68e585eb7e0664902102be3`
+- **Current corrective HEAD:** `a687c7adca1bf204767410d51ef0e1cad3ee9436`
+- **Status:** **CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW**
+- **CI at current HEAD:** backend-tests PASS, frontend-tests PASS
+
+Initial review found blockers across history retention, staged review workflow, guided next action, multi-project completeness, real upload/reference UX, truthful history/audio/QC semantics, approval/status safety, cost-safe selected/batch generation, storyboard editing/autosave, provider neutrality, truthful progress/language/status and CORS.
+
+Antigravity pushed corrective commit `a687c7ad...`. Those blockers are not considered closed until ChatGPT independently reviews the exact new HEAD.
+
+Corrective/re-review MUST remain in the same WP010 branch and PR #25. Do not start WP011.
 
 ---
 
-## 4. Remaining Proposed Roadmap
+## 4. Remaining Roadmap
 
 ### Phase 2 — AI Generation & Production Pipeline
 
-- **P2-WP009 — Cost Control & Granular Usage Audit Ledger**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - Budget caps, provider usage logging and auditable cost controls.
-
-- **P2-WP010 — Mode-Aware Web Workspace: Storyboard & Shot Grid**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - Browser project creation, Video Mode selection, reference/document upload, mode-aware creative editor and shot grid.
-
 - **P2-WP011 — Selective Shot Regeneration Service**
   - **Status:** PROPOSED / NOT AUTHORIZED
-  - Target unlocked shots only, lock validation and provider-neutral regeneration dispatch.
 
 ### Phase 3 — Audio, Timeline Editing & Cloud Rendering
 
@@ -100,7 +95,6 @@ graph TD
 
 - **P4-WP018 — Multi-Output & Platform Export Presets**
   - **Status:** PROPOSED / NOT AUTHORIZED
-  - 16:9 / 9:16 / 1:1 and platform-specific output variants from one master project.
 
 - **P4-WP019 — Project Export/Import Archive Package (.orbis)**
   - **Status:** PROPOSED / NOT AUTHORIZED
@@ -112,11 +106,21 @@ graph TD
 
 - **P4-WP017 — Full Operational Integration Gateway (Hermes / n8n)**
   - **Status:** PROPOSED / POST-CORE V1 / V1.x
-  - Architecture readiness remains a V1 requirement; full operational integration must not block Core V1.
 
 ---
 
-## 5. Mode Expansion Rule
+## 5. Repository Delivery Controls
+
+- Root `AGENTS.md` routes all execution agents.
+- `main` is protected by active ruleset `Protect main`.
+- Required backend CI: `backend-tests`.
+- Frontend-changing work must pass `frontend-tests` when present.
+- ChatGPT independent review + Owner approval remain required even when CI is green.
+- Merged head branches are auto-deleted.
+
+---
+
+## 6. Mode Expansion Rule
 
 Core V1 modes:
 

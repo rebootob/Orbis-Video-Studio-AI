@@ -6,16 +6,19 @@
 
 ## 1. Startup Reading Sequence
 
-Every new chat session, AI agent or execution engine MUST read in this order before doing project work:
+Every new ChatGPT session, AI agent, or execution engine MUST do this before project work:
 
-1. `project-docs/00_CONTROL/START_HERE.md`
-2. `project-docs/00_CONTROL/CURRENT_STATE.md`
-3. `project-docs/00_CONTROL/ACTIVE_TASK.md`
-4. `project-docs/00_CONTROL/DOCUMENT_INDEX.md`
-5. `project-docs/00_CONTROL/CHAT_HANDOFF.md`
-6. Routed domain documents relevant to the active task only
+1. Read root [`AGENTS.md`](../../AGENTS.md).
+2. Fresh-fetch live `main` and any active feature branch / PR.
+3. Read `project-docs/00_CONTROL/START_HERE.md`.
+4. Read `project-docs/00_CONTROL/CURRENT_STATE.md`.
+5. Read `project-docs/00_CONTROL/ACTIVE_TASK.md`.
+6. Read `project-docs/00_CONTROL/DOCUMENT_INDEX.md`.
+7. Read `project-docs/00_CONTROL/CHAT_HANDOFF.md`.
+8. Read the exact active GitHub Issue / WP contract and latest PR review comments.
+9. Read only directly relevant routed domain documents.
 
-For any work touching project creation, Story/Script routing, Scene/Shot behavior, workflow, UI, generation orchestration, timeline or export logic, also read:
+For work touching project creation, Story/Script routing, Scene/Shot behavior, workflow, UI, generation orchestration, timeline, or export logic, also read:
 
 `project-docs/30_PRODUCT/VIDEO_PRODUCTION_MODES.md`
 
@@ -23,10 +26,10 @@ For any work touching project creation, Story/Script routing, Scene/Shot behavio
 
 ## 2. Repository Truth
 
-- Fresh-fetch live Git/GitHub HEAD before stating status.
-- Live repository truth newer than documentation is authoritative.
-- Historical handoff/base SHAs are context, not a reason to overwrite newer repository truth.
+- Live Git/GitHub truth newer than documentation is authoritative.
+- Historical SHAs in handoff documents are context only.
 - Closed WPs must not be reopened without a proven regression.
+- Never infer current authorization from a stale document when Issue/PR state has advanced.
 
 ---
 
@@ -35,6 +38,8 @@ For any work touching project creation, Story/Script routing, Scene/Shot behavio
 No execution engine may exceed the currently authorized Work Package.
 
 If `ACTIVE_WORK_PACKAGE = NONE`, application-code implementation is prohibited until the Owner explicitly authorizes a new WP.
+
+If an active PR is under corrective review, corrective work MUST stay in the same WP branch and PR unless the Owner explicitly authorizes otherwise.
 
 Do not auto-start the next WP after a merge.
 
@@ -46,17 +51,26 @@ Do not auto-start the next WP after a merge.
 Project Owner = final human authority / UAT / merge approval
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
 Antigravity = low-credit bounded Execution Plane when explicitly authorized
-Codex = STOP by default
-Claude Code = STOP
+Codex = STOP by default; local-only specialist when genuinely necessary
+Claude Code = STOP by default
 ```
-
-ChatGPT may manage GitHub Issues, PR metadata/comments and documentation branches where permitted, but direct `main` writes and merges remain governed by Owner approval.
 
 ---
 
-## 5. Multi-Mode Rule
+## 5. Git / CI Governance
 
-Orbis is a multi-mode video production platform.
+- Canonical branch: `main`.
+- `main` is protected by active ruleset `Protect main`.
+- Direct writes, force pushes, and deletion of `main` are prohibited.
+- One WP = one branch = one PR.
+- `backend-tests` is a required status check.
+- Frontend-changing PRs must also pass `frontend-tests` when that workflow is present.
+- Green CI does not override a ChatGPT `CHANGES REQUIRED` review.
+- Owner approval is still required before merge.
+
+---
+
+## 6. Multi-Mode Rule
 
 Core V1 modes:
 
@@ -67,9 +81,9 @@ LOOP
 SCENE
 ```
 
-Do not assume Story or Script is mandatory for every Project.
+Story or Script is not mandatory for every Project.
 
-Architecture-ready future modes:
+Architecture-ready future modes remain unauthorized until separately approved:
 
 ```text
 PRODUCT
@@ -78,17 +92,15 @@ PRESENTER
 MONTAGE
 ```
 
-Architecture readiness does not authorize implementation.
-
 ---
 
-## 6. Immediate Startup Actions
+## 7. Immediate Startup Actions
 
-1. Fetch current `main` and active feature branch/PR if one exists.
-2. Read `CURRENT_STATE.md` and `ACTIVE_TASK.md`.
-3. Confirm whether any WP is actually authorized.
-4. Read only directly relevant routed documents.
-5. Do not repeat completed work.
+1. Report exact live `main` HEAD.
+2. Report exact active Issue / PR / branch / HEAD.
+3. Report the current authorization/review gate.
+4. Read only directly relevant documents and code/diff.
+5. Do not repeat completed work or expensive validation without a concrete reason.
 6. Do not merge or start another WP without Owner authorization.
 
-The local Antigravity watcher/dispatcher is currently PAUSED and is not a production execution dependency.
+The local Antigravity watcher/dispatcher remains PAUSED and is not a production execution dependency.

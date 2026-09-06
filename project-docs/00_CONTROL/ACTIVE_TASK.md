@@ -7,45 +7,101 @@
 ## Active Work Package
 
 ```text
-P2-WP010 CORRECTIVE — Mode-Aware Web Workspace & Production UI
+P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
 ```
 
 Status:
 
 ```text
-IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
+CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW / DO NOT MERGE YET
 ```
 
 Owner Authorization:
-Authorized via GitHub Issue #24 on feature branch `ai/p2-wp010-mode-aware-web-workspace` and PR #25.
+GitHub Issue #24.
+
+Existing delivery branch:
+`ai/p2-wp010-mode-aware-web-workspace`
+
+Existing PR:
+`#25`
+
+Initial reviewed HEAD:
+`291ea773681831a0a68e585eb7e0664902102be3`
+
+Current corrective HEAD:
+`a687c7adca1bf204767410d51ef0e1cad3ee9436`
+
+Current CI:
+- `backend-tests` PASS
+- `frontend-tests` PASS
 
 Execution Engine:
-Antigravity (bounded corrective execution complete; STOPPING for ChatGPT review).
-
-### Objective
-
-Deliver production-ready mode-aware web workspace across STORY, SHORT, LOOP, and SCENE modes with full history retention, safe soft archiving, pre-generation cost confirmation gates, staged approval workflow, multi-project management, real document uploads, and honest provider-neutral readiness panels.
-
-Scope Delivered:
-1. **Full History Retention & Soft Deletion**: Replaced unsafe hard deletion on Project with soft archiving (`status = "ARCHIVED"`). Projects with recorded jobs/ledger entries cannot be deleted, preserving full auditable provenance. Added explicit archive, unarchive, and duplicate endpoints for projects and scenes.
-2. **Deletion Guards on Audit History**: Added conflict guards (HTTP 409) preventing scene or shot deletion if associated with recorded generation jobs or usage ledger records.
-3. **Restricted CORS Security**: Configured strict origin whitelist (`http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:3000`, `http://127.0.0.1:3000`) instead of wildcard with credentials.
-4. **Staged Workflow & Next Best Action Guidance**: Integrated clear 5-stage progress guidance (`Story` → `Storyboard` → `Shot Plan` → `Images` → `Video`) and Next Recommended Step guidance banner with single primary CTA and plain-language explanation.
-5. **Cost Confirmation & Batch Generation**: Built pre-generation `CostConfirmationModal` querying `/projects/{id}/jobs/estimate`, displaying candidate shot count, estimated total cost, explicit `UNKNOWN` pricing warnings when unpriced, and budget hard/soft cap alerts. Added multi-shot selection for "Generate Selected".
-6. **Scene & Shot Reordering Controls**: Implemented server-backed reordering endpoints (`PATCH /projects/{id}/scenes/reorder`, `PATCH /scenes/{id}/shots/reorder`) with move up/down controls on UI.
-7. **Real File Ingestion**: Replaced placeholder upload alerts with real file inputs calling `POST /api/v1/assets/upload` for both New Project source context and Continuity Reference Documents.
-8. **Truthful Audio & QC Panels**: Removed fabricated claims of ElevenLabs/OpenAI TTS, dynamic beat alignment, and specific -14dB auto-ducking. Replaced with honest provider-neutral schema allocation placeholders. Renamed QC audit section to "Generation Dispatch Audit Log & Discovered Assets" and derived checks from real project data.
-9. **Zero Live Credits Used**: 100% mocked / zero live provider costs spent.
+Antigravity corrective push is complete and MUST STOP for independent re-review. Codex and Claude Code remain STOP by default.
 
 ---
 
-## Current Execution Roles
+## Objective
+
+Deliver a safe, first-time-user-friendly, mode-aware browser workspace for STORY / SHORT / LOOP / SCENE that favors automation and human review over per-shot micromanagement, while preserving provider-neutral backend boundaries, cost controls, lock safety, full history retention, and truthful UI state.
+
+---
+
+## Review Context
+
+The initial implementation at `291ea773...` received CHANGES REQUIRED for history retention, staged review workflow, guided next action, multi-project completeness, real upload/reference UX, truthful history/audio/QC semantics, approval/status safety, cost-safe selected/batch generation, storyboard editing/autosave, provider neutrality, truthful progress/language/status handling, and CORS.
+
+Antigravity pushed corrective commit `a687c7ad...` claiming to address those review blockers. CI is green at the new HEAD.
+
+Do not assume any blocker is closed until ChatGPT independently verifies the corrective diff and behavior.
+
+---
+
+## Current Required Action
+
+ChatGPT independent re-review of the exact current PR #25 HEAD.
+
+Review priorities:
+
+1. Verify destructive delete has been replaced/disabled safely and history is preserved.
+2. Verify staged Story -> Storyboard -> Shot Plan -> Images -> Video review/readiness behavior.
+3. Verify state-aware Next Best Action guidance.
+4. Verify minimum multi-project management and summaries.
+5. Verify real reference/document upload and effective-reference visibility.
+6. Verify history/audio/QC/readiness labels are truthful and backend-grounded.
+7. Verify approval/status semantics do not imply unsupported workflow authority.
+8. Verify Generate Selected and cost estimate/confirmation behavior.
+9. Verify provider config remains neutral and not hard-coded in core/frontend semantics.
+10. Verify scene/shot reorder, safe duplication and autosave/saved-state behavior.
+11. Verify safe configured CORS.
+12. Verify progress, language (including Thai/general support), status validation, lock and cross-project safety.
+13. Verify tests and CI actually cover the corrected behavior.
+
+---
+
+## Validation Policy
+
+During any further corrective round:
+- run focused tests relevant to the exact finding
+- do not repeatedly run full suites after every small edit
+
+At final gate:
+- frontend lint/typecheck/build/tests
+- backend focused tests and full regression
+- migration lifecycle if schema changed
+- `git diff --check`
+- GitHub Actions `backend-tests` PASS
+- GitHub Actions `frontend-tests` PASS
+- no live paid provider calls
+
+---
+
+## Current Roles
 
 ```text
 Owner = final human authority / UAT / merge approval
 ChatGPT = Control Plane / Architect / Independent Reviewer
-Antigravity = STOP until explicitly authorized for the next bounded task
-Codex = STOP
+Antigravity = STOP until re-review findings or next explicit authorization
+Codex = STOP by default
 Claude Code = STOP
 ```
 
@@ -53,4 +109,10 @@ Claude Code = STOP
 
 ## Next Allowed Action
 
-Wait for ChatGPT independent review of PR #25. Do not merge without Owner approval. Do not start WP011.
+ChatGPT re-review PR #25 exact current HEAD.
+
+If PASS: wait for Owner merge approval.
+
+If CHANGES REQUIRED: issue bounded corrective findings to Antigravity on the SAME branch/PR, then STOP for re-review again.
+
+Do not merge and do not start WP011 automatically.
