@@ -217,6 +217,7 @@ def batch_generate_project_shots(
         shot_ids=req.shot_ids,
         provider_name=eff_provider,
         only_incomplete=req.only_incomplete,
+        max_queued_jobs=100,
     )
     return jobs
 

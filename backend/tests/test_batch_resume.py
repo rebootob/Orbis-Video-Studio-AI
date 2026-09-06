@@ -1394,3 +1394,82 @@ def test_legacy_batch_endpoint_rejects_over_100_shots(client, db_session, test_p
     assert resp_small.status_code == 200
     jobs = resp_small.json()
     assert len(jobs) == 5
+
+
+def test_legacy_batch_endpoint_toctou_boundary_enforcement(tmp_path, monkeypatch):
+    """Test 20: TOCTOU race test where estimate observes <=100 shots, but eligibility expands to >100 before execution.
+    Legacy endpoint MUST fail closed at the execution boundary without queuing job #101 or silently truncating.
+    Canonical /jobs/resume remains unrestricted.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from fastapi.testclient import TestClient
+    from app.db.base_class import Base
+    from app.main import app
+    from app.db.session import get_db
+
+    db_file = tmp_path / "toctou_batch.db"
+    file_engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(file_engine)
+    FileSessionLocal = sessionmaker(bind=file_engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+
+    with FileSessionLocal() as init_db:
+        p = Project(id=project_id, title="TOCTOU Project", status="SHOT_PLAN_APPROVED", video_mode="STORY")
+        sc = Scene(id=scene_id, project_id=project_id, scene_number=1, heading="EXT")
+        init_db.add_all([p, sc])
+        shots = [
+            Shot(id=uuid.uuid4(), scene_id=scene_id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+            for i in range(1, 102)
+        ]
+        init_db.add_all(shots)
+        init_db.commit()
+
+    def override_get_db():
+        with FileSessionLocal() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    local_client = TestClient(app)
+
+    try:
+        # Simulate TOCTOU race condition:
+        # During estimate_batch(), return shot_count=100 (simulating estimate seeing 100 eligible before new shot arrives)
+        real_estimate = BatchResumeService.estimate_batch
+
+        def raced_estimate(*args, **kwargs):
+            est = real_estimate(*args, **kwargs)
+            est["shot_count"] = 100  # Estimate sees <= 100
+            return est
+
+        monkeypatch.setattr(BatchResumeService, "estimate_batch", raced_estimate)
+
+        # Legacy endpoint: estimate passes (sees 100), but execution sees 101 eligible shots.
+        # It must fail closed with 400 Bad Request at execution boundary, aborting dispatch.
+        resp = local_client.post(f"/api/v1/projects/{project_id}/jobs/batch", json={})
+        assert resp.status_code == 400
+        err_detail = resp.json()["detail"]
+        assert "exceeded legacy endpoint maximum capacity of 100 queued jobs" in err_detail
+        assert "Execution aborted to prevent unreturned or untracked active jobs" in err_detail
+
+        # Verify no jobs were committed or orphaned
+        with FileSessionLocal() as verify_db:
+            queued_jobs = verify_db.query(GenerationJob).all()
+            assert len(queued_jobs) == 0
+
+        # Canonical /jobs/resume remains unrestricted and can queue all 101 shots truthfully
+        resume_resp = local_client.post(f"/api/v1/projects/{project_id}/jobs/resume", json={})
+        assert resume_resp.status_code == 200
+        resume_data = resume_resp.json()
+        assert resume_data["queued_count"] == 101
+        with FileSessionLocal() as verify_db:
+            assert len(verify_db.query(GenerationJob).all()) == 101
+    finally:
+        app.dependency_overrides.clear()

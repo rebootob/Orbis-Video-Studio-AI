@@ -606,12 +606,14 @@ class BatchResumeService:
         shot_ids: Optional[List[uuid.UUID]] = None,
         provider_name: Optional[str] = None,
         only_incomplete: bool = True,
+        max_queued_jobs: Optional[int] = None,
     ) -> Tuple[BatchRun, List[GenerationJob]]:
         """Genuinely bounded, streaming batch execution with atomic savepoints and truthful audits.
 
         Evaluates -> persists BatchRunItems -> dispatches per bounded chunk.
         Does not accumulate full-project candidate lists in memory.
         Enforces atomic GenerationJob + UsageLedger + BatchRunItem persistence.
+        If max_queued_jobs is provided, aborts and fails closed before creating job #(max_queued_jobs + 1).
         """
         project = db.get(Project, project_id)
         if not project:
@@ -679,7 +681,7 @@ class BatchResumeService:
             updated_at=now,
         )
         db.add(batch_run)
-        db.commit()
+        db.flush()
 
         total_evaluated = 0
         eligible_count = 0
@@ -757,6 +759,16 @@ class BatchResumeService:
                     ))
                 else:
                     eligible_count += 1
+                    if max_queued_jobs is not None and queued_count >= max_queued_jobs:
+                        db.rollback()
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"Batch operation exceeded legacy endpoint maximum capacity of {max_queued_jobs} queued jobs. "
+                                "Execution aborted to prevent unreturned or untracked active jobs. "
+                                "Use canonical 'POST /projects/{project_id}/jobs/resume' for large or unbounded batch runs."
+                            ),
+                        )
                     try:
                         with db.begin_nested():
                             job = JobDispatchService.create_and_dispatch_job(
@@ -777,8 +789,7 @@ class BatchResumeService:
                             )
                             db.add(item)
                             db.flush()
-                        if len(created_jobs) < 100:
-                            created_jobs.append(job)
+                        created_jobs.append(job)
                         queued_count += 1
                     except HTTPException as http_exc:
                         if http_exc.status_code == 409 and "Active generation job" in str(http_exc.detail):
@@ -855,7 +866,7 @@ class BatchResumeService:
                             created_at=now,
                         ))
 
-            # Persist batch_run counters at every committed chunk boundary
+            # Persist batch_run counters at every chunk boundary
             batch_run.requested_count = total_evaluated
             batch_run.eligible_count = eligible_count
             batch_run.queued_count = queued_count
@@ -868,7 +879,12 @@ class BatchResumeService:
                 batch_run.status = "NO_OP"
             else:
                 batch_run.status = "DISPATCHED"
-            db.commit()
+            # When max_queued_jobs is enforced (e.g. legacy endpoint), flush chunks so rollback can undo everything cleanly.
+            # Otherwise, commit chunks for crash-resilient unbounded whole-project runs.
+            if max_queued_jobs is None:
+                db.commit()
+            else:
+                db.flush()
 
         # 4. Finalize BatchRun totals and truthful status
         batch_run.requested_count = total_evaluated
