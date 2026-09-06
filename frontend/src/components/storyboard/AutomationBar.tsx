@@ -1,5 +1,6 @@
 import React from 'react';
-import { Sparkles, Play, RefreshCw, CheckCircle, CheckSquare, Layers, BookOpen, Film } from 'lucide-react';
+import { Sparkles, Play, RefreshCw, CheckCircle, CheckSquare, Layers, BookOpen, Film, ArrowRight, AlertTriangle } from 'lucide-react';
+import type { OrchestrationStateResponse, AutomationMode } from '../../api/types';
 
 interface AutomationBarProps {
   automationStep: string | null;
@@ -8,11 +9,14 @@ interface AutomationBarProps {
   hasFailedJobs: boolean;
   projectStatus?: string;
   videoMode?: string;
+  orchestrationState?: OrchestrationStateResponse | null;
   onGenerateFullStoryboard: () => Promise<void>;
   onBatchGenerateShots: () => void; // Opens cost confirmation modal
   onGenerateSelectedShots: () => void; // Opens cost confirmation modal for selected
   onRetryFailed: () => Promise<void>;
   onStageReview?: (stage: 'STORY' | 'STORYBOARD' | 'SHOT_PLAN') => void;
+  onExecuteRecommendedAction?: () => Promise<void>;
+  onUpdateAutomationMode?: (mode: AutomationMode) => Promise<void>;
 }
 
 export const AutomationBar: React.FC<AutomationBarProps> = ({
@@ -22,11 +26,14 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
   hasFailedJobs,
   projectStatus,
   videoMode,
+  orchestrationState,
   onGenerateFullStoryboard,
   onBatchGenerateShots,
   onGenerateSelectedShots,
   onRetryFailed,
   onStageReview,
+  onExecuteRecommendedAction,
+  onUpdateAutomationMode,
 }) => {
   const isRunning = Boolean(automationStep);
 
@@ -39,10 +46,6 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
     'SHOT_PLAN_APPROVED',
     'IMAGES_GENERATED',
     'VIDEO_IN_PROGRESS',
-    'FINAL_REVIEW',
-    'READY_FOR_REVIEW',
-    'COMPLETED',
-    'APPROVED',
   ];
   const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
 
@@ -54,16 +57,66 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
         borderRadius: '8px',
         padding: '12px 16px',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '12px',
+        flexDirection: 'column',
+        gap: '10px',
         marginBottom: '20px',
       }}
       data-testid="automation-bar"
     >
-      {/* Left: High-Level Automation & Batch Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+      {/* Top row: controls */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          width: '100%',
+        }}
+      >
+        {/* Left: Automation Mode & Batch Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Automation Mode Selector */}
+          {onUpdateAutomationMode && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '4px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-secondary)' }}>Mode:</span>
+              <select
+                data-testid="automation-mode-select"
+                className="input-sm"
+                value={orchestrationState?.automation_mode || 'MANUAL'}
+                onChange={(e) => onUpdateAutomationMode(e.target.value as AutomationMode)}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <option value="MANUAL">MANUAL</option>
+                <option value="ASSISTED">ASSISTED</option>
+                <option value="AUTO">AUTO</option>
+              </select>
+            </div>
+          )}
+
+          {/* Recommended Action Button (Primary) */}
+          {orchestrationState?.recommended_action && onExecuteRecommendedAction && (
+            <button
+              className="btn btn-primary"
+              onClick={onExecuteRecommendedAction}
+              disabled={isRunning || orchestrationState.recommended_action.is_blocked}
+              data-testid="orchestration-recommended-action-btn"
+              title={
+                orchestrationState.recommended_action.blocked_reason ||
+                orchestrationState.recommended_action.description
+              }
+            >
+              <ArrowRight size={16} />
+              {orchestrationState.recommended_action.display_name}
+            </button>
+          )}
         <button
           className="btn btn-primary"
           onClick={onGenerateFullStoryboard}
@@ -184,6 +237,32 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
           </div>
         )}
       </div>
+      </div>
+
+      {/* Blocked Reasons Banner */}
+      {orchestrationState?.is_blocked && orchestrationState.blocked_reasons.length > 0 && (
+        <div
+          data-testid="orchestration-blocked-reasons"
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 12px',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '6px',
+            color: '#f87171',
+            fontSize: '0.75rem',
+          }}
+        >
+          <AlertTriangle size={14} />
+          <div>
+            <strong>Action Required: </strong>
+            {orchestrationState.blocked_reasons.join(' • ')}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

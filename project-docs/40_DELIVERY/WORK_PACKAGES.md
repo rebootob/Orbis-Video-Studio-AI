@@ -94,12 +94,14 @@ graph TD
 ## 3. Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P2-WP012
 ```
 
-- **Current Status:** WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
-- No work package is currently active.
-- P2-WP012 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP012 without explicit Owner authorization.
+- **Current Status:** IMPLEMENTED / AWAITING CHATGPT INDEPENDENT REVIEW
+- **Issue:** #31
+- **Branch:** `ai/p2-wp012-production-orchestrator`
+- **Scope:** Production Orchestrator & Staged Approval State Machine.
+- P2-WP013 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP013 without explicit Owner authorization.
 
 ---
 
@@ -110,8 +112,10 @@ The roadmap should prioritize end-to-end production automation rather than build
 ### Phase 2 — Production Orchestration & Generation
 
 - **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior.
+  - **Status:** IMPLEMENTED / AWAITING INDEPENDENT REVIEW
+  - **Issue:** #31
+  - **Branch:** `ai/p2-wp012-production-orchestrator`
+  - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior. Guard stage gates against arbitrary PATCH bypass, integrate append-only orchestration audit trail, and wire frontend state machine controls.
 
 - **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
   - **Status:** PROPOSED / NOT AUTHORIZED

@@ -11,6 +11,9 @@ import type {
   ReferenceItem,
   ApprovalStatus,
   ReorderItem,
+  OrchestrationStateResponse,
+  OrchestrationAuditResponse,
+  AutomationMode,
 } from './api/types';
 import { api } from './api/client';
 import { ProjectDashboard } from './components/dashboard/ProjectDashboard';
@@ -57,6 +60,8 @@ export const App: React.FC = () => {
   const [isStoryInspectionOpen, setIsStoryInspectionOpen] = useState(false);
   const [automationStep, setAutomationStep] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(false);
+  const [orchestrationState, setOrchestrationState] = useState<OrchestrationStateResponse | null>(null);
+  const [orchestrationHistory, setOrchestrationHistory] = useState<OrchestrationAuditResponse[]>([]);
 
   // Load all projects on mount (including archived for dashboard filters)
   const loadProjects = useCallback(async () => {
@@ -74,6 +79,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  const loadOrchestrationData = useCallback(async (projectId: string) => {
+    try {
+      if (api.getOrchestrationState) {
+        const oState = await api.getOrchestrationState(projectId);
+        setOrchestrationState(oState);
+      }
+      if (api.getOrchestrationHistory) {
+        const oHist = await api.getOrchestrationHistory(projectId, { limit: 20 });
+        setOrchestrationHistory(oHist.items);
+      }
+    } catch (e) {
+      console.warn('Orchestration state load failed', e);
+    }
+  }, []);
 
   // Load workspace state for the selected project
   const loadWorkspaceData = useCallback(async (project: Project) => {
@@ -111,10 +131,13 @@ export const App: React.FC = () => {
       // 6. Load Story (if any)
       const storyData = await api.getProjectStory(project.id);
       setStory(storyData);
+
+      // 7. Load Orchestration State & History
+      await loadOrchestrationData(project.id);
     } catch (err: any) {
       console.error('Failed to load workspace data', err);
     }
-  }, []);
+  }, [loadOrchestrationData]);
 
   useEffect(() => {
     if (selectedProject) {
@@ -171,12 +194,35 @@ export const App: React.FC = () => {
     await loadProjects();
   };
 
-  // Status / QC Update
-  const handleUpdateStatus = async (status: ApprovalStatus) => {
+  // Status / Stage Approval via Orchestrator
+  const handleApproveStage = async (stage?: string, notes?: string) => {
     if (!selectedProject) return;
-    const updated = await api.updateProject(selectedProject.id, { status });
-    setSelectedProject(updated);
-    await loadProjects();
+    try {
+      const res = await api.approveStage(selectedProject.id, { stage, notes });
+      setSelectedProject({ ...selectedProject, status: res.to_stage });
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Stage approval failed: ${err.message}`);
+    }
+  };
+
+  const handleUpdateStatus = async (status: ApprovalStatus) => {
+    await handleApproveStage(status);
+  };
+
+  // Automation Settings Update
+  const handleUpdateAutomationMode = async (mode: AutomationMode) => {
+    if (!selectedProject) return;
+    try {
+      const stateRes = await api.updateOrchestrationSettings(selectedProject.id, { automation_mode: mode });
+      setOrchestrationState(stateRes);
+      setSelectedProject((prev) => (prev ? { ...prev, automation_mode: mode } : prev));
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Failed to update automation mode: ${err.message}`);
+    }
   };
 
   // Stage Generator: Story (STORY mode only)
@@ -184,12 +230,10 @@ export const App: React.FC = () => {
     if (!selectedProject) return;
     try {
       setAutomationStep('Generating Story Brief & Narrative Outline...');
-      const storyRes = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
-      setStory(storyRes);
-      await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
+      await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_STORY' });
       await loadWorkspaceData(selectedProject);
-      setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
       setIsStoryInspectionOpen(true);
     } catch (err: any) {
       alert(`Story generation failed: ${err.message}`);
@@ -200,38 +244,19 @@ export const App: React.FC = () => {
 
   const handleApproveStory = async () => {
     if (!selectedProject) return;
-    await handleUpdateStatus('STORY_APPROVED');
+    await handleApproveStage('STORY_GENERATED');
     setIsStoryInspectionOpen(false);
   };
 
   // Stage Generator: Storyboard (Scenes & Shot Structure)
   const handleGenerateStoryboard = async () => {
     if (!selectedProject) return;
-    if (selectedProject.video_mode === 'STORY' && selectedProject.status !== 'STORY_APPROVED') {
-      alert("Story outline must be approved before generating storyboard scenes. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Generating Storyboard Scenes & Layout...');
-      if (selectedProject.video_mode === 'STORY') {
-        if (!story) {
-          const s = await api.generateProjectStory(selectedProject.id, { generate_scenes: false });
-          setStory(s);
-          await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
-          await loadWorkspaceData(selectedProject);
-          setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
-          await loadProjects();
-          setIsStoryInspectionOpen(true);
-          return;
-        }
-        await api.generateStoryScenes(story.id, { generate_shots: false });
-      } else {
-        await api.generateProjectStoryboard(selectedProject.id, { generate_shots: false });
-      }
-      await api.updateProject(selectedProject.id, { status: 'STORYBOARD_GENERATED' });
+      await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_STORYBOARD' });
       await loadWorkspaceData(selectedProject);
-      setSelectedProject({ ...selectedProject, status: 'STORYBOARD_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
     } catch (err: any) {
       alert(`Storyboard generation failed: ${err.message}`);
     } finally {
@@ -242,22 +267,12 @@ export const App: React.FC = () => {
   // Stage Generator: Detailed Shot Plan & Prompts via Backend Service
   const handleGenerateShotPlan = async () => {
     if (!selectedProject) return;
-    if (selectedProject.status !== 'STORYBOARD_APPROVED') {
-      alert("Storyboard must be approved before generating shot plans. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Formulating Detailed Shot Plan & Prompts...');
-      if (scenes.length === 0) {
-        throw new Error('Please generate storyboard scenes before generating shot plans.');
-      }
-      for (const scene of scenes) {
-        await api.generateSceneShots(scene.id);
-      }
-      await api.updateProject(selectedProject.id, { status: 'SHOT_PLAN_GENERATED' });
+      await api.executeOrchestrationAction(selectedProject.id, { action: 'GENERATE_SHOT_PLAN' });
       await loadWorkspaceData(selectedProject);
-      setSelectedProject({ ...selectedProject, status: 'SHOT_PLAN_GENERATED' });
       await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
     } catch (err: any) {
       alert(`Shot plan generation failed: ${err.message}`);
     } finally {
@@ -275,22 +290,121 @@ export const App: React.FC = () => {
     }
   };
 
+  // Execute Recommended Action from Orchestrator
+  const handleExecuteRecommendedAction = async () => {
+    if (!selectedProject || !orchestrationState?.recommended_action) return;
+    const action = orchestrationState.recommended_action;
+    if (action.action_type === 'APPROVAL') {
+      if (action.action === 'TRANSITION_TO_FINAL_REVIEW') {
+        try {
+          setAutomationStep('Proceeding to Final Review...');
+          await api.executeOrchestrationAction(selectedProject.id, { action: 'TRANSITION_TO_FINAL_REVIEW' });
+          await loadWorkspaceData(selectedProject);
+          await loadProjects();
+          await loadOrchestrationData(selectedProject.id);
+        } catch (err: any) {
+          alert(`Failed to transition to final review: ${err.message}`);
+        } finally {
+          setAutomationStep(null);
+        }
+        return;
+      }
+      await handleApproveStage(action.parameters?.stage);
+      return;
+    }
+    if (action.action === 'POLL_STATUS') {
+      await loadWorkspaceData(selectedProject);
+      await loadOrchestrationData(selectedProject.id);
+      return;
+    }
+    if (action.action === 'VIEW_SUMMARY') {
+      setActiveTab('qc');
+      return;
+    }
+    if (action.action === 'RESOLVE_RECONCILIATION') {
+      setActiveTab('queue');
+      return;
+    }
+    if (action.action === 'GENERATE_STORY') {
+      await handleGenerateStory();
+      return;
+    }
+    if (action.action === 'GENERATE_STORYBOARD') {
+      await handleGenerateStoryboard();
+      return;
+    }
+    if (action.action === 'GENERATE_SHOT_PLAN') {
+      await handleGenerateShotPlan();
+      return;
+    }
+    if (
+      action.action === 'START_VIDEO_GENERATION' ||
+      action.action === 'CONTINUE_INCOMPLETE' ||
+      action.action === 'RETRY_FAILED' ||
+      action.action === 'GENERATE_SELECTED_SHOTS'
+    ) {
+      try {
+        setAutomationStep(`Executing ${action.display_name}...`);
+        const res = await api.executeOrchestrationAction(selectedProject.id, {
+          action: action.action,
+          parameters: action.parameters || undefined,
+        });
+        if (res.to_stage) {
+          setSelectedProject((prev) => (prev ? { ...prev, status: res.to_stage } : prev));
+        }
+        await loadProjects();
+        await loadWorkspaceData(selectedProject);
+        await loadOrchestrationData(selectedProject.id);
+      } catch (err: any) {
+        alert(`Execution failed: ${err.message}`);
+      } finally {
+        setAutomationStep(null);
+      }
+      return;
+    }
+    // Generic execute fallback
+    try {
+      setAutomationStep(`Executing ${action.display_name}...`);
+      if (api.executeOrchestrationAction) {
+        const res = await api.executeOrchestrationAction(selectedProject.id, {
+          action: action.action,
+          parameters: action.parameters || undefined,
+        });
+        if (res.to_stage) {
+          setSelectedProject((prev) => (prev ? { ...prev, status: res.to_stage } : prev));
+        }
+      }
+      await loadWorkspaceData(selectedProject);
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Execution failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
+  const handleResolveReconciliation = async (jobId: string, resolution: string, evidence: string) => {
+    if (!selectedProject) return;
+    try {
+      setAutomationStep('Applying reconciliation resolution...');
+      await api.executeOrchestrationAction(selectedProject.id, {
+        action: 'RESOLVE_RECONCILIATION',
+        parameters: { job_id: jobId, resolution, evidence },
+      });
+      await loadWorkspaceData(selectedProject);
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Failed to resolve reconciliation: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
   // Automation: Batch Generate Shots (Selected or All Incomplete)
   const handleBatchGenerateShots = async (shotIds?: string[] | null, onlyIncomplete = true) => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before batch generating video. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Dispatching Batch Generation Jobs...');
       const opType = shotIds && shotIds.length > 0 ? 'GENERATE_SELECTED' : 'CONTINUE_INCOMPLETE';
@@ -300,9 +414,9 @@ export const App: React.FC = () => {
         only_incomplete: onlyIncomplete,
       });
       if (run.queued_count > 0) {
-        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
         setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
         await loadProjects();
+        await loadOrchestrationData(selectedProject.id);
       }
       await loadWorkspaceData(selectedProject);
       if (run.skipped_count > 0 || run.queued_count === 0) {
@@ -318,28 +432,15 @@ export const App: React.FC = () => {
   // Retry Failed Jobs via Canonical Backend Service
   const handleRetryFailed = async () => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before retrying production jobs. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       setAutomationStep('Retrying failed jobs...');
       const run = await api.resumeProjectJobs(selectedProject.id, {
         operation_type: 'RETRY_FAILED',
       });
       if (run.queued_count > 0) {
-        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
         setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
         await loadProjects();
+        await loadOrchestrationData(selectedProject.id);
       }
       await loadWorkspaceData(selectedProject);
       alert(`Retry summary:\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count}`);
@@ -429,19 +530,6 @@ export const App: React.FC = () => {
 
   const handleGenerateShot = async (shotId: string) => {
     if (!selectedProject) return;
-    const allowedStatuses = [
-      'SHOT_PLAN_APPROVED',
-      'IMAGES_GENERATED',
-      'VIDEO_IN_PROGRESS',
-      'FINAL_REVIEW',
-      'READY_FOR_REVIEW',
-      'COMPLETED',
-      'APPROVED',
-    ];
-    if (!allowedStatuses.includes(selectedProject.status)) {
-      alert("Shot Plan must be approved before production generation. Current stage is '" + selectedProject.status + "'.");
-      return;
-    }
     try {
       await api.createJob(shotId);
       await loadWorkspaceData(selectedProject);
@@ -645,6 +733,7 @@ export const App: React.FC = () => {
                 automationStep={automationStep}
                 projectStatus={selectedProject.status}
                 videoMode={selectedProject.video_mode}
+                orchestrationState={orchestrationState}
                 onGenerateFullStoryboard={handleGenerateFullStoryboard}
                 onBatchGenerateShots={handleBatchGenerateShots}
                 onRetryFailed={handleRetryFailed}
@@ -669,6 +758,8 @@ export const App: React.FC = () => {
                     setActiveTab('storyboard');
                   }
                 }}
+                onExecuteRecommendedAction={handleExecuteRecommendedAction}
+                onUpdateAutomationMode={handleUpdateAutomationMode}
               />
             )}
 
@@ -693,6 +784,7 @@ export const App: React.FC = () => {
                 onCancelJob={handleCancelJob}
                 onPollJob={handlePollJob}
                 onRetryJob={handleGenerateShot}
+                onResolveReconciliation={handleResolveReconciliation}
               />
             )}
 
@@ -713,7 +805,9 @@ export const App: React.FC = () => {
                 project={selectedProject}
                 jobs={jobs}
                 budget={budget}
+                orchestrationAudits={orchestrationHistory}
                 onUpdateStatus={handleUpdateStatus}
+                onApproveStage={handleApproveStage}
               />
             )}
           </main>

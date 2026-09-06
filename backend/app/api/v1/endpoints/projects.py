@@ -73,6 +73,7 @@ def create_project(
         mode_config=request.mode_config,
         default_config=request.default_config,
         status="DRAFT",
+        automation_mode=getattr(request, "automation_mode", "MANUAL") or "MANUAL",
     )
     db.add(project)
     db.commit()
@@ -122,9 +123,19 @@ def update_project(
     if request.status is not None:
         try:
             norm_status = request.validate_and_normalize_status()
-            project.status = norm_status
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        if norm_status != project.status:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Direct modification of project status via generic PATCH /projects is disallowed. "
+                    "Production stage transitions must be executed through canonical orchestration endpoints: "
+                    f"POST /api/v1/projects/{project_id}/orchestration/execute or POST /api/v1/projects/{project_id}/orchestration/approve."
+                ),
+            )
+    if request.automation_mode is not None:
+        project.automation_mode = request.automation_mode
     if request.purpose is not None:
         project.purpose = request.purpose
     if request.target_platform is not None:

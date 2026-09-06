@@ -219,6 +219,26 @@ def batch_generate_project_shots(
         only_incomplete=req.only_incomplete,
         max_queued_jobs=100,
     )
+    if len(jobs) > 0:
+        from app.models.project import Project
+        from app.schemas.orchestrator import OrchestrationActionResult
+        from app.services.production_orchestrator import ProductionOrchestrator
+        project = db.get(Project, project_id)
+        if project and project.status in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED"):
+            prev = project.status
+            project.status = "VIDEO_IN_PROGRESS"
+            ProductionOrchestrator.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=prev,
+                to_state="VIDEO_IN_PROGRESS",
+                action="BATCH_GENERATE",
+                actor="USER",
+                result=OrchestrationActionResult.APPLIED,
+                reason_code="JOBS_QUEUED",
+                detail=f"Queued {len(jobs)} jobs via legacy batch generate.",
+            )
+            db.commit()
     return jobs
 
 
@@ -239,6 +259,26 @@ def resume_project_jobs(
         only_incomplete=req.only_incomplete,
         accumulate_jobs=False,
     )
+    if batch_run.queued_count > 0:
+        from app.models.project import Project
+        from app.schemas.orchestrator import OrchestrationActionResult
+        from app.services.production_orchestrator import ProductionOrchestrator
+        project = db.get(Project, project_id)
+        if project and project.status in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED"):
+            prev = project.status
+            project.status = "VIDEO_IN_PROGRESS"
+            ProductionOrchestrator.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=prev,
+                to_state="VIDEO_IN_PROGRESS",
+                action="RESUME_DISPATCH",
+                actor="USER",
+                result=OrchestrationActionResult.APPLIED,
+                reason_code="JOBS_QUEUED",
+                detail=f"Queued {batch_run.queued_count} jobs via batch resume.",
+            )
+            db.commit()
     return batch_run
 
 

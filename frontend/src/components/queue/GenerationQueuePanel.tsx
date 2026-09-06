@@ -19,6 +19,7 @@ interface GenerationQueuePanelProps {
   onCancelJob: (jobId: string) => Promise<void>;
   onPollJob: (jobId: string) => Promise<void>;
   onRetryJob: (shotId: string) => Promise<void>;
+  onResolveReconciliation?: (jobId: string, resolution: string, evidence: string) => Promise<void>;
 }
 
 export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
@@ -29,7 +30,12 @@ export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
   onCancelJob,
   onPollJob,
   onRetryJob,
+  onResolveReconciliation,
 }) => {
+  const [reconcilingJob, setReconcilingJob] = React.useState<GenerationJob | null>(null);
+  const [resolution, setResolution] = React.useState<'CONFIRMED_FAILED' | 'CONFIRMED_COMPLETED' | 'CONFIRMED_CANCELLED'>('CONFIRMED_FAILED');
+  const [evidence, setEvidence] = React.useState<string>('');
+  const [submitting, setSubmitting] = React.useState<boolean>(false);
   const getStatusDisplay = (status: string) => {
     switch (status) {
       case 'PENDING':
@@ -251,10 +257,6 @@ export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
                             'SHOT_PLAN_APPROVED',
                             'IMAGES_GENERATED',
                             'VIDEO_IN_PROGRESS',
-                            'FINAL_REVIEW',
-                            'READY_FOR_REVIEW',
-                            'COMPLETED',
-                            'APPROVED',
                           ];
                           const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
                           return (
@@ -276,14 +278,15 @@ export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
                         {isRecon && (
                           <button
                             className="btn btn-xs btn-outline"
-                            onClick={() =>
-                              alert(
-                                'Reconciliation required: A potential duplicate was detected. Check external provider logs and ledger before manual retry.'
-                              )
-                            }
+                            data-testid={`reconcile-job-btn-${job.id}`}
+                            onClick={() => {
+                              setReconcilingJob(job);
+                              setResolution('CONFIRMED_FAILED');
+                              setEvidence('');
+                            }}
                             style={{ color: 'var(--accent-amber)', borderColor: 'var(--accent-amber)' }}
                           >
-                            Investigate
+                            Reconcile
                           </button>
                         )}
 
@@ -304,6 +307,138 @@ export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Explicit Reconciliation Modal */}
+      {reconcilingJob && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          data-testid="reconciliation-modal"
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-panel)',
+              borderRadius: '12px',
+              border: '1px solid var(--border-subtle)',
+              padding: '24px',
+              width: '480px',
+              maxWidth: '90%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={20} color="#fbbf24" />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Resolve Ambiguous Provider Job</h3>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              This job lost provider synchronization. Choose the verified provider outcome and supply verification evidence.
+            </p>
+
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                JOB ID
+              </label>
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.8rem',
+                  padding: '6px 8px',
+                  backgroundColor: 'var(--bg-main)',
+                  borderRadius: '6px',
+                  marginTop: '4px',
+                }}
+              >
+                {reconcilingJob.id}
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                PROVIDER JOB ID
+              </label>
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '0.8rem',
+                  padding: '6px 8px',
+                  backgroundColor: 'var(--bg-main)',
+                  borderRadius: '6px',
+                  marginTop: '4px',
+                }}
+              >
+                {reconcilingJob.provider_job_id || 'N/A (No provider ID assigned)'}
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                RESOLUTION
+              </label>
+              <select
+                className="input"
+                style={{ width: '100%', marginTop: '4px' }}
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value as any)}
+                data-testid="reconciliation-resolution-select"
+              >
+                <option value="CONFIRMED_FAILED">CONFIRMED_FAILED (Provider failed or never completed)</option>
+                <option value="CONFIRMED_COMPLETED">CONFIRMED_COMPLETED (Provider verified completed)</option>
+                <option value="CONFIRMED_CANCELLED">CONFIRMED_CANCELLED (Provider verified cancelled)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                VERIFICATION EVIDENCE (Required)
+              </label>
+              <textarea
+                className="input"
+                style={{ width: '100%', height: '80px', marginTop: '4px', resize: 'vertical' }}
+                placeholder="e.g. Verified via provider dashboard that task timed out and was not billed."
+                value={evidence}
+                onChange={(e) => setEvidence(e.target.value)}
+                data-testid="reconciliation-evidence-input"
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+              <button
+                className="btn btn-outline"
+                onClick={() => setReconcilingJob(null)}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={submitting || !evidence.trim() || !onResolveReconciliation}
+                data-testid="confirm-reconciliation-btn"
+                onClick={async () => {
+                  if (!onResolveReconciliation || !evidence.trim()) return;
+                  setSubmitting(true);
+                  try {
+                    await onResolveReconciliation(reconcilingJob.id, resolution, evidence.trim());
+                    setReconcilingJob(null);
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+              >
+                {submitting ? 'Applying...' : 'Confirm Resolution'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

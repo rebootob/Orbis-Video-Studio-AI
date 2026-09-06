@@ -8,6 +8,7 @@ class ProjectCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     video_mode: str = "STORY"
+    automation_mode: str = "MANUAL"
     purpose: Optional[str] = None
     target_platform: Optional[str] = None
     target_duration_seconds: Optional[float] = Field(default=None, gt=0.0)
@@ -37,6 +38,7 @@ class ProjectUpdateRequest(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
     status: Optional[str] = None
+    automation_mode: Optional[str] = None
     purpose: Optional[str] = None
     target_platform: Optional[str] = None
     target_duration_seconds: Optional[float] = Field(default=None, gt=0.0)
@@ -64,6 +66,7 @@ class ProjectResponse(BaseModel):
     description: Optional[str] = None
     status: str
     video_mode: str
+    automation_mode: str = "MANUAL"
     purpose: Optional[str] = None
     target_platform: Optional[str] = None
     target_duration_seconds: Optional[float] = None

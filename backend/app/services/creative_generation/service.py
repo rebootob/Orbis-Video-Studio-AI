@@ -138,6 +138,18 @@ class StoryGenerationService:
                 "PROJECT_NOT_FOUND", f"Project '{project_id}' not found."
             )
 
+        # 1b. Stage Guard (Fail Closed)
+        if project.status in ("COMPLETED", "APPROVED", "ARCHIVED", "VIDEO_IN_PROGRESS", "FINAL_REVIEW", "READY_FOR_REVIEW"):
+            raise CreativeGenerationError(
+                "STAGE_NOT_APPROVED",
+                f"Cannot generate story when project is in '{project.status}' stage.",
+            )
+        if project.status not in ("DRAFT", "STORY_GENERATED"):
+            raise CreativeGenerationError(
+                "STAGE_NOT_APPROVED",
+                f"Story generation requires 'DRAFT' or 'STORY_GENERATED' stage, current project status is '{project.status}'.",
+            )
+
         # 2. Check Project Lock
         if getattr(project, "is_locked", False):
             raise CreativeGenerationError(
@@ -318,6 +330,23 @@ class StoryGenerationService:
                         )
                         self.db.add(shot)
 
+            prev_status = project.status
+            project.status = "STORY_GENERATED"
+            from app.models.orchestration_audit import OrchestrationAudit
+            audit = OrchestrationAudit(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                from_state=prev_status or "DRAFT",
+                to_state="STORY_GENERATED",
+                action="GENERATE_STORY",
+                actor="USER",
+                result="APPLIED",
+                reason_code=None,
+                detail=f"Story {story.id} generated successfully.",
+                created_at=utc_now(),
+            )
+            self.db.add(audit)
+
             self.db.commit()
             self.db.refresh(story)
             return story
@@ -344,16 +373,14 @@ class StoryGenerationService:
         # Gate enforcement for STORY mode:
         project = self.db.get(Project, story.project_id)
         if project and project.video_mode == "STORY":
+            if project.status in ("COMPLETED", "APPROVED", "ARCHIVED", "VIDEO_IN_PROGRESS", "FINAL_REVIEW", "READY_FOR_REVIEW"):
+                raise CreativeGenerationError(
+                    "STAGE_NOT_APPROVED",
+                    f"Cannot generate storyboard scenes when project is in '{project.status}' stage.",
+                )
             ALLOWED_STORYBOARD_STORY_STATUSES = {
                 "STORY_APPROVED",
                 "STORYBOARD_GENERATED",
-                "STORYBOARD_APPROVED",
-                "SHOT_PLAN_GENERATED",
-                "SHOT_PLAN_APPROVED",
-                "IMAGES_GENERATED",
-                "VIDEO_IN_PROGRESS",
-                "READY_FOR_REVIEW",
-                "COMPLETED",
             }
             if story.status != "APPROVED" and project.status not in ALLOWED_STORYBOARD_STORY_STATUSES:
                 raise CreativeGenerationError(
@@ -462,6 +489,24 @@ class StoryGenerationService:
                         self.db.add(shot)
                 created_scenes.append(scene)
 
+            if project:
+                prev_status = project.status
+                project.status = "STORYBOARD_GENERATED"
+                from app.models.orchestration_audit import OrchestrationAudit
+                audit = OrchestrationAudit(
+                    id=uuid.uuid4(),
+                    project_id=project.id,
+                    from_state=prev_status or "STORY_APPROVED",
+                    to_state="STORYBOARD_GENERATED",
+                    action="GENERATE_STORYBOARD",
+                    actor="USER",
+                    result="APPLIED",
+                    reason_code=None,
+                    detail=f"Generated {len(created_scenes)} storyboard scene(s).",
+                    created_at=utc_now(),
+                )
+                self.db.add(audit)
+
             self.db.commit()
             return created_scenes
         except CreativeGenerationError:
@@ -486,15 +531,16 @@ class StoryGenerationService:
         project_id = scene.project_id or (scene.story.project_id if scene.story else None)
         project = self.db.get(Project, project_id) if project_id else None
         if project:
-            ALLOWED_SHOT_PLAN_STATUSES = {
-                "STORYBOARD_APPROVED",
-                "SHOT_PLAN_GENERATED",
-                "SHOT_PLAN_APPROVED",
-                "IMAGES_GENERATED",
-                "VIDEO_IN_PROGRESS",
-                "READY_FOR_REVIEW",
-                "COMPLETED",
-            }
+            if project.status in ("COMPLETED", "APPROVED", "ARCHIVED", "VIDEO_IN_PROGRESS", "FINAL_REVIEW", "READY_FOR_REVIEW"):
+                raise CreativeGenerationError(
+                    "STAGE_NOT_APPROVED",
+                    f"Cannot generate shots when project is in '{project.status}' stage.",
+                )
+            ALLOWED_SHOT_PLAN_STATUSES = (
+                {"DRAFT", "SHOT_PLAN_GENERATED"}
+                if project.video_mode == "LOOP"
+                else {"STORYBOARD_APPROVED", "SHOT_PLAN_GENERATED"}
+            )
             if project.status not in ALLOWED_SHOT_PLAN_STATUSES:
                 raise CreativeGenerationError(
                     "STAGE_NOT_APPROVED",
@@ -582,6 +628,24 @@ class StoryGenerationService:
                 self.db.add(shot)
                 created_shots.append(shot)
 
+            if project:
+                prev_status = project.status
+                project.status = "SHOT_PLAN_GENERATED"
+                from app.models.orchestration_audit import OrchestrationAudit
+                audit = OrchestrationAudit(
+                    id=uuid.uuid4(),
+                    project_id=project.id,
+                    from_state=prev_status or "STORYBOARD_APPROVED",
+                    to_state="SHOT_PLAN_GENERATED",
+                    action="GENERATE_SHOT_PLAN",
+                    actor="USER",
+                    result="APPLIED",
+                    reason_code=None,
+                    detail=f"Generated {len(created_shots)} shot plan(s).",
+                    created_at=utc_now(),
+                )
+                self.db.add(audit)
+
             self.db.commit()
             return created_shots
         except CreativeGenerationError:
@@ -603,6 +667,17 @@ class StoryGenerationService:
             raise CreativeGenerationError("PROJECT_NOT_FOUND", f"Project with ID '{project_id}' not found.")
         if getattr(project, "is_locked", False):
             raise CreativeGenerationError("PROJECT_LOCKED", "Project is locked.")
+
+        if project.status in ("COMPLETED", "APPROVED", "ARCHIVED", "VIDEO_IN_PROGRESS", "FINAL_REVIEW", "READY_FOR_REVIEW"):
+            raise CreativeGenerationError(
+                "STAGE_NOT_APPROVED",
+                f"Cannot generate storyboard when project is in '{project.status}' stage.",
+            )
+        if project.video_mode in ("SHORT", "SCENE") and project.status not in ("DRAFT", "STORYBOARD_GENERATED"):
+            raise CreativeGenerationError(
+                "STAGE_NOT_APPROVED",
+                f"Storyboard generation requires 'DRAFT' or 'STORYBOARD_GENERATED' stage, current project status is '{project.status}'.",
+            )
 
         # If in STORY mode, must have a Story and delegate to generate_story_scenes (which enforces STORY_APPROVED)
         if project.video_mode == "STORY":
@@ -728,6 +803,23 @@ class StoryGenerationService:
                         )
                         self.db.add(shot)
                 created_scenes.append(scene)
+
+            prev_status = project.status
+            project.status = "STORYBOARD_GENERATED"
+            from app.models.orchestration_audit import OrchestrationAudit
+            audit = OrchestrationAudit(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                from_state=prev_status or "DRAFT",
+                to_state="STORYBOARD_GENERATED",
+                action="GENERATE_STORYBOARD",
+                actor="USER",
+                result="APPLIED",
+                reason_code=None,
+                detail=f"Generated {len(created_scenes)} storyboard scene(s).",
+                created_at=utc_now(),
+            )
+            self.db.add(audit)
 
             self.db.commit()
             return created_scenes

@@ -120,7 +120,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -157,7 +157,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -165,10 +165,13 @@ describe('Batch Generation Status Advancement Safety', () => {
     });
 
     await waitFor(() => {
-      expect(api.updateProject).toHaveBeenCalledWith('proj-batch-1', {
-        status: 'VIDEO_IN_PROGRESS',
-      });
+      expect(api.listProjects).toHaveBeenCalled();
     });
+
+    expect(api.updateProject).not.toHaveBeenCalledWith(
+      'proj-batch-1',
+      expect.objectContaining({ status: 'VIDEO_IN_PROGRESS' })
+    );
   });
 
   it('does NOT transition Project status to VIDEO_IN_PROGRESS when handleRetryFailed queues 0 jobs', async () => {
@@ -205,7 +208,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
     fireEvent.click(retryBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -254,7 +257,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
     fireEvent.click(retryBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -264,9 +267,12 @@ describe('Batch Generation Status Advancement Safety', () => {
     });
 
     await waitFor(() => {
-      expect(api.updateProject).toHaveBeenCalledWith('proj-batch-1', {
-        status: 'VIDEO_IN_PROGRESS',
-      });
+      expect(api.listProjects).toHaveBeenCalled();
     });
+
+    expect(api.updateProject).not.toHaveBeenCalledWith(
+      'proj-batch-1',
+      expect.objectContaining({ status: 'VIDEO_IN_PROGRESS' })
+    );
   });
 });

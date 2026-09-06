@@ -543,3 +543,83 @@ def test_011_batch_resume_runs_and_indexes_lifecycle(tmp_path, monkeypatch):
     assert "batch_runs" in meta4.tables
     assert "batch_run_items" in meta4.tables
     engine.dispose()
+
+
+def test_012_production_orchestrator_and_staged_approvals_lifecycle(tmp_path, monkeypatch):
+    """Test 012 migration lifecycle:
+    1. Upgrade to 012 adds automation_mode to projects and creates orchestration_audits table with indexes.
+    2. Downgrade to 011 removes orchestration_audits table and automation_mode column.
+    3. Upgrade back to head re-establishes schema cleanly.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+
+    url = f"sqlite:///{tmp_path / 'orchestration_test.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to head
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "orchestration_audits" in meta.tables
+    assert "automation_mode" in meta.tables["projects"].c
+
+    projects_tbl = Table("projects", meta, autoload_with=engine)
+    projects_tbl.c.id.type = Uuid()
+    audits_tbl = Table("orchestration_audits", meta, autoload_with=engine)
+    audits_tbl.c.id.type = Uuid()
+    audits_tbl.c.project_id.type = Uuid()
+
+    p_id = uuid.uuid4()
+    audit_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(
+            id=p_id,
+            title="Orchestration Test Project",
+            status="DRAFT",
+            automation_mode="MANUAL",
+            created_at=now,
+            updated_at=now,
+        ))
+        conn.execute(audits_tbl.insert().values(
+            id=audit_id,
+            project_id=p_id,
+            from_state="DRAFT",
+            to_state="STORY_GENERATED",
+            action="GENERATE_STORY",
+            actor="USER",
+            result="APPLIED",
+            reason_code="USER_ACTION",
+            detail="Generated initial story",
+            created_at=now,
+        ))
+
+    with engine.connect() as conn:
+        p_row = conn.execute(select(projects_tbl).where(projects_tbl.c.id == p_id)).mappings().first()
+        assert p_row["automation_mode"] == "MANUAL"
+        audit_row = conn.execute(select(audits_tbl).where(audits_tbl.c.id == audit_id)).mappings().first()
+        assert audit_row["action"] == "GENERATE_STORY"
+        assert audit_row["result"] == "APPLIED"
+
+    # 2. Downgrade to 011
+    command.downgrade(cfg, "011_batch_resume_runs_and_indexes")
+    meta_down = MetaData()
+    meta_down.reflect(bind=engine)
+    assert "orchestration_audits" not in meta_down.tables
+    assert "automation_mode" not in meta_down.tables["projects"].c
+
+    # 3. Upgrade back to head
+    command.upgrade(cfg, "head")
+    meta_head = MetaData()
+    meta_head.reflect(bind=engine)
+    assert "orchestration_audits" in meta_head.tables
+    assert "automation_mode" in meta_head.tables["projects"].c
+    engine.dispose()

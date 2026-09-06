@@ -43,10 +43,12 @@ P2-WP011_REVIEWED_HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
 P2-WP011_MERGE_COMMIT: 643614b089a295ea96be179e470707609cbe4b53
 P2-WP011_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124729394)
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING OWNER AUTHORIZATION FOR NEXT WORK PACKAGE
+ACTIVE_WORK_PACKAGE: P2-WP012
+CURRENT_GATE: IMPLEMENTATION COMPLETE / READY FOR CHATGPT INDEPENDENT REVIEW
 
-P2-WP012: PROPOSED / NOT AUTHORIZED
+P2-WP012: IMPLEMENTED / AWAITING INDEPENDENT REVIEW
+P2-WP012_ISSUE: "#31"
+P2-WP012_BRANCH: ai/p2-wp012-production-orchestrator
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -100,6 +102,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
 | Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
 | Selective / Batch Regeneration & Resume Service (P2-WP011) | PASS / CLOSED / MERGED | Canonical candidate selection, shot deduplication, repeat-safe resume, set-based DB queries (no N+1), transactional job/audit persistence, bounded keyset execution, memory-bounded created_jobs accumulation, and BatchRun audit complete. PR #29 merged into main at 643614b089a295ea96be179e470707609cbe4b53. |
+| Production Orchestrator & Staged Approval State Machine (P2-WP012) | IMPLEMENTED / AWAITING REVIEW | Server-side orchestrator service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration replacing client status mutations. Branch ai/p2-wp012-production-orchestrator. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -148,11 +151,13 @@ Beautiful but not distracting
 ## Next Allowed Action
 
 1. Keep WP001-WP011 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = WAITING OWNER AUTHORIZATION FOR NEXT WORK PACKAGE`.
-4. Antigravity = STOP / NONE.
-5. Codex = STOP.
-6. Claude Code = STOP.
-7. P2-WP012 remains: PROPOSED / NOT AUTHORIZED. Do not start WP012 or any later WP without explicit Owner authorization.
+2. `ACTIVE_WORK_PACKAGE = P2-WP012`.
+3. `CURRENT_GATE = IMPLEMENTATION COMPLETE / READY FOR CHATGPT INDEPENDENT REVIEW`.
+4. Await ChatGPT Independent Review for P2-WP012 PR.
+5. Antigravity = STOP / NONE.
+6. Codex = STOP.
+7. Claude Code = STOP.
+8. Do NOT merge without Owner approval.
+9. Do NOT start WP013.
 
 Live GitHub/repository truth newer than this document is authoritative.

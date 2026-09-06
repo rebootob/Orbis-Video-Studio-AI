@@ -18,6 +18,7 @@ from app.models.reference_library import (
 from app.models.asset_lock import AssetLock
 from app.models.usage_ledger import UsageLedger, LedgerAdjustment
 from app.models.batch_run import BatchRun, BatchRunItem
+from app.models.orchestration_audit import OrchestrationAudit
 
 __all__ = [
     "Base",
@@ -40,5 +41,6 @@ __all__ = [
     "LedgerAdjustment",
     "BatchRun",
     "BatchRunItem",
+    "OrchestrationAudit",
 ]
 
