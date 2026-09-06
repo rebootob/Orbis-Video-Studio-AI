@@ -9,7 +9,7 @@
 - **Active Work Package:** `P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue`
 - **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
 - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
-- **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
+- **Authorized Agent:** Codex (Owner-authorized WP007 final corrective; stopped after delivery)
 - **Authority / Oversight:** ChatGPT (Control Plane / Architect), Project Owner (Final Human Authority)
 
 ---
@@ -23,7 +23,10 @@ Implement Vidu Provider Adapter & Durable Job Dispatch Queue:
 4. **Idempotency & Concurrency:** DB-level uniqueness constraint on `(shot_id, idempotency_key)`, safe race handling, no duplicate provider submission after restart.
 5. **Secret & Error Safety:** Sanitization of keys/tokens/credentials in logs, errors, and DB results; no raw provider payloads persisted blindly.
 6. **Output Asset Safety:** Provider output URL kept in job/result; no fabricated Asset records with zero file size or dummy checksums.
-7. **Migrations & Tests:** Alembic migration 006 updating generation_jobs; 100% mocked HTTP pytest test suite with full backend regression.
+7. **Migrations & Tests:** New migration `007_queue_safety`; upgrade / downgrade -1 / upgrade passed on SQLite and PostgreSQL 16.11. Full backend: 101 passed; WP007 suite with PostgreSQL-backed concurrency/recovery fixtures: 53 passed. HTTP is mocked only.
+8. **Final Corrective Safety:** Persisted claim token/lease ownership, atomic submission attempt fencing, `RECONCILIATION_REQUIRED` for ambiguous submissions, durable retry/poll schedules, nested secret rejection and provider result allowlisting, provider-neutral cancel API.
+
+Evidence and operational limits: [`WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md).
 
 ---
 

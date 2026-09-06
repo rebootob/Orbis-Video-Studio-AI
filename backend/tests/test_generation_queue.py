@@ -1,5 +1,6 @@
 """WP007 contract tests: mocked HTTP only; real independent DB sessions for races."""
 import asyncio
+import os
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -10,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base_class import Base
@@ -59,13 +60,26 @@ def sample_shot(db_session):
 
 @pytest.fixture
 def durable_db(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'queue.db'}", connect_args={"timeout": 30})
+    postgres_url = os.environ.get("WP007_TEST_DATABASE_URL")
+    schema = "wp007_" + uuid.uuid4().hex
+    if postgres_url:
+        admin = create_engine(postgres_url)
+        with admin.begin() as connection:
+            connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(postgres_url, connect_args={"options": f"-csearch_path={schema}"})
+    else:
+        engine = create_engine(f"sqlite:///{tmp_path / 'queue.db'}", connect_args={"timeout": 30})
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as db:
         shot_id = make_shot(db).id
     yield factory, shot_id
     engine.dispose()
+    if postgres_url:
+        with admin.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        admin.dispose()
+
 
 
 @pytest.fixture
@@ -390,4 +404,148 @@ def test_worker_restarts_and_recovers_due_jobs(durable_db, provider):
     asyncio.run(run_once(factory))
     with factory() as db:
         assert db.get(Job, job_id).provider_job_id == "task-1"
+    assert provider.submit_generation_job.await_count == 1
+
+
+def test_concurrent_polls_make_one_provider_call(durable_db, provider):
+    factory, shot_id = durable_db
+    with factory() as db:
+        job = Queue.create_and_dispatch_job(db, shot_id)
+        job_id = job.id
+        token = claim(db, job).claim_token
+        asyncio.run(Queue.process_job(db, job_id, claim_token=token, now=NOW))
+    barrier = Barrier(4)
+    def poll():
+        with factory() as db:
+            barrier.wait()
+            return asyncio.run(Queue.poll_job_status(db, job_id, now=NOW+timedelta(seconds=10))).status
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(lambda _: poll(), range(4)))
+    assert provider.check_job_status.await_count == 1
+    with factory() as db:
+        assert db.get(Job, job_id).poll_count == 1
+
+
+def test_concurrent_cancels_make_one_provider_call(durable_db, provider):
+    factory, shot_id = durable_db
+    with factory() as db:
+        job = Queue.create_and_dispatch_job(db, shot_id)
+        job_id = job.id
+        token = claim(db, job).claim_token
+        asyncio.run(Queue.process_job(db, job_id, claim_token=token, now=NOW))
+    barrier = Barrier(4)
+    def cancel():
+        with factory() as db:
+            barrier.wait()
+            return asyncio.run(Queue.cancel_job(db, job_id, now=NOW)).status
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(lambda _: cancel(), range(4)))
+    assert provider.cancel_job.await_count == 1
+    with factory() as db:
+        assert db.get(Job, job_id).status == "CANCELLED"
+
+
+@pytest.mark.anyio
+async def test_live_submission_lease_and_stale_completion_fence(durable_db, provider):
+    factory, shot_id = durable_db
+    async def recover_during_submission(params):
+        with factory() as other:
+            assert Queue.recover_pending_jobs(other, now=NOW+timedelta(seconds=1)) == 0
+            assert Queue.recover_pending_jobs(other, now=NOW+timedelta(seconds=LEASE_SECONDS)) == 1
+        return ProviderJobResult(provider_job_id="accepted-task", status="QUEUED")
+    provider.submit_generation_job.side_effect = recover_during_submission
+    with factory() as db:
+        job = Queue.create_and_dispatch_job(db, shot_id)
+        token = claim(db, job).claim_token
+        result = await Queue.process_job(db, job.id, claim_token=token, now=NOW)
+        assert result.status == "RECONCILIATION_REQUIRED"
+        assert result.provider_job_id is None
+    assert provider.submit_generation_job.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_persisted_poll_bound_requires_reconciliation(db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    job.max_polls = 1
+    db_session.commit()
+    token = claim(db_session, job).claim_token
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=10))
+    result = await Queue.poll_job_status(db_session, job.id, now=NOW+timedelta(seconds=20))
+    assert result.status == "RECONCILIATION_REQUIRED"
+    assert provider.check_job_status.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_schedule_starts_after_response(db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="", status="FAILED", retryable=True)
+    with patch("app.services.job_dispatch.utc_now", side_effect=[NOW, NOW+timedelta(seconds=30)]):
+        result = await Queue.process_job(db_session, job.id, claim_token=token)
+    assert result.next_retry_at.replace(tzinfo=timezone.utc) == NOW+timedelta(seconds=35)
+
+
+def test_api_claim_token_dispatch_and_no_secret_output(client, db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    claimed = client.post("/api/v1/queue/claim").json()
+    assert claimed["id"] == str(job.id) and claimed["claim_token"]
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="", status="FAILED",
+        error_message='unlabelled LEAK', raw_response={"details":[{"credential":"LEAK"}]})
+    response = client.post(f"/api/v1/jobs/{job.id}/dispatch", json={"claim_token":claimed["claim_token"]})
+    assert response.status_code == 200 and response.json()["status"] == "FAILED"
+    assert "LEAK" not in response.text
+    assert claimed["claim_token"] not in response.text
+    assert "LEAK" not in client.get(f"/api/v1/jobs/{job.id}").text
+
+
+def test_configured_secret_value_rejected(client, sample_shot, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "VIDU_API_KEY", "unlabelled-sensitive-value")
+    response = client.post("/api/v1/jobs", json={"shot_id":str(sample_shot.id), "custom_params":{"resolution":"unlabelled-sensitive-value"}})
+    assert response.status_code == 400
+    assert "unlabelled-sensitive-value" not in response.text
+
+
+@pytest.mark.anyio
+async def test_long_safe_prompt_is_preserved(db_session, sample_shot, provider):
+    sample_shot.video_prompt = "A tree in the wind. " * 100
+    db_session.commit()
+    job = create(db_session, sample_shot)
+    assert job.payload["prompt"] == sample_shot.video_prompt
+
+
+@pytest.mark.anyio
+async def test_service_discards_unlabelled_cancel_exception(client, db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    provider.cancel_job.side_effect = RuntimeError("unlabelled LEAK")
+    response = client.post(f"/api/v1/jobs/{job.id}/cancel")
+    assert "LEAK" not in response.text
+
+
+@pytest.mark.anyio
+async def test_unsupported_and_unconfigured_providers_do_not_submit(db_session, sample_shot, provider):
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    provider.validate_config = lambda config: False
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert result.status == "FAILED" and provider.submit_generation_job.await_count == 0
+    other = create(db_session, sample_shot, provider_name="unsupported")
+    token = claim(db_session, other).claim_token
+    with patch.object(ProviderFactory, "get_provider", side_effect=ValueError("LEAK")):
+        result = await Queue.process_job(db_session, other.id, claim_token=token, now=NOW)
+        assert result.status == "FAILED" and "LEAK" not in result.error_message
+
+
+@pytest.mark.anyio
+async def test_transient_result_with_provider_identity_never_resubmits(db_session, sample_shot, provider):
+    provider.submit_generation_job.return_value = ProviderJobResult(provider_job_id="accepted-task", status="FAILED", retryable=True)
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert result.status == "PROCESSING" and result.provider_job_id == "accepted-task"
+    assert Queue.claim_next_job(db_session, now=NOW+timedelta(days=1)) is None
+    await Queue.process_job(db_session, job.id, claim_token=token, now=NOW+timedelta(days=1))
     assert provider.submit_generation_job.await_count == 1

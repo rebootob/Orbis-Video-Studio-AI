@@ -45,13 +45,12 @@ def get_job(
 @router.post("/jobs/{job_id}/dispatch", response_model=JobResponse)
 async def dispatch_job(
     job_id: uuid.UUID,
-    request: Optional[DispatchRequest] = None,
-    worker_id: Optional[str] = Query(None),
+    request: DispatchRequest,
     db: Session = Depends(get_db),
 ):
-    claim_token = request.claim_token if request else None
+    claim_token = request.claim_token
     job = await JobDispatchService.process_job(
-        db=db, job_id=job_id, claim_token=claim_token, worker_id=worker_id
+        db=db, job_id=job_id, claim_token=claim_token
     )
     return job
 
@@ -59,10 +58,9 @@ async def dispatch_job(
 @router.post("/jobs/{job_id}/poll", response_model=JobResponse)
 async def poll_job(
     job_id: uuid.UUID,
-    max_polls: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ):
-    job = await JobDispatchService.poll_job_status(db=db, job_id=job_id, max_polls=max_polls)
+    job = await JobDispatchService.poll_job_status(db=db, job_id=job_id)
     return job
 
 
@@ -88,8 +86,8 @@ def claim_next_job(
 def recover_jobs(
     db: Session = Depends(get_db),
 ):
-    stats = JobDispatchService.recover_pending_jobs(db=db)
-    return stats
+    count = JobDispatchService.recover_pending_jobs(db=db)
+    return {"recovered_count": count}
 
 
 @router.get("/shots/{shot_id}/jobs", response_model=List[JobResponse])

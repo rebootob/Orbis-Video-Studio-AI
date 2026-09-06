@@ -3,10 +3,9 @@
 Worker flow: recover -> claim -> dispatch(token); poll due jobs separately.
 No provider identity after an ambiguous submit requires manual reconciliation.
 """
-import threading
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
 
 import httpx
 from fastapi import HTTPException
@@ -21,8 +20,6 @@ from app.providers.factory import ProviderFactory
 from app.providers.safety import (
     contains_secret,
     safe_result,
-    sanitize_secret_text,
-    strip_secret_keys,
 )
 
 LEASE_SECONDS = 120
@@ -32,19 +29,8 @@ MAX_BACKOFF_SECONDS = 300
 TERMINAL = ("COMPLETED", "FAILED", "CANCELLED", "RECONCILIATION_REQUIRED")
 ACTIVE = ("QUEUED", "PROCESSING")
 
-_claim_lock = threading.Lock()
-
-
 def utc_now():
     return datetime.now(timezone.utc)
-
-
-def ensure_utc(dt):
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def backoff(attempt):
@@ -56,13 +42,7 @@ def is_retryable_error(status_code=None, exc=None, error_message=None):
         return status_code == 429 or status_code in (500, 502, 503, 504)
     if exc is not None:
         return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError))
-    if error_message is not None:
-        msg = error_message.lower()
-        if any(w in msg for w in ("400", "401", "403", "unauthorized", "moderation", "policy", "unsupported", "invalid")):
-            return False
-        if any(w in msg for w in ("504", "503", "502", "500", "429", "timeout", "rate limit")):
-            return True
-        return False
+
     return False
 
 
@@ -139,16 +119,13 @@ class JobDispatchService:
         if contains_secret(prompt):
             raise HTTPException(400, "Secret-like generation parameters are not allowed")
 
-        clean_custom_params = strip_secret_keys(custom_params or {})
-        clean_reference_images = strip_secret_keys(reference_images) if reference_images else None
-
         try:
             params = VideoGenerationParams(
                 shot_id=str(shot_id),
                 prompt=prompt,
                 duration_seconds=shot.duration_seconds or 4.0,
-                reference_images=clean_reference_images,
-                provider_specific_params=clean_custom_params,
+                reference_images=reference_images,
+                provider_specific_params=custom_params or {},
             )
         except ValueError:
             raise HTTPException(400, "Invalid generation parameters") from None
@@ -188,7 +165,9 @@ class JobDispatchService:
         worker_id = worker_id or "queue-worker"
         if len(worker_id) > 255 or contains_secret(worker_id):
             raise HTTPException(400, "Invalid worker identifier")
-        lease_secs = lease_duration_seconds or LEASE_SECONDS
+        if not 1 <= lease_duration_seconds <= LEASE_SECONDS:
+            raise HTTPException(400, "Invalid lease duration")
+        lease_secs = lease_duration_seconds
         eligible = [
             Job.status == "PENDING",
             Job.provider_job_id.is_(None),
@@ -199,20 +178,18 @@ class JobDispatchService:
         if job_id is not None:
             eligible.append(Job.id == job_id)
 
-        with _claim_lock:
-            candidate_ids = [
-                row[0] for row in db.query(Job.id).filter(*eligible).order_by(Job.created_at, Job.id).limit(100).all()
-            ]
-            for candidate in candidate_ids:
-                claim_token = uuid.uuid4().hex
-                if change(db, [Job.id == candidate, *eligible], {
-                    "status": "CLAIMED",
-                    "claimed_by": worker_id,
-                    "claim_token": claim_token,
-                    "claim_expires_at": now + timedelta(seconds=lease_secs),
-                }):
-                    return load(db, candidate)
-            return None
+        candidate_ids = [row[0] for row in db.query(Job.id).filter(*eligible)
+                         .order_by(Job.created_at, Job.id).limit(100).all()]
+        # Release the read transaction before the DB compare-and-set. No process-local
+        # lock: independent workers and processes compete on the same persisted state.
+        db.commit()
+        for candidate in candidate_ids:
+            if change(db, [Job.id == candidate, *eligible], {
+                "status": "CLAIMED", "claimed_by": worker_id, "claim_token": uuid.uuid4().hex,
+                "claim_expires_at": now + timedelta(seconds=lease_secs),
+            }):
+                return load(db, candidate)
+        return None
 
     @staticmethod
     def recover_pending_jobs(db: Session, *, now=None):
@@ -234,6 +211,7 @@ class JobDispatchService:
 
     @staticmethod
     async def process_job(db: Session, job_id, *, claim_token=None, worker_id=None, now=None):
+        supplied_now = now
         now = now or utc_now()
         job = load(db, job_id)
         if job.status in TERMINAL or job.provider_job_id:
@@ -277,6 +255,9 @@ class JobDispatchService:
             except Exception as exc:
                 res = failure(exc, submitting=True)
 
+        if res.provider_job_id and (not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", res.provider_job_id) or contains_secret(res.provider_job_id)):
+            res = ProviderJobResult(provider_job_id="", status="FAILED", submission_uncertain=True)
+        now = now if supplied_now is not None else utc_now()
         values = released()
         values.update(result=safe_result(res), error_message=None, next_retry_at=None)
 
@@ -287,13 +268,21 @@ class JobDispatchService:
                 status="RECONCILIATION_REQUIRED",
                 error_message="Submission outcome unknown; manual reconciliation required",
             )
+        elif res.provider_job_id and res.status == "FAILED" and retryable:
+            # The provider has an identity already: retry status, never submission.
+            retries = job.retry_count + 1
+            retry = retries < job.max_retries
+            values.update(provider_job_id=res.provider_job_id,
+                          status="PROCESSING" if retry else "FAILED", retry_count=retries,
+                          error_message="Transient provider status failure",
+                          next_poll_at=now + timedelta(seconds=max(POLL_SECONDS, backoff(retries))) if retry else None)
         elif res.status == "FAILED":
             retries = job.retry_count + (1 if retryable else 0)
             retry = retryable and retries < job.max_retries
             values.update(
                 status="PENDING" if retry else "FAILED",
                 retry_count=retries,
-                error_message=sanitize_secret_text(res.error_message) if res.error_message else ("Transient provider failure" if retryable else "Provider rejected submission"),
+                error_message="Transient provider failure" if retryable else "Provider rejected submission",
                 submission_attempt_id=None if retry else attempt,
                 next_retry_at=now + timedelta(seconds=backoff(retries)) if retry else None,
             )
@@ -314,6 +303,7 @@ class JobDispatchService:
 
     @staticmethod
     async def poll_job_status(db: Session, job_id, *, now=None, max_polls=None):
+        supplied_now = now
         now = now or utc_now()
         job = load(db, job_id)
         if job.status not in ACTIVE or not job.provider_job_id:
@@ -321,17 +311,11 @@ class JobDispatchService:
 
         limit = min(job.max_polls, max_polls) if max_polls is not None else job.max_polls
 
-        if job.next_poll_at and ensure_utc(job.next_poll_at) > ensure_utc(now):
-            return job
-
-        if job.poll_count >= limit:
-            values = {
-                **released(),
-                "status": "FAILED",
-                "error_message": "Bounded polling limit exceeded",
-                "next_poll_at": None,
-            }
-            change(db, [Job.id == job_id, Job.status.in_(ACTIVE)], values)
+        exhausted = [Job.id == job_id, Job.status.in_(ACTIVE), due(Job.next_poll_at, now), Job.poll_count >= limit]
+        if change(db, exhausted, {
+            **released(), "status": "RECONCILIATION_REQUIRED",
+            "error_message": "Polling limit reached; manual reconciliation required", "next_poll_at": None,
+        }):
             return load(db, job_id)
 
         token = uuid.uuid4().hex
@@ -353,10 +337,11 @@ class JobDispatchService:
         except Exception as exc:
             res = failure(exc)
 
+        now = now if supplied_now is not None else utc_now()
         values = {
             **released(),
             "result": safe_result(res),
-            "error_message": sanitize_secret_text(res.error_message) if res.error_message else None,
+            "error_message": None,
             "status": res.status,
             "next_poll_at": now + timedelta(seconds=POLL_SECONDS),
         }
@@ -367,7 +352,7 @@ class JobDispatchService:
             values.update(
                 status="PROCESSING" if retry else "FAILED",
                 retry_count=retries,
-                error_message=sanitize_secret_text(res.error_message) if res.error_message else ("Transient status failure" if retryable else "Provider job failed"),
+                error_message="Transient status failure" if retryable else "Provider job failed",
                 next_poll_at=now + timedelta(seconds=max(POLL_SECONDS, backoff(retries))) if retry else None,
             )
         elif values["status"] in TERMINAL:
@@ -378,6 +363,7 @@ class JobDispatchService:
 
     @staticmethod
     async def cancel_job(db: Session, job_id, *, now=None):
+        supplied_now = now
         now = now or utc_now()
         job = load(db, job_id)
         if job.status in TERMINAL or job.status == "SUBMITTING":
@@ -419,11 +405,9 @@ class JobDispatchService:
         try:
             adapter = ProviderFactory.get_provider(job.provider_name)
             cancelled = await adapter.cancel_job(job.provider_job_id)
-        except Exception as exc:
+        except Exception:
             cancelled = False
-            err_text = sanitize_secret_text(str(exc))
-        else:
-            err_text = "Provider cancellation not confirmed"
+        now = now if supplied_now is not None else utc_now()
 
         if cancelled:
             values = {
@@ -437,7 +421,7 @@ class JobDispatchService:
             values = {
                 **released(),
                 "status": "PROCESSING",
-                "error_message": sanitize_secret_text(err_text),
+                "error_message": "Provider cancellation not confirmed",
                 "next_retry_at": now + timedelta(seconds=POLL_SECONDS),
                 "next_poll_at": now + timedelta(seconds=POLL_SECONDS),
             }

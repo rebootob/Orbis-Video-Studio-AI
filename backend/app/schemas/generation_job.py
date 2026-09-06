@@ -47,4 +47,4 @@ class ClaimResponse(JobResponse):
 
 
 class DispatchRequest(BaseModel):
-    claim_token: Optional[str] = None
+    claim_token: str

@@ -1,5 +1,6 @@
 """Provider-neutral persistence boundary. Never retain raw provider bodies."""
 import re
+import math
 from urllib.parse import urlsplit, parse_qsl
 from app.core.config import settings
 
@@ -12,7 +13,7 @@ def sanitize_secret_text(text):
     return re.sub(
         r'''(?i)(?:authorization|api[_-]?key|token|bearer|secret|password|credential)[\\"' \t:=]*[^\s,;}]+''',
         "[REDACTED]", str(text),
-    )[:1000]
+    )
 
 
 def contains_secret(value):
@@ -25,25 +26,6 @@ def contains_secret(value):
                               if SECRET_KEY.search(k) and isinstance(v, str) and v)
         return sanitize_secret_text(value) != value or any(secret in value for secret in configured_secrets)
     return False
-
-
-def strip_secret_keys(obj):
-    if isinstance(obj, dict):
-        result = {}
-        for k, v in obj.items():
-            if isinstance(v, dict):
-                result[k] = strip_secret_keys(v)
-            elif isinstance(v, list):
-                result[k] = [strip_secret_keys(item) for item in v]
-            else:
-                if not SECRET_KEY.search(str(k)):
-                    result[k] = sanitize_secret_text(v) if isinstance(v, str) else v
-        return result
-    elif isinstance(obj, list):
-        return [strip_secret_keys(item) for item in obj]
-    elif isinstance(obj, str):
-        return sanitize_secret_text(obj)
-    return obj
 
 
 def safe_url(value):
@@ -70,8 +52,7 @@ def safe_result(result):
         "video_url": safe_url(getattr(result, "video_url", None)),
         "thumbnail_url": safe_url(getattr(result, "thumbnail_url", None)),
     }
-    for field in ("progress_percentage", "duration", "resolution", "seed"):
-        val = getattr(result, field, None)
-        if val is not None:
-            data[field] = val
+    progress = result.progress_percentage
+    if isinstance(progress, (int, float)) and math.isfinite(progress) and 0 <= progress <= 100:
+        data["progress_percentage"] = progress
     return data
