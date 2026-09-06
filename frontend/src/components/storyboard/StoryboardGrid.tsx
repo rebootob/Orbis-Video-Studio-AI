@@ -167,7 +167,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
     setCostModalOpen(true);
   };
 
-  const triggerRetryFailed = () => {
+  const triggerRetryFailed = async () => {
     setCostModalOperationType('RETRY_FAILED');
     setCostModalShotIds(null);
     setCostModalOnlyIncomplete(false);
