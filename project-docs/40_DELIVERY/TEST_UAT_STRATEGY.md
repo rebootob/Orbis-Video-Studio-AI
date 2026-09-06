@@ -4,39 +4,125 @@
 
 ---
 
-## 1. Multi-Tiered Testing Pyramid
+## 1. Multi-Layer Testing Model
 
-To ensure architectural integrity, provider stability, cost efficiency, and rendering quality, testing spans four distinct layers:
+To protect architecture, workflow correctness, cost safety and user experience, testing spans five layers:
 
 ```mermaid
 graph TD
-    UAT["4. User Acceptance Testing (UAT) - End-to-End Workflow Verification"]
-    Integration["3. Integration & Cloud Render Tests - Multi-service & Composite Pipeline"]
-    MockProvider["2. Provider Adapter Mock Tests - Contract Validation (Zero Billing)"]
-    Unit["1. Unit Tests - Domain Entities, State Machine, Parsers"]
+    UAT["5. Owner UAT - End-to-End Guided Production"]
+    Product["4. Product / UX Behavior Tests"]
+    Integration["3. Integration / Queue / Storage / Render Tests"]
+    MockProvider["2. Provider Adapter Mock Tests - Zero Billing"]
+    Unit["1. Unit / Domain / State Tests"]
 
     Unit --> MockProvider
     MockProvider --> Integration
-    Integration --> UAT
+    Integration --> Product
+    Product --> UAT
 ```
 
 ---
 
 ## 2. Testing Layers & Methodology
 
-### 1. Unit Testing
-- **Scope:** Domain models, state transition machines, document parsers, audio ducking calculations.
-- **Framework:** Test runner / assertion library *(Candidate TBD)*.
-- **Rule:** 100% pure in-memory execution; no network or database calls.
+### Layer 1 — Unit / Domain / State Tests
 
-### 2. Provider Adapter Mock Testing
-- **Scope:** Validates `IVideoGenerationProviderAdapter` implementations against mock Vidu API responses.
-- **Objective:** Verifies prompt formatting, reference image mapping, seed retention, retry handling, and error response handling **WITHOUT incurring live provider billing charges**.
+Scope includes:
+- domain models and validation
+- mode routing
+- lock/state transitions
+- approval-state rules
+- version/history lineage behavior
+- budget/cost calculations and idempotency
+- retry/resume/reconciliation state
+- audio planning/basic-mix rules where deterministic
 
-### 3. Integration & Cloud Render Testing
-- **Scope:** Tests queue dispatching, object storage asset uploading, relational state mutations, and cloud video compositing.
-- **Environment:** Containerized integration test suite running in isolated container environment.
+Tests should be deterministic and avoid live provider calls.
 
-### 4. User Acceptance Testing (UAT)
-- **Scope:** Validates end-to-end user story workflows from browser UI workspace to final MP4 download.
-- **Protocol:** Executed against human approval gates, asset lock mechanisms, and multi-output export profiles. Requires Project Owner sign-off.
+### Layer 2 — Provider Adapter Mock Tests
+
+Validate provider contract mapping without paid usage:
+
+```text
+CreativeProvider
+ImageProvider
+VideoProvider
+AudioProvider
+```
+
+Mock tests should verify request mapping, references, provider errors, retries, secret safety and result normalization. Vidu remains the initial V1 video adapter target, but tests should reinforce provider independence rather than hard-code provider behavior into the domain.
+
+### Layer 3 — Integration Tests
+
+Scope includes:
+- database migrations
+- durable queue dispatch/claim/lease/retry/reconciliation
+- object storage asset lifecycle
+- project ownership/isolation
+- history/version persistence
+- cost ledger integration
+- batch selected/incomplete job behavior
+- render/assembly integration when those WPs are authorized
+
+Use isolated test environments/containers and zero live billing unless a separate Owner-approved live UAT specifically requires it.
+
+### Layer 4 — Product / UX Behavior Tests
+
+Frontend tests should cover behavior, not just rendering components:
+
+- multi-project dashboard filters/lifecycle actions
+- STORY / SHORT / LOOP / SCENE mode-aware paths
+- staged flow and approval gates
+- Next Recommended Action logic
+- Simple vs Advanced progressive disclosure
+- empty/error/blocked state recovery
+- truthful queue/QC/approval statuses
+- cost warning/UNKNOWN behavior
+- Generate Selected / Retry Failed / Continue Incomplete
+- unsaved/autosave/reorder interactions as implemented
+- no unsafe normal-path hard-delete behavior
+
+Visual review should also check consistency, hierarchy, readability and whether first-time users can understand the next step.
+
+### Layer 5 — Owner UAT
+
+Core V1 UAT must validate a realistic end-to-end production journey:
+
+```text
+Create Project
+-> Add Brief / References
+-> Generate Story/Concept
+-> Review / Approve
+-> Generate Storyboard
+-> Review / Approve
+-> Generate Shot Plan
+-> Review / Approve
+-> Generate Images / Keyframes as applicable
+-> Generate Video Shots
+-> Produce VO / BGM / SFX / Ambience
+-> Auto Assemble / Preview
+-> QC
+-> Final Approval
+-> Render
+-> Export Variants
+```
+
+UAT must verify the user can pause and review before expensive generation, recover from partial failure without restarting completed work and reopen historical project state.
+
+---
+
+## 3. Current WP010 Verification Requirement
+
+For the corrective on PR #25, required evidence should include at least:
+
+- backend full regression tests if backend changes exist
+- frontend tests
+- frontend lint
+- frontend build/typecheck
+- `git diff --check`
+- exact-head GitHub Actions green
+- no live paid provider calls
+- screenshots or direct UI evidence sufficient to review Guided Flexibility / staged workflow truthfulness
+
+ChatGPT independent review compares the exact corrective HEAD against Issue #24 and all authorized addenda. CI green alone does not close product/UX blockers.
