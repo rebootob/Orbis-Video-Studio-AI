@@ -15,6 +15,7 @@ This index routes each project topic to its canonical documentation source.
 | Active Work Package / Next Gate | [`ACTIVE_TASK.md`](ACTIVE_TASK.md) |
 | Master Topic Routing Matrix | [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md) |
 | Chat Session Handoff | [`CHAT_HANDOFF.md`](CHAT_HANDOFF.md) |
+| Copy/Paste Prompt for Next Chat | [`NEXT_CHAT_PROMPT.md`](NEXT_CHAT_PROMPT.md) |
 
 ---
 
