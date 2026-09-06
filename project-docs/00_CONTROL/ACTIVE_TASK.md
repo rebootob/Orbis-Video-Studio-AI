@@ -7,32 +7,53 @@
 ## Active Work Package
 
 ```text
-P2-WP009 — Cost Control & Granular Usage Audit Ledger
+P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
 ```
 
 Status:
 
 ```text
-IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
+AUTHORIZED / IMPLEMENTED FIRST PASS / CHANGES REQUIRED
 ```
 
-Owner Authorization:
-Authorized via GitHub Issue #22 on feature branch `ai/p2-wp009-cost-ledger`.
+Current Pull Request:
+
+```text
+PR #25
+Branch: ai/p2-wp010-mode-aware-web-workspace
+Reviewed HEAD: 291ea773681831a0a68e585eb7e0664902102be3
+Gate: WAITING FOR ANTIGRAVITY CORRECTIVE COMMIT
+```
+
+Owner authorization is recorded in GitHub Issue #24 and its Product Lock / UX addendum comments.
 
 Execution Engine:
-Antigravity (bounded execution complete; STOPPING for ChatGPT review).
+Antigravity, bounded to the existing WP010 branch/PR only.
 
-### Objective
+## Current Corrective Priorities
 
-Build a provider-neutral, auditable usage and cost-control layer that records billable AI/provider activity per project/job/shot, prevents duplicate charging under retry/reconciliation flows, and enforces project-level budget controls before chargeable dispatch.
+1. Remove unsafe hard-delete behavior that conflicts with full-history retention.
+2. Preserve multi-project history and no-silent-history-loss behavior.
+3. Make staged production explicit and reviewable:
+   `Story -> Storyboard -> Shot Plan -> Images -> Video -> Audio -> Final Review -> Export`.
+4. Support approval gates and a clear next recommended action.
+5. Improve Project Dashboard actions: rename, duplicate, archive, search, sort, recent.
+6. Add truthful actionable queue states, Generate Selected / continue incomplete behavior and safe cost confirmation before chargeable batch work.
+7. Ensure references/upload UX is real rather than placeholder.
+8. Provide lightweight History / Version entry points and reorder/autosave readiness.
+9. Fix unsafe CORS configuration.
+10. Keep UI simple, guided, professional and progressively disclose advanced settings.
 
-Scope Delivered:
-1. Provider-neutral `UsageLedger` and `LedgerAdjustment` audit models with migration 009.
-2. Idempotent recording of usage events, preventing duplicate charges across retries and reconciliations.
-3. Pluggable `ProviderPricingService` registry without hard-coded pricing in core domain logic.
-4. Project budget management: soft warning thresholds and fail-closed hard caps before chargeable dispatch.
-5. Manual adjustment audit trail preserving original costs and reasons without overwriting history.
-6. Summary and query endpoints grouping by provider and operation.
+## Locked Product Direction Relevant to WP010
+
+- Multi-project is required.
+- Full history retention and auditable changes are required.
+- Multi-mode Core V1: STORY / SHORT / LOOP / SCENE.
+- Automation-first: AI handles repetitive production work; human reviews and approves.
+- User must be able to review Story and Storyboard before detailed Shot/Image/Video generation.
+- Guided Flexibility is required: always show a sensible next action while preserving expert control.
+- No live paid provider calls are required for WP010 acceptance.
+- Audio is Core V1, but WP010 only prepares truthful UI/readiness and must not expand into the full audio engine.
 
 ---
 
@@ -40,9 +61,9 @@ Scope Delivered:
 
 ```text
 Owner = final human authority / UAT / merge approval
-ChatGPT = Control Plane / Architect / Independent Reviewer
-Antigravity = STOP until explicitly authorized for the next bounded implementation
-Codex = STOP
+ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
+Antigravity = bounded low-credit Execution Plane for the authorized WP only
+Codex = STOP by default
 Claude Code = STOP
 ```
 
@@ -52,4 +73,7 @@ The local GitHub watcher/dispatcher remains PAUSED and must not be treated as a 
 
 ## Next Allowed Action
 
-Owner may review and explicitly authorize P2-WP008. Until then: documentation/review only, no WP008 application-code implementation.
+Antigravity may implement the requested WP010 corrective changes on the SAME branch and SAME PR #25, run required tests/CI, push a new exact HEAD, then STOP for ChatGPT independent review.
+
+Do not merge PR #25 without explicit Owner approval.
+Do not start WP011 or any later WP automatically.

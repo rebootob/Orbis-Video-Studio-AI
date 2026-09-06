@@ -20,39 +20,66 @@ P1-WP004 = PASS / CLOSED / MERGED
 P1-WP005 = PASS / CLOSED / MERGED
 P2-WP006 = PASS / CLOSED / MERGED
 P2-WP007 = PASS / CLOSED / MERGED
+P2-WP008 = PASS / CLOSED / MERGED
+P2-WP009 = PASS / CLOSED / MERGED
 ```
 
-WP007 merged via PR #15.
+Key reviewed/merge truth:
 
 ```text
-Reviewed feature HEAD:
-5a03d4d7f56ac8ae39a78914276610c0512da78b
+WP007 reviewed HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
+WP007 merge: 9cb098dea7fc2948b023ad48163c729f566573a7
 
-Merge commit:
-9cb098dea7fc2948b023ad48163c729f566573a7
+WP008 reviewed HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
+WP008 merge: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
+
+WP009 reviewed HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
+WP009 merge / current documented main HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 ```
-
-WP007 delivered the provider-neutral Vidu adapter and durable DB-backed generation queue with claim/lease fencing, idempotency, bounded retry/poll scheduling, safe reconciliation for ambiguous submissions, provider-neutral cancellation, secret/result safety and mocked Vidu tests. No live Vidu credits were required.
 
 ---
 
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = P2-WP008
-P2-WP008 = IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
-NEXT ALLOWED ACTION = ChatGPT Independent Review
+ACTIVE WORK PACKAGE = P2-WP010
+ISSUE = #24
+PR = #25
+BRANCH = ai/p2-wp010-mode-aware-web-workspace
+LAST REVIEWED HEAD = 291ea773681831a0a68e585eb7e0664902102be3
+STATUS = CHANGES REQUIRED / WAITING ANTIGRAVITY CORRECTIVE
+NEXT ALLOWED ACTION = corrective on SAME branch/PR, then ChatGPT independent review
 ```
 
-P2-WP008 implementation is complete. All 119 backend tests pass (including 17 focused hybrid shot and lock tests and 3 migration lifecycle tests). Antigravity execution is complete and stops here awaiting independent review. Do not merge. Do not start WP009.
+Do not merge PR #25 yet. Do not start WP011.
+
+The first WP010 pass delivered a substantial workspace/UI baseline, but review found blockers around hard deletion/history safety, staged approval workflow, Guided Flexibility / next-action guidance, truthful QC/approval readiness, real reference upload, batch/cost safety, reorder/autosave readiness and CORS safety. Antigravity has been instructed to correct only those WP010 blockers, run all required tests/CI, push a new HEAD and stop.
 
 ---
 
-## Owner-Locked Multi-Mode Direction
+## Owner-Locked Product Direction
 
-Orbis is a multi-mode video production platform.
+Orbis is not intended to recreate foundation AI models. It is an **AI Video Production Orchestrator / Production Control Plane** that coordinates best-of-breed Creative, Image, Video and Audio providers behind adapters.
 
-Core V1 modes:
+Provider-neutral direction:
+
+```text
+CreativeProvider
+  -> OpenAI / Gemini / future
+
+ImageProvider
+  -> Gemini Image / OpenAI Image / future
+
+VideoProvider
+  -> Vidu / Veo / future
+
+AudioProvider
+  -> TTS / music / SFX / future
+```
+
+The Orbis-owned value is production orchestration and control: Projects, modes, references, Story/Scene/Shot structure, approvals, history/version lineage, locks, durable queue/retry/recovery, cost/budget, QC, assembly and export.
+
+### Core V1 Modes
 
 ```text
 STORY
@@ -61,7 +88,7 @@ LOOP
 SCENE
 ```
 
-Architecture-ready future modes:
+Architecture-ready later:
 
 ```text
 PRODUCT
@@ -70,18 +97,56 @@ PRESENTER
 MONTAGE
 ```
 
-Mode routing:
+### Multi-Project / History Locks
 
 ```text
-STORY -> Story -> Script -> Scenes -> Shots
-SHORT -> Hook/Concept -> Scene -> Shots
-LOOP -> Loop Spec -> Shot(s)
-SCENE -> Scene -> 1-N Shots
+MULTI_PROJECT = REQUIRED
+FULL_HISTORY_RETENTION = REQUIRED
+AUDITABLE_CHANGES = REQUIRED
+NO_SILENT_HISTORY_LOSS = REQUIRED
 ```
 
-Story is optional at Project level. Video Mode is separate from Purpose, Target Platform, Aspect Ratio and Output Preset.
+### Automation-First Locks
 
-The earliest planned implementation point for base Video Mode configuration is P2-WP008.
+```text
+AUTOMATION_FIRST = REQUIRED
+AUTO_STORYBOARD = REQUIRED
+AUTO_SHOT_PLANNING = REQUIRED
+AUTO_PROMPT_GENERATION = REQUIRED
+BATCH_GENERATION = REQUIRED
+HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
+```
+
+Target flow:
+
+```text
+Brief / References
+-> Story
+-> Review / Approve
+-> Storyboard
+-> Review / Approve
+-> Detailed Shot Plan + Prompts
+-> Review / Approve
+-> Images / Keyframes
+-> Continuity QC
+-> Review / Approve
+-> Video Generation
+-> VO / BGM / SFX / Ambience
+-> Auto Assembly
+-> Final QC
+-> Final Approval
+-> Render / Export
+```
+
+The user must be able to stop at Story or Storyboard before generating detailed shots/images/video and consuming expensive provider credits.
+
+### Guided Flexibility
+
+The UI should always suggest a sensible next action, use safe defaults and progressive disclosure, avoid dead ends, explain failures in plain language and preserve Advanced controls without trapping the user in a rigid wizard.
+
+### Audio
+
+Audio Production is Core V1 and must include VO, BGM, SFX, ambience, basic mixing/fades/mute/volume and basic auto-ducking. Advanced DAW-style editing is outside V1.
 
 ---
 
@@ -89,27 +154,25 @@ The earliest planned implementation point for base Video Mode configuration is P
 
 ```text
 Owner = final human authority / UAT / merge approval
-ChatGPT = Control Plane / Architect / Independent Reviewer
+ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
 Antigravity = bounded low-credit Execution Plane when explicitly authorized
 Codex = STOP by default
 Claude Code = STOP
 ```
 
-GitHub connector write access is available to ChatGPT for repository control work such as Issue/PR/document operations. Direct `main` writes and merges still require governance/Owner approval.
-
-The local Antigravity watcher/dispatcher is PAUSED. Do not depend on it for production execution until separate no-credit UAT passes.
+The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a production dependency.
 
 ---
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD.
+1. Fresh-fetch current `main` HEAD and PR #25 HEAD.
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
 5. Read `DOCUMENT_INDEX.md`.
 6. Read this handoff.
-7. Read `VIDEO_PRODUCTION_MODES.md` for product/mode work.
-8. Read the exact active WP contract before implementation.
+7. Read `VIDEO_PRODUCTION_MODES.md`, `PRODUCT_VISION.md`, `USER_WORKFLOW.md` and only other documents directly relevant to the active task.
+8. Read Issue #24 plus all Product Lock / UX addendum comments and the latest PR #25 review/corrective comment.
 9. Do not repeat closed work.
-10. Do not start the next WP without explicit Owner authorization.
+10. Do not start the next WP or merge without explicit Owner authorization.

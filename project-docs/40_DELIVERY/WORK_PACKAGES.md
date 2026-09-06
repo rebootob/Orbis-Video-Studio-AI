@@ -8,11 +8,13 @@
 
 Orbis Video Studio AI is delivered through discrete, bounded Work Packages. Every WP requires explicit Owner authorization before implementation. Completion of one WP never auto-authorizes the next.
 
+The product direction is automation-first: Orbis should orchestrate external Creative, Image, Video and Audio AI services behind adapters while owning the production state, approvals, history, cost control, QC, assembly and export workflow.
+
 ```mermaid
 graph TD
     P0["P0 Foundation & Governance"] --> P1["P1 Core Architecture & Data Engine"]
-    P1 --> P2["P2 Generation & Production Pipeline"]
-    P2 --> P3["P3 Audio, Timeline & Cloud Render"]
+    P1 --> P2["P2 Generation, Workspace & Production Orchestration"]
+    P2 --> P3["P3 Audio, Assembly, QC & Cloud Render"]
     P3 --> P4["P4 Multi-Output, Export & Core V1"]
     P4 -.-> PX["Post-Core V1 / V1.x Integrations"]
 ```
@@ -44,57 +46,85 @@ graph TD
   - **PR:** #15
   - **Reviewed Head:** `5a03d4d7f56ac8ae39a78914276610c0512da78b`
   - **Merge Commit:** `9cb098dea7fc2948b023ad48163c729f566573a7`
-  - **Scope delivered:** provider-neutral Vidu adapter, durable DB-backed queue/worker, idempotency, claim/lease fencing, bounded retry/poll scheduling, cancellation, ambiguous-submission reconciliation, secret/result safety, migration lifecycle and mocked provider tests.
-
----
-
-## 3. Next Candidate Work Package
 
 - **P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration**
-  - **Status:** **PROPOSED / NOT AUTHORIZED**
-  - **Proposal:** [`P2_WP008_PROPOSAL.md`](P2_WP008_PROPOSAL.md)
-  - **Candidate scope:**
-    - hybrid shot sources: AI generated / imported video / imported image / recorded / stock / mixed
-    - granular lock state machine
-    - base provider-neutral `video_mode` configuration
-    - initial V1 modes: STORY / SHORT / LOOP / SCENE
-    - Story optional at Project level when mode does not require it
-    - preserve WP006 references and WP007 provider/queue boundaries
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #19
+  - **Reviewed Head:** `a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797`
+  - **Merge Commit:** `a360c3b38d1d962f9f3c5f6412e3107e90fae7db`
+
+- **P2-WP009 — Cost Control & Granular Usage Audit Ledger**
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #23
+  - **Reviewed Head:** `250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa`
+  - **Merge Commit:** `9f094a5cbe9a4faeb5741231d0a819da0da283c1`
+  - **Scope delivered:** provider-neutral usage ledger, configurable pricing service, project budget controls, manual adjustment audit, DB-level idempotency/uniqueness and concurrency-safe accounting behavior.
 
 ---
 
-## 4. Remaining Proposed Roadmap
+## 3. Active Work Package
 
-### Phase 2 — AI Generation & Production Pipeline
+- **P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX**
+  - **Status:** **AUTHORIZED / FIRST PASS IMPLEMENTED / CHANGES REQUIRED**
+  - **Issue:** #24
+  - **PR:** #25
+  - **Branch:** `ai/p2-wp010-mode-aware-web-workspace`
+  - **Last reviewed Head:** `291ea773681831a0a68e585eb7e0664902102be3`
+  - **Current gate:** Antigravity corrective on the same branch/PR -> ChatGPT independent review -> Owner merge decision.
 
-- **P2-WP009 — Cost Control & Granular Usage Audit Ledger**
+### WP010 corrective focus
+
+- preserve full history; remove unsafe hard-delete behavior
+- multi-project dashboard usability
+- approval-gated staged workflow: Story -> Storyboard -> Shot Plan -> Images -> Video
+- Guided Flexibility / Next Recommended Action
+- real reference upload and truthful UI states
+- Generate Selected / continue incomplete / actionable queue behavior
+- safe cost confirmation before chargeable batch generation
+- lightweight History / Version entry point
+- reorder/autosave/unsaved-state readiness
+- safe CORS configuration
+- keep the UI professional, simple and progressively disclose advanced controls
+
+WP010 must not expand into the full audio engine, final renderer or WP011 implementation.
+
+---
+
+## 4. Remaining Roadmap — Direction After WP010
+
+The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
+
+### Phase 2 — Production Orchestration & Generation
+
+- **P2-WP011 — Selective / Batch Regeneration & Resume Service**
   - **Status:** PROPOSED / NOT AUTHORIZED
-  - Budget caps, provider usage logging and auditable cost controls.
+  - Regenerate selected unlocked/failed/incomplete work only; preserve completed assets and history.
 
-- **P2-WP010 — Mode-Aware Web Workspace: Storyboard & Shot Grid**
+- **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
   - **Status:** PROPOSED / NOT AUTHORIZED
-  - Browser project creation, Video Mode selection, reference/document upload, mode-aware creative editor and shot grid.
+  - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior.
 
-- **P2-WP011 — Selective Shot Regeneration Service**
+- **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
   - **Status:** PROPOSED / NOT AUTHORIZED
-  - Target unlocked shots only, lock validation and provider-neutral regeneration dispatch.
+  - Dedicated ImageProvider abstraction, batch storyboard/keyframe generation, continuity/reference mapping and retry/resume.
 
-### Phase 3 — Audio, Timeline Editing & Cloud Rendering
+### Phase 3 — Audio, Assembly, QC & Cloud Rendering
 
-- **P3-WP012 — Audio Production & Voice Over / TTS Service**
+- **P3-WP014 — Core V1 Audio Production Automation**
   - **Status:** PROPOSED / NOT AUTHORIZED
+  - VO, BGM, SFX, ambience, batch audio planning/generation/assignment and basic mixing/ducking.
 
-- **P3-WP013 — Subtitle Generator & Auto-Ducking Processor**
+- **P3-WP015 — Simplified Assembly / Timeline Preview**
   - **Status:** PROPOSED / NOT AUTHORIZED
+  - Shot ordering, duration, simple trim, basic audio layers and preview; not a Premiere-class editor.
 
-- **P3-WP014 — Simplified Multi-Track Timeline Preview Engine**
+- **P3-WP016 — QC / Approval Pipeline**
   - **Status:** PROPOSED / NOT AUTHORIZED
+  - Continuity checks, missing-asset checks, final review and explicit approval semantics.
 
-- **P3-WP015 — Cloud FFmpeg Video Render Workers**
+- **P3-WP017 — Cloud Render Workers**
   - **Status:** PROPOSED / NOT AUTHORIZED
-
-- **P3-WP016 — Human Approval Gates & QC Review Pipeline**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - Final assembly/render after approval, preserving deterministic job control and auditability.
 
 ### Phase 4 — Multi-Output, Export & Core V1 Release
 
@@ -110,13 +140,26 @@ graph TD
 
 ### Post-Core V1 / V1.x
 
-- **P4-WP017 — Full Operational Integration Gateway (Hermes / n8n)**
+- **Full Operational Integration Gateway (Hermes / n8n / external agents)**
   - **Status:** PROPOSED / POST-CORE V1 / V1.x
-  - Architecture readiness remains a V1 requirement; full operational integration must not block Core V1.
+  - Architecture readiness remains a V1 design requirement; full operational integration must not block Core V1.
 
 ---
 
-## 5. Mode Expansion Rule
+## 5. Product Locks Governing Future WPs
+
+```text
+MULTI_PROJECT = REQUIRED
+FULL_HISTORY_RETENTION = REQUIRED
+NO_SILENT_HISTORY_LOSS = REQUIRED
+AUTOMATION_FIRST = REQUIRED
+HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
+APPROVAL_GATED_AUTOMATION = REQUIRED
+GUIDED_FLEXIBILITY = REQUIRED
+AUDIO_PRODUCTION = CORE_V1_REQUIRED
+PROVIDER_INDEPENDENCE = REQUIRED
+LOCAL_AI = DISALLOWED
+```
 
 Core V1 modes:
 
