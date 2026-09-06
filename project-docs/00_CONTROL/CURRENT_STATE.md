@@ -11,7 +11,7 @@ Live GitHub/repository truth newer than this document is authoritative.
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-CURRENT_MAIN_HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+CURRENT_MAIN_HEAD_AT_HANDOFF: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -27,11 +27,12 @@ ACTIVE_ISSUE: "#24"
 ACTIVE_PR: "#25"
 ACTIVE_BRANCH: ai/p2-wp010-mode-aware-web-workspace
 INITIAL_REVIEWED_HEAD: 291ea773681831a0a68e585eb7e0664902102be3
-CURRENT_PR_HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
+LATEST_CORRECTIVE_CODE_HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
+CURRENT_PR_HEAD: FRESH_FETCH_REQUIRED
 CURRENT_GATE: CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
 P2-WP010: NOT READY TO MERGE UNTIL RE-REVIEW PASS
 
-CI_AT_CURRENT_HEAD:
+CI_AT_LATEST_CORRECTIVE_CODE_HEAD:
   backend-tests: PASS
   frontend-tests: PASS
 
@@ -40,6 +41,8 @@ CODEX: STOP BY DEFAULT
 CLAUDE_CODE: STOP
 WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 ```
+
+`LATEST_CORRECTIVE_CODE_HEAD` identifies the latest implementation/corrective code commit known at handoff. Documentation-sync commits may appear after it on PR #25, so every session must fresh-fetch the exact current PR HEAD before review or merge decisions.
 
 ---
 
@@ -52,7 +55,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 - Review conversations must be resolved before merge.
 - Force push and deletion of `main` are blocked.
 - Head branches are automatically deleted after merge.
-- Frontend CI workflow exists in the active WP010 PR and is green at current HEAD.
+- Frontend CI workflow exists in the active WP010 PR and was green at the latest corrective code HEAD.
 
 ---
 
@@ -69,7 +72,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | Provider-neutral adapter/queue, idempotency, reconciliation, cancellation and secret safety. |
 | Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | PR #19 merged; hybrid shots, ownership validation, lock machine, V1 modes, config inheritance. |
 | Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | PR #23 merged; provider-neutral ledger, budget controls, pricing abstraction, manual adjustments, migration 009. |
-| Mode-Aware Web Workspace (P2-WP010) | WAITING RE-REVIEW | PR #25 corrective commit pushed; CI green; exact corrective diff still requires independent review. |
+| Mode-Aware Web Workspace (P2-WP010) | WAITING RE-REVIEW | PR #25 corrective code was pushed; both CI workflows were green at that code HEAD; exact current PR HEAD still requires independent review. |
 | Watcher / Dispatcher automation | PAUSED | Not a production execution dependency. |
 
 ---
@@ -94,16 +97,16 @@ Blocking areas were:
 12. unsafe CORS configuration
 13. additional truthful progress, language and status-validation issues
 
-Antigravity then pushed corrective commit:
+Antigravity then pushed corrective code commit:
 
 `a687c7adca1bf204767410d51ef0e1cad3ee9436`
 
 Commit message:
 `fix(wp010): address review blockers with soft retention, cost confirmation, staged workflow, and truthful readiness`
 
-Both backend and frontend GitHub Actions are green at this corrective HEAD.
+Both backend and frontend GitHub Actions were green at this corrective code HEAD.
 
-**Important:** previous blockers are not considered closed merely because a corrective commit and green CI exist. ChatGPT must independently review the exact new HEAD.
+**Important:** previous blockers are not considered closed merely because a corrective commit and green CI exist. ChatGPT must independently review the exact current PR HEAD, using `a687c7ad...` as the corrective-code baseline and distinguishing later docs-only commits from implementation changes.
 
 ---
 
@@ -136,9 +139,10 @@ Story is optional at Project level. Video Mode remains separate from Purpose, Ta
 ## Next Allowed Action
 
 1. Keep WP006-WP009 closed unless a proven regression exists.
-2. ChatGPT independently re-review exact PR #25 HEAD `a687c7adca1bf204767410d51ef0e1cad3ee9436` against Issue #24 and the prior blocking findings.
-3. If PASS: report READY TO MERGE and wait for explicit Owner merge approval.
-4. If findings remain: send only bounded corrective findings back to Antigravity on the SAME branch/PR.
-5. Do not create a replacement PR.
-6. Do not start WP011.
-7. Do not merge until ChatGPT PASS and explicit Owner approval.
+2. Fresh-fetch PR #25 current HEAD/state/CI/comments.
+3. ChatGPT independently re-review the exact current PR #25 HEAD against Issue #24 and the prior blocking findings, using `a687c7ad...` as the latest known corrective-code baseline.
+4. If PASS: report READY TO MERGE and wait for explicit Owner merge approval.
+5. If findings remain: send only bounded corrective findings back to Antigravity on the SAME branch/PR.
+6. Do not create a replacement PR.
+7. Do not start WP011.
+8. Do not merge until ChatGPT PASS and explicit Owner approval.

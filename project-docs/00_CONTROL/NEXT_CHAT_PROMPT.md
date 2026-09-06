@@ -21,7 +21,7 @@ ROLE MODEL:
 IMPORTANT:
 Fresh-fetch current GitHub/repository truth FIRST.
 Repository truth newer than this prompt or documentation is authoritative.
-Do not assume the SHAs below are still current if GitHub has advanced.
+Do not assume any recorded SHA is still the current PR HEAD.
 
 READ IN EXACT ORDER:
 1. AGENTS.md
@@ -32,7 +32,7 @@ READ IN EXACT ORDER:
 6. project-docs/00_CONTROL/CHAT_HANDOFF.md
 7. project-docs/30_PRODUCT/VIDEO_PRODUCTION_MODES.md
 8. GitHub Issue #24
-9. PR #25 metadata, latest commits, CI, review comments and exact corrective diff
+9. PR #25 metadata, latest commits, CI, review comments and exact current diff
 10. only other directly relevant routed documents/code
 
 KNOWN COMPLETED STATE AT HANDOFF:
@@ -48,6 +48,7 @@ P2-WP009 = PASS / CLOSED / MERGED — PR #23
 
 KNOWN MAIN HEAD AT HANDOFF:
 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+(Fresh-fetch; this may have advanced.)
 
 ACTIVE WORK PACKAGE:
 P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
@@ -67,22 +68,25 @@ INITIAL REVIEWED HEAD:
 INITIAL REVIEW VERDICT:
 CHANGES REQUIRED / NOT READY TO MERGE
 
-CURRENT CORRECTIVE HEAD AT HANDOFF:
+LATEST KNOWN CORRECTIVE CODE HEAD:
 a687c7adca1bf204767410d51ef0e1cad3ee9436
 
 CORRECTIVE COMMIT MESSAGE:
 fix(wp010): address review blockers with soft retention, cost confirmation, staged workflow, and truthful readiness
 
-CI AT CURRENT CORRECTIVE HEAD:
+CI AT THAT CORRECTIVE CODE HEAD:
 backend-tests = PASS
 frontend-tests = PASS
+
+NOTE:
+Documentation-sync commits may follow the corrective code commit on the same PR. Fresh-fetch the exact PR HEAD and distinguish docs-only commits from implementation commits.
 
 CURRENT GATE:
 WAITING CHATGPT INDEPENDENT RE-REVIEW
 
 DO NOT ASSUME THE CORRECTIVE IS PASS JUST BECAUSE CI IS GREEN.
 
-PREVIOUS BLOCKERS THAT MUST BE RE-VERIFIED AGAINST THE CURRENT EXACT HEAD:
+PREVIOUS BLOCKERS THAT MUST BE RE-VERIFIED AGAINST THE CURRENT EXACT PR STATE:
 1. safe retention/archive instead of destructive hard delete
 2. staged Story -> Storyboard -> Shot Plan -> Images -> Video review gates
 3. state-aware Next Best Action / Guided Flexibility
@@ -116,10 +120,10 @@ LOW-CREDIT POLICY:
 - Codex must not duplicate Antigravity implementation/test loops
 
 FIRST ACTION IN THE NEW CHAT:
-1. Fresh-fetch live main HEAD and PR #25 HEAD/state/CI/comments.
-2. Report whether PR #25 has advanced beyond a687c7adca1bf204767410d51ef0e1cad3ee9436.
-3. Independently review the exact CURRENT PR #25 corrective HEAD against Issue #24 and the prior blocking findings.
-4. If PASS, report PASS / READY TO MERGE and wait for Owner approval.
+1. Fresh-fetch live main HEAD and PR #25 exact HEAD/state/CI/comments.
+2. Identify which commits are implementation/corrective vs documentation-only.
+3. Independently review the exact CURRENT PR #25 state against Issue #24 and the prior blocking findings, using a687c7adca1bf204767410d51ef0e1cad3ee9436 as the latest known corrective-code baseline.
+4. If PASS, report PASS / READY TO MERGE at the exact reviewed HEAD and wait for Owner approval.
 5. If findings remain, prepare only bounded corrective instructions for Antigravity on the SAME branch/PR.
 6. Do not merge and do not start WP011 automatically.
 ```

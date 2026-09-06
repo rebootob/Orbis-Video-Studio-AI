@@ -28,10 +28,12 @@ Existing PR:
 Initial reviewed HEAD:
 `291ea773681831a0a68e585eb7e0664902102be3`
 
-Current corrective HEAD:
+Latest known corrective **code** HEAD:
 `a687c7adca1bf204767410d51ef0e1cad3ee9436`
 
-Current CI:
+Documentation-sync commits may follow the corrective code commit; therefore the exact current PR HEAD must always be fresh-fetched before review.
+
+CI at the corrective code HEAD:
 - `backend-tests` PASS
 - `frontend-tests` PASS
 
@@ -50,15 +52,15 @@ Deliver a safe, first-time-user-friendly, mode-aware browser workspace for STORY
 
 The initial implementation at `291ea773...` received CHANGES REQUIRED for history retention, staged review workflow, guided next action, multi-project completeness, real upload/reference UX, truthful history/audio/QC semantics, approval/status safety, cost-safe selected/batch generation, storyboard editing/autosave, provider neutrality, truthful progress/language/status handling, and CORS.
 
-Antigravity pushed corrective commit `a687c7ad...` claiming to address those review blockers. CI is green at the new HEAD.
+Antigravity pushed corrective code commit `a687c7ad...` claiming to address those review blockers. CI was green at that code HEAD.
 
-Do not assume any blocker is closed until ChatGPT independently verifies the corrective diff and behavior.
+Do not assume any blocker is closed until ChatGPT independently verifies the corrective diff and exact current PR state.
 
 ---
 
 ## Current Required Action
 
-ChatGPT independent re-review of the exact current PR #25 HEAD.
+ChatGPT independent re-review of the exact current PR #25 HEAD after a fresh fetch.
 
 Review priorities:
 
@@ -109,7 +111,9 @@ Claude Code = STOP
 
 ## Next Allowed Action
 
-ChatGPT re-review PR #25 exact current HEAD.
+Fresh-fetch and re-review PR #25 exact current HEAD.
+
+Use `a687c7adca1bf204767410d51ef0e1cad3ee9436` as the latest known corrective-code baseline, not as an assumption that it is still the PR HEAD.
 
 If PASS: wait for Owner merge approval.
 

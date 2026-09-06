@@ -24,11 +24,11 @@ P2-WP008 = PASS / CLOSED / MERGED — PR #19
 P2-WP009 = PASS / CLOSED / MERGED — PR #23
 ```
 
-Current live `main` at this handoff:
+Known live `main` at this handoff:
 
 `9f094a5cbe9a4faeb5741231d0a819da0da283c1`
 
-WP009 merge delivered provider-neutral cost/usage ledger, project budget controls, provider pricing abstraction, adjustment audit trail, query/summary support and migration 009.
+Always fresh-fetch before relying on this SHA.
 
 ---
 
@@ -53,30 +53,35 @@ Issue: #24
 PR: #25
 Branch: ai/p2-wp010-mode-aware-web-workspace
 Initial reviewed HEAD: 291ea773681831a0a68e585eb7e0664902102be3
-Current corrective HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
+Latest known corrective CODE HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
+Exact current PR HEAD: FRESH_FETCH_REQUIRED
 Status: CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
 ```
 
 Initial review at `291ea773...` returned **CHANGES REQUIRED / NOT READY TO MERGE** with blockers covering retention, staged review flow, guided next action, multi-project completeness, real upload/reference UX, truthful history/audio/QC, approval/status safety, cost-safe selected/batch generation, storyboard editing/autosave, provider neutrality, truthful progress/language/status, and CORS.
 
-Antigravity pushed corrective commit `a687c7ad...` with message:
+Antigravity pushed corrective code commit `a687c7ad...` with message:
 
 `fix(wp010): address review blockers with soft retention, cost confirmation, staged workflow, and truthful readiness`
 
-At the current corrective HEAD:
+At that corrective code HEAD:
 - `backend-tests` = PASS
 - `frontend-tests` = PASS
 
-These CI results do not prove the previous review findings are closed. The exact corrective diff now requires independent ChatGPT re-review.
+Documentation-sync commits may follow that code commit on the same PR. Therefore the next reviewer must fresh-fetch the exact current PR HEAD and distinguish docs-only commits from the corrective implementation diff.
+
+These CI results do not prove the previous review findings are closed.
 
 ---
 
 ## Exact Next Step
 
-**ChatGPT independently re-review PR #25 at exact current HEAD `a687c7adca1bf204767410d51ef0e1cad3ee9436`.**
+**ChatGPT fresh-fetches and independently re-reviews PR #25 at its exact current HEAD.**
+
+Use `a687c7adca1bf204767410d51ef0e1cad3ee9436` as the latest known corrective-code baseline.
 
 If PASS:
-1. Report PASS / READY TO MERGE at the exact HEAD.
+1. Report PASS / READY TO MERGE at the exact reviewed PR HEAD.
 2. Wait for explicit Owner approval.
 3. Do not merge automatically.
 
@@ -131,7 +136,7 @@ Claude Code = STOP
 ## Mandatory Resume Procedure
 
 1. Read root `AGENTS.md`.
-2. Fresh-fetch current `main` HEAD and PR #25 HEAD/state/CI.
+2. Fresh-fetch current `main` HEAD and PR #25 exact HEAD/state/CI.
 3. Read `START_HERE.md`.
 4. Read `CURRENT_STATE.md`.
 5. Read `ACTIVE_TASK.md`.
@@ -140,5 +145,5 @@ Claude Code = STOP
 8. Read `VIDEO_PRODUCTION_MODES.md`.
 9. Read GitHub Issue #24 and latest PR #25 review comments.
 10. Independently inspect the exact current PR #25 diff; do not rely only on Antigravity's commit message.
-11. If PR #25 HEAD advanced beyond the handoff HEAD, review the newer repository truth instead.
+11. If PR #25 HEAD advanced beyond the latest known corrective code commit, classify later commits (e.g. docs-only vs implementation) and review the actual current repository truth.
 12. Do not repeat closed WPs and do not start WP011 automatically.
