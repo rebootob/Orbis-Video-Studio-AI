@@ -1170,3 +1170,68 @@ def test_with_video_generation_mode_safety_and_blocker(db_session: Session):
         assert "WITH_VIDEO_REQUIRES_VIDEO_REGENERATION" in exc_d.value.detail
         # Prove AudioProvider was NEVER called!
         assert mock_get_audio_provider.call_count == 0
+
+
+def test_canonical_video_provider_resolution_ignores_newer_image_jobs(db_session: Session):
+    """Verify that generate_audio_plan ignores newer IMAGE/KEYFRAME jobs and uses canonical VIDEO job provider truth."""
+    from datetime import timedelta
+    ProviderFactory.register("mock_native_video", MockNativeAudioVideoAdapter)
+
+    project = Project(id=uuid.uuid4(), title="Canonical Resolution Test Project", video_mode="STORY")
+    db_session.add(project)
+    db_session.flush()
+
+    scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=1, heading="INT. SCENE")
+    db_session.add(scene)
+    db_session.flush()
+
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        source_metadata={"is_dialogue": True, "dialogue_text": "Canonical test dialogue", "speaker_name": "Hero"},
+        duration_seconds=4.0,
+    )
+    db_session.add(shot)
+    db_session.flush()
+
+    from datetime import datetime, timezone, timedelta
+    from app.models.generation_job import GenerationJob
+    now = datetime.now(timezone.utc)
+
+    # 1. Older VIDEO job with native-audio-capable provider ("mock_native_video")
+    older_video_job = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=shot.id,
+        job_type="VIDEO",
+        provider_name="mock_native_video",
+        status="COMPLETED",
+        created_at=now - timedelta(hours=2),
+        updated_at=now - timedelta(hours=2),
+    )
+    db_session.add(older_video_job)
+
+    # 2. Newer IMAGE job with non-video provider ("mock_image_provider")
+    newer_image_job = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=shot.id,
+        job_type="IMAGE",
+        provider_name="mock_image_provider",
+        status="COMPLETED",
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(newer_image_job)
+    db_session.commit()
+
+    # Generate Audio Plan without passing explicit video_provider_name
+    plan = AudioProductionService.generate_audio_plan(db_session, project.id)
+
+    # Verify Dialogue clip classification uses the VIDEO job provider ("mock_native_video")
+    clips = db_session.query(AudioClip).filter(AudioClip.project_id == project.id).all()
+    dialogue_clip = next(c for c in clips if c.audio_type == AudioType.DIALOGUE.value)
+
+    # Must recommend WITH_VIDEO because mock_native_video supports native audio!
+    assert dialogue_clip.generation_mode == AudioGenerationMode.WITH_VIDEO.value
+    # IMAGE job provider must NOT affect WITH_VIDEO decision

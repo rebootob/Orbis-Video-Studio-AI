@@ -360,18 +360,43 @@ class AudioProductionService:
             )
 
         # 1. CANONICAL PROVIDER-CAPABILITY ROUTING
-        # Resolve selected/current VideoProvider capability truth
+        # Resolution order:
+        # A. Explicit / project-configured selected VideoProvider
+        # B. Latest canonical VIDEO GenerationJob provider (job_type == "VIDEO")
+        # C. ProviderFactory default video provider
         eff_video_provider = video_provider_name
+
+        if not eff_video_provider and project:
+            for cfg_attr in ("provider_config", "default_config", "mode_config"):
+                cfg_val = getattr(project, cfg_attr, None)
+                if isinstance(cfg_val, dict):
+                    cand = (
+                        cfg_val.get("video_provider")
+                        or cfg_val.get("video_provider_name")
+                        or cfg_val.get("default_video_provider")
+                        or cfg_val.get("provider_name")
+                    )
+                    if cand:
+                        eff_video_provider = str(cand)
+                        break
+
         if not eff_video_provider and shots:
             shot_ids = [sh.id for sh in shots]
             latest_video_job = (
                 db.query(GenerationJob)
-                .filter(GenerationJob.shot_id.in_(shot_ids))
+                .filter(
+                    GenerationJob.shot_id.in_(shot_ids),
+                    GenerationJob.job_type == "VIDEO",
+                )
                 .order_by(GenerationJob.created_at.desc())
                 .first()
             )
             if latest_video_job and latest_video_job.provider_name:
                 eff_video_provider = latest_video_job.provider_name
+
+        if not eff_video_provider:
+            from app.providers.factory import ProviderFactory
+            eff_video_provider = ProviderFactory.get_default_provider_name()
 
         from app.providers.factory import ProviderFactory
         video_supports_native_audio = False
