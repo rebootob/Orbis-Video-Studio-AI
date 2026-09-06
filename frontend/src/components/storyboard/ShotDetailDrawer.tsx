@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Shot, ShotType, GenerationJob } from '../../api/types';
 import {
   X,
@@ -44,10 +44,13 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'SAVED' | 'SAVING' | 'DIRTY' | null>(null);
+
+  const isInitialMount = useRef(true);
 
   useEffect(() => {
     if (shot) {
+      isInitialMount.current = true;
       setVisualPrompt(shot.visual_prompt || shot.video_prompt || '');
       setShotType(shot.shot_type);
       setDurationSeconds(shot.duration_seconds || 4);
@@ -58,12 +61,20 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
     }
   }, [shot]);
 
+  // Mark dirty when user types
+  const markDirty = () => {
+    if (!shot?.is_locked) {
+      setSaveStatus('DIRTY');
+    }
+  };
+
   if (!shot) return null;
 
   const handleSave = async () => {
     if (shot.is_locked) return;
     try {
       setSaving(true);
+      setSaveStatus('SAVING');
       await onUpdateShot(shot.id, {
         visual_prompt: visualPrompt,
         video_prompt: visualPrompt,
@@ -73,10 +84,11 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         subject: subject || undefined,
         action: action || undefined,
       });
-      setSaveStatus('Saved');
-      setTimeout(() => setSaveStatus(null), 2000);
+      setSaveStatus('SAVED');
+      setTimeout(() => setSaveStatus(null), 2500);
     } catch (err: any) {
       alert(`Save failed: ${err.message}`);
+      setSaveStatus('DIRTY');
     } finally {
       setSaving(false);
     }
@@ -197,7 +209,7 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         {shot.is_locked && (
           <div className="alert alert-warning" style={{ fontSize: '0.75rem', padding: '8px 12px' }}>
             <AlertCircle size={14} />
-            This shot is locked. Changes and regeneration are disabled until unlocked.
+            This shot is locked. Modifications and regeneration are prevented until unlocked.
           </div>
         )}
 
@@ -207,7 +219,10 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
           <textarea
             rows={4}
             value={visualPrompt}
-            onChange={(e) => setVisualPrompt(e.target.value)}
+            onChange={(e) => {
+              setVisualPrompt(e.target.value);
+              markDirty();
+            }}
             disabled={shot.is_locked}
             placeholder="Describe camera movement, action, character, and visual tone..."
             style={{ resize: 'vertical' }}
@@ -221,7 +236,10 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
             <label className="form-label">Source Type</label>
             <select
               value={shotType}
-              onChange={(e) => setShotType(e.target.value as ShotType)}
+              onChange={(e) => {
+                setShotType(e.target.value as ShotType);
+                markDirty();
+              }}
               disabled={shot.is_locked}
             >
               <option value="AI_GENERATED">AI GENERATED</option>
@@ -242,7 +260,10 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
                 max="30"
                 step="0.5"
                 value={durationSeconds}
-                onChange={(e) => setDurationSeconds(Number(e.target.value))}
+                onChange={(e) => {
+                  setDurationSeconds(Number(e.target.value));
+                  markDirty();
+                }}
                 disabled={shot.is_locked}
               />
               <Clock size={16} color="var(--text-muted)" />
@@ -256,9 +277,12 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
           <input
             type="text"
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) => {
+              setSubject(e.target.value);
+              markDirty();
+            }}
             disabled={shot.is_locked}
-            placeholder="e.g., Detective Vance holding flashlight"
+            placeholder="e.g., Lead detective holding torch"
           />
         </div>
 
@@ -267,13 +291,16 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
           <input
             type="text"
             value={camera}
-            onChange={(e) => setCamera(e.target.value)}
+            onChange={(e) => {
+              setCamera(e.target.value);
+              markDirty();
+            }}
             disabled={shot.is_locked}
-            placeholder="e.g., Low angle tracking shot moving left"
+            placeholder="e.g., Low angle tracking shot moving right"
           />
         </div>
 
-        {/* Advanced Mode Toggle */}
+        {/* Advanced Provider & Inherited Config Toggle */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
           <button
             type="button"
@@ -281,7 +308,7 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
             style={{ width: '100%', justifyContent: 'space-between' }}
             onClick={() => setShowAdvanced(!showAdvanced)}
           >
-            <span>Advanced Provider & Inherited Config</span>
+            <span>Advanced Configuration & Inherited Bibles</span>
             {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
 
@@ -297,10 +324,10 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
                 lineHeight: '1.5',
               }}
             >
-              <div><strong>Inherited Platform Aspect:</strong> Auto-resolved from project</div>
-              <div><strong>Default Provider:</strong> Vidu (via adapter boundary)</div>
-              <div><strong>Generation Model:</strong> vidu-high-consistency</div>
-              <div><strong>Audio Track Entry:</strong> Sync ready (Core V1)</div>
+              <div><strong>Aspect Ratio:</strong> Inherited from project setting</div>
+              <div><strong>Provider Routing:</strong> Provider-neutral queue dispatch</div>
+              <div><strong>Audit Ledger:</strong> Cost idempotency & reservation enabled</div>
+              <div><strong>Lock Integrity:</strong> Enforced by server state machine</div>
             </div>
           )}
         </div>
@@ -330,11 +357,22 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {saveStatus && (
+          {saveStatus === 'SAVED' && (
             <span style={{ fontSize: '0.75rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <CheckCircle2 size={12} /> {saveStatus}
+              <CheckCircle2 size={12} /> All changes saved
             </span>
           )}
+          {saveStatus === 'SAVING' && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Saving...
+            </span>
+          )}
+          {saveStatus === 'DIRTY' && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent-amber)' }}>
+              Unsaved changes
+            </span>
+          )}
+
           <button
             className="btn btn-primary btn-sm"
             onClick={handleSave}

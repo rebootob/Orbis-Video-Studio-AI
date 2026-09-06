@@ -187,3 +187,37 @@ export interface ReferenceItem {
   visual_traits?: Record<string, any> | null;
   is_locked?: boolean;
 }
+
+export interface BatchJobEstimateResponse {
+  shot_count: number;
+  estimated_cost_total?: number | null;
+  currency: string;
+  has_unknown_pricing: boolean;
+  warning_messages: string[];
+}
+
+export interface BatchJobCreatePayload {
+  shot_ids?: string[] | null;
+  provider_name?: string | null;
+  only_incomplete?: boolean;
+}
+
+export interface ReorderItem {
+  id: string;
+  order: number;
+}
+
+export interface ReorderPayload {
+  items: ReorderItem[];
+}
+
+export interface AssetUploadResponse {
+  id: string;
+  project_id?: string | null;
+  asset_type: string;
+  original_filename: string;
+  file_path: string;
+  file_size_bytes?: number | null;
+  mime_type?: string | null;
+  created_at: string;
+}

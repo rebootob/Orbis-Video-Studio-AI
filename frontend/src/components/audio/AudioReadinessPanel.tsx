@@ -9,31 +9,31 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
   const audioStems = [
     {
       id: 'vo',
-      name: 'Voiceover (VO) / Narration',
+      name: 'Voiceover (VO) / Dialogue Stem',
       icon: <Mic size={18} color="#818cf8" />,
-      status: 'Awaiting Script Approval',
-      desc: 'Automatic ElevenLabs / OpenAI TTS voiceover track linked to scene narrations.',
+      status: 'Architectural Allocation Ready',
+      desc: 'Schema track slot allocated to receive synthesized narration or recorded speech once audio provider is integrated.',
     },
     {
       id: 'bgm',
-      name: 'Background Music (BGM)',
+      name: 'Background Score / Music Track',
       icon: <Music size={18} color="#fbbf24" />,
-      status: 'Dynamic Beat Alignment Ready',
-      desc: 'Adaptive cinematic soundtrack synced to shot duration cuts.',
+      status: 'Timing Alignment Ready',
+      desc: 'Music track blueprint mapped to total shot timeline and cut markers.',
     },
     {
       id: 'sfx',
       name: 'Sound Effects (SFX)',
       icon: <Sparkles size={18} color="#34d399" />,
-      status: 'Cue Points Mapped',
-      desc: 'Foley and action-synced sound cues based on shot action tags.',
+      status: 'Cue Slot Allocation',
+      desc: 'Action-specific sound design cues aligned with individual shot action blueprints.',
     },
     {
       id: 'ambience',
-      name: 'Environmental Ambience',
+      name: 'Environmental Room Tone & Ambience',
       icon: <Wind size={18} color="#22d3ee" />,
-      status: 'Setting Context Active',
-      desc: 'Continuous room tone and atmospheric presence derived from scene setting.',
+      status: 'Setting Context Mapped',
+      desc: 'Atmospheric audio layer derived from scene setting descriptions.',
     },
   ];
 
@@ -55,12 +55,12 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
             Audio Production Readiness (Core V1 Architecture)
           </h3>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Pre-flight stems and ducking pipeline ready for audio rendering
+            Provider-neutral audio stem schema and track layout ready for future audio rendering integration
           </p>
         </div>
       </div>
 
-      {/* Auto-Ducking Mix Spec Banner */}
+      {/* Auto-Ducking & Mix Spec Placeholder */}
       <div
         style={{
           backgroundColor: 'var(--bg-card)',
@@ -76,10 +76,12 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Sliders size={16} color="#818cf8" />
-          <span><strong>Auto-Ducking Engine:</strong> BGM ducks -14dB when VO / Narration is active</span>
+          <span>
+            <strong>Audio Pipeline Allocation:</strong> 4-stem layout (VO, BGM, SFX, Ambience) prepared for pluggable audio engine
+          </span>
         </div>
-        <span className="badge badge-approved" style={{ fontSize: '0.7rem' }}>
-          Configured
+        <span className="badge badge-draft" style={{ fontSize: '0.7rem' }}>
+          Schema Ready
         </span>
       </div>
 
@@ -100,15 +102,30 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {stem.icon}
-                <h4 style={{ fontSize: '0.875rem', fontWeight: 600 }}>{stem.name}</h4>
+                <h4 style={{ fontSize: '0.9375rem', fontWeight: 600 }}>{stem.name}</h4>
               </div>
+            </div>
+
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+              {stem.desc}
+            </p>
+
+            <div
+              style={{
+                marginTop: 'auto',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--border-subtle)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '0.7rem',
+              }}
+            >
+              <span style={{ color: 'var(--text-muted)' }}>Status:</span>
               <span className="badge badge-draft" style={{ fontSize: '0.65rem' }}>
                 {stem.status}
               </span>
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-              {stem.desc}
-            </p>
           </div>
         ))}
       </div>

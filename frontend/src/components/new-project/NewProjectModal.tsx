@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import type { VideoMode, ProjectCreatePayload } from '../../api/types';
-import { X, Sparkles, Film, Repeat, Clapperboard, FileText, CheckCircle2 } from 'lucide-react';
+import { X, Sparkles, Film, Repeat, Clapperboard, Upload } from 'lucide-react';
 
 interface NewProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (payload: ProjectCreatePayload) => Promise<void>;
+  onCreate: (payload: ProjectCreatePayload, file?: File | null) => Promise<void>;
 }
 
 export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClose, onCreate }) => {
@@ -18,8 +18,11 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
   const [language, setLanguage] = useState('English');
   const [automationLevel, setAutomationLevel] = useState<'AUTO' | 'ASSISTED' | 'MANUAL'>('AUTO');
   const [sourceDocName, setSourceDocName] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -46,6 +49,16 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
     },
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      if (!sourceDocName) {
+        setSourceDocName(file.name);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
@@ -67,11 +80,15 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
         mode_config: {
           automation_level: automationLevel,
           language: language,
-          source_document_hint: sourceDocName || undefined,
+          source_document_hint: sourceDocName || selectedFile?.name || undefined,
         },
       };
 
-      await onCreate(payload);
+      if (selectedFile) {
+        await onCreate(payload, selectedFile);
+      } else {
+        await onCreate(payload);
+      }
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to create project');
@@ -98,18 +115,23 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="modal-body">
-            {error && <div className="alert alert-danger">{error}</div>}
+          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {error && (
+              <div className="alert alert-danger" style={{ fontSize: '0.8125rem' }}>
+                {error}
+              </div>
+            )}
 
             {/* 1. Mode Selection */}
-            <div className="form-group">
-              <label className="form-label">Video Production Mode</label>
+            <div>
+              <label className="form-label" style={{ marginBottom: '8px', display: 'block' }}>
+                Choose Production Video Mode
+              </label>
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: '12px',
-                  marginTop: '4px',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '10px',
                 }}
               >
                 {(['STORY', 'SHORT', 'LOOP', 'SCENE'] as VideoMode[]).map((mode) => {
@@ -123,50 +145,40 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
                         if (mode === 'SHORT') {
                           setAspectRatio('9:16');
                           setDurationSeconds(15);
+                          setTargetPlatform('TikTok / Reels / Shorts');
                         } else if (mode === 'LOOP') {
-                          setDurationSeconds(5);
+                          setDurationSeconds(6);
                         } else if (mode === 'STORY') {
                           setAspectRatio('16:9');
                           setDurationSeconds(60);
+                          setTargetPlatform('YouTube');
                         }
                       }}
                       style={{
-                        padding: '12px',
+                        padding: '12px 10px',
                         borderRadius: '8px',
-                        cursor: 'pointer',
                         border: isSelected
                           ? '2px solid var(--primary)'
                           : '1px solid var(--border-default)',
-                        backgroundColor: isSelected
-                          ? 'rgba(79, 70, 229, 0.1)'
-                          : 'var(--bg-input)',
-                        transition: 'all 0.15s ease',
+                        backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.1)' : 'var(--bg-card)',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '6px',
                       }}
                       data-testid={`mode-option-${mode.toLowerCase()}`}
                     >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          marginBottom: '6px',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {item.icon}
-                          <span style={{ fontWeight: '600', fontSize: '0.875rem' }}>
-                            {item.title}
-                          </span>
-                        </div>
-                        {isSelected && <CheckCircle2 size={16} color="var(--primary)" />}
-                      </div>
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: '1.3' }}>
-                        {item.desc}
-                      </p>
+                      {item.icon}
+                      <span style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{item.title}</span>
                     </div>
                   );
                 })}
               </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                {modeDescriptions[videoMode].desc}
+              </p>
             </div>
 
             {/* 2. Project Title & Goal */}
@@ -174,45 +186,45 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
               <label className="form-label">Project Title *</label>
               <input
                 type="text"
-                placeholder="e.g., Cyberpunk Detective Chase"
+                required
+                placeholder="e.g. Cyberpunk Detective Story Ep. 1"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                required
                 data-testid="project-title-input"
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Purpose / Creative Goal</label>
-              <input
-                type="text"
-                placeholder="e.g., Commercial trailer showcasing hero product in dramatic lighting"
+              <label className="form-label">Project Purpose / Logline / Brief</label>
+              <textarea
+                rows={2}
+                placeholder="Describe narrative theme, core message, or target audience..."
                 value={purpose}
                 onChange={(e) => setPurpose(e.target.value)}
               />
             </div>
 
-            {/* 3. Specs Row: Platform, Duration, Aspect Ratio */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+            {/* 3. Specs: Aspect Ratio, Target Duration, Platform, Language */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
               <div className="form-group">
-                <label className="form-label">Platform</label>
+                <label className="form-label">Aspect Ratio</label>
                 <select
-                  value={targetPlatform}
-                  onChange={(e) => setTargetPlatform(e.target.value)}
+                  value={aspectRatio}
+                  onChange={(e) => setAspectRatio(e.target.value)}
                 >
-                  <option value="YouTube">YouTube</option>
-                  <option value="TikTok">TikTok</option>
-                  <option value="Instagram Reels">Instagram Reels</option>
-                  <option value="Cinema">Cinema</option>
-                  <option value="Web">Web / Landing Page</option>
+                  <option value="16:9">16:9 (Landscape / YouTube)</option>
+                  <option value="9:16">9:16 (Vertical / TikTok / Shorts)</option>
+                  <option value="1:1">1:1 (Square / Feed)</option>
+                  <option value="4:5">4:5 (Portrait)</option>
+                  <option value="2.39:1">2.39:1 (Cinematic Anamorphic)</option>
                 </select>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Duration (s)</label>
+                <label className="form-label">Duration (sec)</label>
                 <input
                   type="number"
-                  min="1"
+                  min="3"
                   max="600"
                   value={durationSeconds}
                   onChange={(e) => setDurationSeconds(Number(e.target.value))}
@@ -220,16 +232,16 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
               </div>
 
               <div className="form-group">
-                <label className="form-label">Aspect Ratio</label>
+                <label className="form-label">Platform</label>
                 <select
-                  value={aspectRatio}
-                  onChange={(e) => setAspectRatio(e.target.value)}
+                  value={targetPlatform}
+                  onChange={(e) => setTargetPlatform(e.target.value)}
                 >
-                  <option value="16:9">16:9 (Landscape)</option>
-                  <option value="9:16">9:16 (Vertical)</option>
-                  <option value="1:1">1:1 (Square)</option>
-                  <option value="4:5">4:5 (Social)</option>
-                  <option value="2.39:1">2.39:1 (Anamorphic)</option>
+                  <option value="YouTube">YouTube</option>
+                  <option value="TikTok / Reels / Shorts">TikTok / Shorts / Reels</option>
+                  <option value="Instagram">Instagram</option>
+                  <option value="Broadcast / Film">Broadcast / Film</option>
+                  <option value="Internal / Presentation">Internal / Presentation</option>
                 </select>
               </div>
 
@@ -239,6 +251,7 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
                 >
+                  <option value="Thai">Thai (ภาษาไทย)</option>
                   <option value="English">English</option>
                   <option value="Spanish">Spanish</option>
                   <option value="French">French</option>
@@ -248,7 +261,6 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
                 </select>
               </div>
             </div>
-
 
             {/* 4. Automation Level */}
             <div className="form-group">
@@ -291,10 +303,16 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
             {/* 5. Document Ingestion Entry Point */}
             <div className="form-group">
               <label className="form-label">Source Context / Document (Optional)</label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
-                  placeholder="Paste script title or brief notes..."
+                  placeholder="Paste script title or select reference file..."
                   value={sourceDocName}
                   onChange={(e) => setSourceDocName(e.target.value)}
                   style={{ flex: 1 }}
@@ -302,12 +320,18 @@ export const NewProjectModal: React.FC<NewProjectModalProps> = ({ isOpen, onClos
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  title="Upload reference document"
-                  onClick={() => alert('Document ingestion ready. Additional documents can also be uploaded in the References tab.')}
+                  title="Upload reference document or brief"
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="attach-source-file-btn"
                 >
-                  <FileText size={16} /> Attach
+                  <Upload size={14} /> {selectedFile ? 'Attached' : 'Browse File'}
                 </button>
               </div>
+              {selectedFile && (
+                <span style={{ fontSize: '0.75rem', color: '#10b981', marginTop: '4px', display: 'block' }}>
+                  ✓ Selected: {selectedFile.name} ({Math.round(selectedFile.size / 1024)} KB)
+                </span>
+              )}
             </div>
           </div>
 

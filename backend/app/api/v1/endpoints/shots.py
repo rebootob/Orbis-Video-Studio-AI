@@ -8,14 +8,18 @@ from app.models.shot import Shot
 from app.models.scene import Scene
 from app.services.hybrid_shot import HybridShotService
 from app.services.lock_machine import LockMachineService
+from app.models.generation_job import GenerationJob
+from app.models.usage_ledger import UsageLedger
 from app.schemas.shot import (
     ShotCreateRequest,
     ShotUpdateRequest,
     ShotDetailResponse,
     EffectiveShotConfigResponse,
+    ReorderRequest,
 )
 
 router = APIRouter()
+
 
 
 @router.post(
@@ -100,9 +104,47 @@ def delete_shot(
 
     LockMachineService.check_mutation_allowed(db, "SHOT", shot_id)
 
+    # Prevent destruction of recorded generation jobs or ledger audit records
+    has_jobs = db.query(GenerationJob).filter(GenerationJob.shot_id == shot_id).first() is not None
+    has_ledger = db.query(UsageLedger).filter(UsageLedger.shot_id == shot_id).first() is not None
+    if has_jobs or has_ledger:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete Shot '{shot_id}' with recorded generation jobs or ledger audit history. Retain for auditability.",
+        )
+
     db.delete(shot)
     db.commit()
     return None
+
+
+@router.patch(
+    "/scenes/{scene_id}/shots/reorder",
+    response_model=List[ShotDetailResponse],
+    status_code=status.HTTP_200_OK,
+)
+def reorder_scene_shots(
+    scene_id: uuid.UUID,
+    request: ReorderRequest,
+    db: Session = Depends(get_db),
+):
+    scene = db.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scene '{scene_id}' not found",
+        )
+
+    for item in request.items:
+        shot = db.get(Shot, item.id)
+        if shot and shot.scene_id == scene_id:
+            LockMachineService.check_mutation_allowed(db, "SHOT", shot.id)
+            shot.shot_number = item.order
+
+    db.commit()
+    shots = db.query(Shot).filter(Shot.scene_id == scene_id).order_by(Shot.shot_number).all()
+    return shots
+
 
 
 @router.get(

@@ -10,6 +10,10 @@ import type {
   CostLedgerEntry,
   AssetLock,
   ReferenceItem,
+  BatchJobEstimateResponse,
+  BatchJobCreatePayload,
+  ReorderItem,
+  AssetUploadResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -43,8 +47,8 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Projects
-  async listProjects(): Promise<Project[]> {
-    return request<Project[]>('/projects');
+  async listProjects(includeArchived = false): Promise<Project[]> {
+    return request<Project[]>(`/projects?include_archived=${includeArchived}`);
   },
 
   async getProject(projectId: string): Promise<Project> {
@@ -65,9 +69,28 @@ export const api = {
     });
   },
 
-  async deleteProject(projectId: string): Promise<void> {
-    return request<void>(`/projects/${projectId}`, {
+  async deleteProject(projectId: string): Promise<Project> {
+    // Soft-archive project to retain full history
+    return request<Project>(`/projects/${projectId}`, {
       method: 'DELETE',
+    });
+  },
+
+  async archiveProject(projectId: string): Promise<Project> {
+    return request<Project>(`/projects/${projectId}/archive`, {
+      method: 'POST',
+    });
+  },
+
+  async unarchiveProject(projectId: string): Promise<Project> {
+    return request<Project>(`/projects/${projectId}/unarchive`, {
+      method: 'POST',
+    });
+  },
+
+  async duplicateProject(projectId: string): Promise<Project> {
+    return request<Project>(`/projects/${projectId}/duplicate`, {
+      method: 'POST',
     });
   },
 
@@ -93,6 +116,19 @@ export const api = {
   async deleteScene(sceneId: string): Promise<void> {
     return request<void>(`/scenes/${sceneId}`, {
       method: 'DELETE',
+    });
+  },
+
+  async duplicateScene(sceneId: string): Promise<Scene> {
+    return request<Scene>(`/scenes/${sceneId}/duplicate`, {
+      method: 'POST',
+    });
+  },
+
+  async reorderScenes(projectId: string, items: ReorderItem[]): Promise<Scene[]> {
+    return request<Scene[]>(`/projects/${projectId}/scenes/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ items }),
     });
   },
 
@@ -122,6 +158,13 @@ export const api = {
   async deleteShot(shotId: string): Promise<void> {
     return request<void>(`/shots/${shotId}`, {
       method: 'DELETE',
+    });
+  },
+
+  async reorderShots(sceneId: string, items: ReorderItem[]): Promise<Shot[]> {
+    return request<Shot[]>(`/scenes/${sceneId}/shots/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ items }),
     });
   },
 
@@ -164,9 +207,17 @@ export const api = {
     });
   },
 
-  async batchGenerateProjectShots(projectId: string, providerName = 'vidu'): Promise<GenerationJob[]> {
-    return request<GenerationJob[]>(`/projects/${projectId}/jobs/batch?provider_name=${encodeURIComponent(providerName)}`, {
+  async estimateBatchJobs(projectId: string, payload?: BatchJobCreatePayload): Promise<BatchJobEstimateResponse> {
+    return request<BatchJobEstimateResponse>(`/projects/${projectId}/jobs/estimate`, {
       method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  async batchGenerateProjectShots(projectId: string, payload?: BatchJobCreatePayload): Promise<GenerationJob[]> {
+    return request<GenerationJob[]>(`/projects/${projectId}/jobs/batch`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
     });
   },
 
@@ -331,5 +382,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  },
+
+  // Assets & Documents
+  async listProjectAssets(projectId: string): Promise<AssetUploadResponse[]> {
+    return request<AssetUploadResponse[]>(`/projects/${projectId}/assets`);
+  },
+
+  async uploadAsset(
+    projectId: string,
+    file: File,
+    assetType = 'DOCUMENT',
+    name?: string
+  ): Promise<AssetUploadResponse> {
+    const formData = new FormData();
+    formData.append('project_id', projectId);
+    formData.append('asset_type', assetType);
+    if (name) {
+      formData.append('name', name);
+    }
+    formData.append('file', file);
+
+    const url = `${BASE_URL}/assets/upload`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorDetail = `Asset upload failed with status ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        errorDetail = errorJson.detail || errorDetail;
+      } catch {
+        // ignore
+      }
+      throw new Error(errorDetail);
+    }
+
+    return response.json();
   },
 };

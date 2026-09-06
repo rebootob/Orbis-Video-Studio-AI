@@ -9,6 +9,7 @@ import type {
   CostLedgerEntry,
   ReferenceItem,
   ApprovalStatus,
+  ReorderItem,
 } from './api/types';
 import { api } from './api/client';
 import { ProjectDashboard } from './components/dashboard/ProjectDashboard';
@@ -53,11 +54,11 @@ export const App: React.FC = () => {
   const [automationStep, setAutomationStep] = useState<string | null>(null);
   const [loadingQueue, setLoadingQueue] = useState(false);
 
-  // Load all projects on mount
+  // Load all projects on mount (including archived for dashboard filters)
   const loadProjects = useCallback(async () => {
     try {
       setLoadingProjects(true);
-      const list = await api.listProjects();
+      const list = await api.listProjects(true);
       setProjects(list);
     } catch (err: any) {
       console.error('Failed to load projects', err);
@@ -114,18 +115,48 @@ export const App: React.FC = () => {
   }, [selectedProject, loadWorkspaceData]);
 
   // Project Creation
-  const handleCreateProject = async (payload: ProjectCreatePayload) => {
+  const handleCreateProject = async (payload: ProjectCreatePayload, file?: File | null) => {
     const created = await api.createProject(payload);
+    if (file) {
+      try {
+        await api.uploadAsset(created.id, file, 'DOCUMENT', file.name);
+      } catch (uploadErr) {
+        console.warn('Initial document upload skipped:', uploadErr);
+      }
+    }
     await loadProjects();
     setSelectedProject(created);
     setActiveTab('storyboard');
   };
 
-  // Project Deletion
-  const handleDeleteProject = async (projectId: string) => {
-    await api.deleteProject(projectId);
+  // Soft-Archive Project
+  const handleArchiveProject = async (projectId: string) => {
+    await api.archiveProject(projectId);
     if (selectedProject?.id === projectId) {
       setSelectedProject(null);
+    }
+    await loadProjects();
+  };
+
+  // Unarchive Project
+  const handleUnarchiveProject = async (projectId: string) => {
+    await api.unarchiveProject(projectId);
+    await loadProjects();
+  };
+
+  // Duplicate Project
+  const handleDuplicateProject = async (projectId: string) => {
+    const duplicated = await api.duplicateProject(projectId);
+    await loadProjects();
+    setSelectedProject(duplicated);
+    setActiveTab('storyboard');
+  };
+
+  // Rename Project
+  const handleRenameProject = async (projectId: string, newTitle: string) => {
+    await api.updateProject(projectId, { title: newTitle });
+    if (selectedProject?.id === projectId) {
+      setSelectedProject({ ...selectedProject, title: newTitle });
     }
     await loadProjects();
   };
@@ -147,7 +178,10 @@ export const App: React.FC = () => {
       setAutomationStep('Planning Scenes & Camera Setups...');
       await api.generateProjectStory(selectedProject.id);
       setAutomationStep('Building Visual Storyboard & Shot Prompts...');
+      await api.updateProject(selectedProject.id, { status: 'STORYBOARD_GENERATED' });
       await loadWorkspaceData(selectedProject);
+      setSelectedProject({ ...selectedProject, status: 'STORYBOARD_GENERATED' });
+      await loadProjects();
     } catch (err: any) {
       alert(`Storyboard generation failed: ${err.message}`);
     } finally {
@@ -155,13 +189,19 @@ export const App: React.FC = () => {
     }
   };
 
-  // Automation: Batch Generate Shots
-  const handleBatchGenerateShots = async () => {
+  // Automation: Batch Generate Shots (Selected or All Incomplete)
+  const handleBatchGenerateShots = async (shotIds?: string[] | null, onlyIncomplete = true) => {
     if (!selectedProject) return;
     try {
       setAutomationStep('Dispatching Batch Generation Jobs...');
-      await api.batchGenerateProjectShots(selectedProject.id);
+      await api.batchGenerateProjectShots(selectedProject.id, {
+        shot_ids: shotIds || undefined,
+        only_incomplete: onlyIncomplete,
+      });
+      await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
       await loadWorkspaceData(selectedProject);
+      setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
+      await loadProjects();
     } catch (err: any) {
       alert(`Batch generation failed: ${err.message}`);
     } finally {
@@ -204,7 +244,23 @@ export const App: React.FC = () => {
 
   const handleDeleteScene = async (sceneId: string) => {
     if (!selectedProject) return;
-    await api.deleteScene(sceneId);
+    try {
+      await api.deleteScene(sceneId);
+      await loadWorkspaceData(selectedProject);
+    } catch (err: any) {
+      alert(`Cannot delete scene: ${err.message}`);
+    }
+  };
+
+  const handleDuplicateScene = async (sceneId: string) => {
+    if (!selectedProject) return;
+    await api.duplicateScene(sceneId);
+    await loadWorkspaceData(selectedProject);
+  };
+
+  const handleReorderScenes = async (items: ReorderItem[]) => {
+    if (!selectedProject) return;
+    await api.reorderScenes(selectedProject.id, items);
     await loadWorkspaceData(selectedProject);
   };
 
@@ -230,7 +286,17 @@ export const App: React.FC = () => {
 
   const handleDeleteShot = async (shotId: string) => {
     if (!selectedProject) return;
-    await api.deleteShot(shotId);
+    try {
+      await api.deleteShot(shotId);
+      await loadWorkspaceData(selectedProject);
+    } catch (err: any) {
+      alert(`Cannot delete shot: ${err.message}`);
+    }
+  };
+
+  const handleReorderShots = async (sceneId: string, items: ReorderItem[]) => {
+    if (!selectedProject) return;
+    await api.reorderShots(sceneId, items);
     await loadWorkspaceData(selectedProject);
   };
 
@@ -314,6 +380,41 @@ export const App: React.FC = () => {
     await loadWorkspaceData(selectedProject);
   };
 
+  // Next Best Action dispatcher
+  const handleNextBestAction = (action: string) => {
+    switch (action) {
+      case 'GENERATE_STORY':
+      case 'GENERATE_STORYBOARD':
+        handleGenerateFullStoryboard();
+        break;
+      case 'APPROVE_STORY':
+        handleUpdateStatus('STORY_APPROVED' as any);
+        break;
+      case 'APPROVE_STORYBOARD':
+        handleUpdateStatus('STORYBOARD_APPROVED' as any);
+        break;
+      case 'GENERATE_SHOT_PLAN':
+        handleUpdateStatus('SHOT_PLAN_APPROVED' as any);
+        break;
+      case 'BATCH_GENERATE':
+        setActiveTab('storyboard');
+        break;
+      case 'MONITOR_QUEUE':
+        setActiveTab('queue');
+        break;
+      case 'APPROVE_PROJECT':
+        handleUpdateStatus('COMPLETED' as any);
+        break;
+      case 'VIEW_QC':
+        setActiveTab('qc');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const completedShotsCount = jobs.filter((j) => j.status === 'COMPLETED').length;
+
   return (
     <div className="app-container">
       {selectedProject ? (
@@ -328,9 +429,15 @@ export const App: React.FC = () => {
           />
 
           <main className="main-content">
-            {/* Mode Banner */}
+            {/* Mode & Next Best Action Guidance Banner */}
             <div style={{ marginBottom: '20px' }}>
-              <ModeSpecBanner mode={selectedProject.video_mode} />
+              <ModeSpecBanner
+                mode={selectedProject.video_mode}
+                status={selectedProject.status}
+                shotCount={shots.length}
+                completedShotCount={completedShotsCount}
+                onAction={handleNextBestAction}
+              />
             </div>
 
             {/* Tab Navigation */}
@@ -382,6 +489,7 @@ export const App: React.FC = () => {
             {/* Tab Panels */}
             {activeTab === 'storyboard' && (
               <StoryboardGrid
+                projectId={selectedProject.id}
                 scenes={scenes}
                 shots={shots}
                 jobs={jobs}
@@ -392,12 +500,24 @@ export const App: React.FC = () => {
                 onAddScene={handleAddScene}
                 onUpdateScene={handleUpdateScene}
                 onDeleteScene={handleDeleteScene}
+                onDuplicateScene={handleDuplicateScene}
+                onReorderScenes={handleReorderScenes}
                 onAddShot={handleAddShot}
                 onUpdateShot={handleUpdateShot}
                 onDeleteShot={handleDeleteShot}
+                onReorderShots={handleReorderShots}
                 onToggleShotLock={handleToggleShotLock}
                 onToggleSceneLock={handleToggleSceneLock}
                 onGenerateShot={handleGenerateShot}
+                onStageReview={(st) => {
+                  if (st === 'STORY') {
+                    handleUpdateStatus('STORY_GENERATED' as any);
+                  } else if (st === 'STORYBOARD') {
+                    handleUpdateStatus('STORYBOARD_GENERATED' as any);
+                  } else if (st === 'SHOT_PLAN') {
+                    handleUpdateStatus('SHOT_PLAN_GENERATED' as any);
+                  }
+                }}
               />
             )}
 
@@ -440,6 +560,7 @@ export const App: React.FC = () => {
               <QCHistoryPanel
                 project={selectedProject}
                 jobs={jobs}
+                budget={budget}
                 onUpdateStatus={handleUpdateStatus}
               />
             )}
@@ -456,7 +577,11 @@ export const App: React.FC = () => {
               setActiveTab('storyboard');
             }}
             onOpenNewProjectModal={() => setIsNewProjectOpen(true)}
-            onDeleteProject={handleDeleteProject}
+            onDeleteProject={handleArchiveProject}
+            onArchiveProject={handleArchiveProject}
+            onUnarchiveProject={handleUnarchiveProject}
+            onDuplicateProject={handleDuplicateProject}
+            onRenameProject={handleRenameProject}
           />
         </main>
       )}

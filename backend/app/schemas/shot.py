@@ -109,3 +109,12 @@ class SceneDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     shots: List[ShotDetailResponse] = Field(default_factory=list)
+
+
+class ReorderItem(BaseModel):
+    id: uuid.UUID
+    order: int = Field(..., ge=1)
+
+
+class ReorderRequest(BaseModel):
+    items: List[ReorderItem]

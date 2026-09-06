@@ -1,30 +1,37 @@
 import React, { useState } from 'react';
-import type { Scene, Shot, GenerationJob } from '../../api/types';
+import type { Scene, Shot, GenerationJob, ReorderItem } from '../../api/types';
 import { AutomationBar } from './AutomationBar';
 import { SceneSection } from './SceneSection';
 import { ShotDetailDrawer } from './ShotDetailDrawer';
+import { CostConfirmationModal } from '../workspace/CostConfirmationModal';
 import { Plus } from 'lucide-react';
 
 interface StoryboardGridProps {
+  projectId: string;
   scenes: Scene[];
   shots: Shot[];
   jobs: GenerationJob[];
   automationStep: string | null;
   onGenerateFullStoryboard: () => Promise<void>;
-  onBatchGenerateShots: () => Promise<void>;
+  onBatchGenerateShots: (shotIds?: string[] | null, onlyIncomplete?: boolean) => Promise<void>;
   onRetryFailed: () => Promise<void>;
   onAddScene: () => Promise<void>;
   onUpdateScene: (sceneId: string, payload: Partial<Scene>) => Promise<void>;
   onDeleteScene: (sceneId: string) => Promise<void>;
+  onDuplicateScene?: (sceneId: string) => Promise<void>;
+  onReorderScenes?: (items: ReorderItem[]) => Promise<void>;
   onAddShot: (sceneId: string) => Promise<void>;
   onUpdateShot: (shotId: string, payload: Partial<Shot>) => Promise<void>;
   onDeleteShot: (shotId: string) => Promise<void>;
+  onReorderShots?: (sceneId: string, items: ReorderItem[]) => Promise<void>;
   onToggleShotLock: (shot: Shot) => Promise<void>;
   onToggleSceneLock: (scene: Scene) => Promise<void>;
   onGenerateShot: (shotId: string) => Promise<void>;
+  onStageReview?: (stage: 'STORY' | 'STORYBOARD' | 'SHOT_PLAN') => void;
 }
 
 export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
+  projectId,
   scenes,
   shots,
   jobs,
@@ -35,14 +42,24 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   onAddScene,
   onUpdateScene,
   onDeleteScene,
+  onDuplicateScene,
+  onReorderScenes,
   onAddShot,
   onUpdateShot,
   onDeleteShot,
+  onReorderShots,
   onToggleShotLock,
   onToggleSceneLock,
   onGenerateShot,
+  onStageReview,
 }) => {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(new Set());
+
+  // Cost confirmation modal state
+  const [costModalOpen, setCostModalOpen] = useState(false);
+  const [costModalShotIds, setCostModalShotIds] = useState<string[] | null>(null);
+  const [costModalOnlyIncomplete, setCostModalOnlyIncomplete] = useState(true);
 
   // Group shots by scene
   const shotsBySceneId: Record<string, Shot[]> = {};
@@ -68,16 +85,94 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   const selectedShot = shots.find((s) => s.id === selectedShotId) || null;
   const hasFailedJobs = jobs.some((j) => j.status === 'FAILED');
 
+  // Toggle selection of shot
+  const handleToggleSelectShot = (shotId: string) => {
+    setSelectedShotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(shotId)) {
+        next.delete(shotId);
+      } else {
+        next.add(shotId);
+      }
+      return next;
+    });
+  };
+
+  // Scene reordering
+  const handleMoveSceneUp = (sceneId: string) => {
+    const idx = scenes.findIndex((s) => s.id === sceneId);
+    if (idx <= 0 || !onReorderScenes) return;
+    const items: ReorderItem[] = [
+      { id: scenes[idx].id, order: scenes[idx - 1].scene_number },
+      { id: scenes[idx - 1].id, order: scenes[idx].scene_number },
+    ];
+    onReorderScenes(items);
+  };
+
+  const handleMoveSceneDown = (sceneId: string) => {
+    const idx = scenes.findIndex((s) => s.id === sceneId);
+    if (idx < 0 || idx >= scenes.length - 1 || !onReorderScenes) return;
+    const items: ReorderItem[] = [
+      { id: scenes[idx].id, order: scenes[idx + 1].scene_number },
+      { id: scenes[idx + 1].id, order: scenes[idx].scene_number },
+    ];
+    onReorderScenes(items);
+  };
+
+  // Shot reordering
+  const handleMoveShotUp = (sceneId: string, shotId: string) => {
+    const sceneShots = [...(shotsBySceneId[sceneId] || [])].sort(
+      (a, b) => a.shot_number - b.shot_number
+    );
+    const idx = sceneShots.findIndex((s) => s.id === shotId);
+    if (idx <= 0 || !onReorderShots) return;
+    const items: ReorderItem[] = [
+      { id: sceneShots[idx].id, order: sceneShots[idx - 1].shot_number },
+      { id: sceneShots[idx - 1].id, order: sceneShots[idx].shot_number },
+    ];
+    onReorderShots(sceneId, items);
+  };
+
+  const handleMoveShotDown = (sceneId: string, shotId: string) => {
+    const sceneShots = [...(shotsBySceneId[sceneId] || [])].sort(
+      (a, b) => a.shot_number - b.shot_number
+    );
+    const idx = sceneShots.findIndex((s) => s.id === shotId);
+    if (idx < 0 || idx >= sceneShots.length - 1 || !onReorderShots) return;
+    const items: ReorderItem[] = [
+      { id: sceneShots[idx].id, order: sceneShots[idx + 1].shot_number },
+      { id: sceneShots[idx + 1].id, order: sceneShots[idx].shot_number },
+    ];
+    onReorderShots(sceneId, items);
+  };
+
+  // Batch trigger helpers
+  const triggerBatchIncomplete = () => {
+    setCostModalShotIds(null);
+    setCostModalOnlyIncomplete(true);
+    setCostModalOpen(true);
+  };
+
+  const triggerSelectedShots = () => {
+    if (selectedShotIds.size === 0) return;
+    setCostModalShotIds(Array.from(selectedShotIds));
+    setCostModalOnlyIncomplete(false);
+    setCostModalOpen(true);
+  };
+
   return (
     <div data-testid="storyboard-grid">
       {/* High-Level Automation Bar */}
       <AutomationBar
         automationStep={automationStep}
-        onGenerateFullStoryboard={onGenerateFullStoryboard}
-        onBatchGenerateShots={onBatchGenerateShots}
-        onRetryFailed={onRetryFailed}
-        hasFailedJobs={hasFailedJobs}
+        selectedShotCount={selectedShotIds.size}
         totalShots={shots.length}
+        hasFailedJobs={hasFailedJobs}
+        onGenerateFullStoryboard={onGenerateFullStoryboard}
+        onBatchGenerateShots={triggerBatchIncomplete}
+        onGenerateSelectedShots={triggerSelectedShots}
+        onRetryFailed={onRetryFailed}
+        onStageReview={onStageReview}
       />
 
       {/* Scenes List */}
@@ -124,17 +219,26 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
         </div>
       ) : (
         <div>
-          {scenes.map((scene) => (
+          {scenes.map((scene, idx) => (
             <SceneSection
               key={scene.id}
               scene={scene}
               shots={shotsBySceneId[scene.id] || []}
               jobsByShotId={latestJobByShotId}
               selectedShotId={selectedShotId}
+              selectedShotIds={selectedShotIds}
+              canMoveSceneUp={idx > 0}
+              canMoveSceneDown={idx < scenes.length - 1}
               onSelectShot={(s) => setSelectedShotId(s.id)}
+              onToggleSelectShot={handleToggleSelectShot}
               onAddShot={onAddShot}
               onUpdateScene={onUpdateScene}
               onDeleteScene={onDeleteScene}
+              onDuplicateScene={onDuplicateScene}
+              onMoveSceneUp={handleMoveSceneUp}
+              onMoveSceneDown={handleMoveSceneDown}
+              onMoveShotUp={handleMoveShotUp}
+              onMoveShotDown={handleMoveShotDown}
               onToggleShotLock={onToggleShotLock}
               onToggleSceneLock={onToggleSceneLock}
             />
@@ -165,6 +269,19 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
           onGenerateShot={onGenerateShot}
         />
       )}
+
+      {/* Pre-Generation Cost Confirmation Dialog */}
+      <CostConfirmationModal
+        isOpen={costModalOpen}
+        projectId={projectId}
+        shotIds={costModalShotIds}
+        onlyIncomplete={costModalOnlyIncomplete}
+        onClose={() => setCostModalOpen(false)}
+        onConfirm={async () => {
+          await onBatchGenerateShots(costModalShotIds, costModalOnlyIncomplete);
+          setSelectedShotIds(new Set());
+        }}
+      />
     </div>
   );
 };

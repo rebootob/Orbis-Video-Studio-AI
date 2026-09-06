@@ -1,21 +1,33 @@
 import React from 'react';
 import type { Shot, GenerationJob } from '../../api/types';
-import { Lock, Unlock, Play, Clock, AlertCircle, CheckCircle2, Film } from 'lucide-react';
+import { Lock, Unlock, Play, Clock, AlertCircle, CheckCircle2, Film, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface ShotCardProps {
   shot: Shot;
   latestJob?: GenerationJob;
   isSelected: boolean;
+  isMultiSelected?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
   onSelect: () => void;
+  onToggleSelect?: (e: React.MouseEvent) => void;
   onToggleLock: (e: React.MouseEvent) => void;
+  onMoveUp?: (e: React.MouseEvent) => void;
+  onMoveDown?: (e: React.MouseEvent) => void;
 }
 
 export const ShotCard: React.FC<ShotCardProps> = ({
   shot,
   latestJob,
   isSelected,
+  isMultiSelected = false,
+  canMoveUp = false,
+  canMoveDown = false,
   onSelect,
+  onToggleSelect,
   onToggleLock,
+  onMoveUp,
+  onMoveDown,
 }) => {
   const getJobStatusBadge = () => {
     if (!latestJob) {
@@ -93,6 +105,8 @@ export const ShotCard: React.FC<ShotCardProps> = ({
         backgroundColor: 'var(--bg-card)',
         border: isSelected
           ? '2px solid var(--primary)'
+          : isMultiSelected
+          ? '1px solid var(--primary)'
           : '1px solid var(--border-subtle)',
         borderRadius: '8px',
         overflow: 'hidden',
@@ -128,9 +142,82 @@ export const ShotCard: React.FC<ShotCardProps> = ({
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
             <Film size={24} style={{ marginBottom: '4px' }} />
-            <div style={{ fontSize: '0.65rem' }}>Visual Placeholder</div>
+            <div style={{ fontSize: '0.65rem' }}>Visual Blueprint</div>
           </div>
         )}
+
+        {/* Multi-Select Checkbox */}
+        {onToggleSelect && (
+          <div
+            onClick={onToggleSelect}
+            style={{
+              position: 'absolute',
+              top: '6px',
+              left: '6px',
+              backgroundColor: isMultiSelected ? 'var(--primary)' : 'rgba(0,0,0,0.6)',
+              borderRadius: '4px',
+              padding: '2px 4px',
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+              border: '1px solid rgba(255,255,255,0.3)',
+            }}
+            title="Select for batch action"
+          >
+            <input
+              type="checkbox"
+              checked={isMultiSelected}
+              onChange={() => {}}
+              style={{ cursor: 'pointer', margin: 0 }}
+            />
+          </div>
+        )}
+
+        {/* Reorder Up / Down Controls */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '6px',
+            right: '34px',
+            display: 'flex',
+            gap: '2px',
+          }}
+        >
+          {canMoveUp && onMoveUp && (
+            <button
+              onClick={onMoveUp}
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.6)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '3px',
+                padding: '2px',
+                cursor: 'pointer',
+                display: 'flex',
+              }}
+              title="Move shot up"
+            >
+              <ChevronUp size={12} />
+            </button>
+          )}
+          {canMoveDown && onMoveDown && (
+            <button
+              onClick={onMoveDown}
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.6)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '3px',
+                padding: '2px',
+                cursor: 'pointer',
+                display: 'flex',
+              }}
+              title="Move shot down"
+            >
+              <ChevronDown size={12} />
+            </button>
+          )}
+        </div>
 
         {/* Lock Overlay Badge */}
         <button
@@ -139,13 +226,15 @@ export const ShotCard: React.FC<ShotCardProps> = ({
             position: 'absolute',
             top: '6px',
             right: '6px',
-            backgroundColor: shot.is_locked ? 'rgba(239, 68, 68, 0.8)' : 'rgba(0, 0, 0, 0.5)',
+            backgroundColor: shot.is_locked ? 'rgba(239, 68, 68, 0.8)' : 'rgba(0, 0, 0, 0.6)',
             color: '#fff',
             borderRadius: '4px',
             padding: '4px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            border: 'none',
+            cursor: 'pointer',
           }}
           title={shot.is_locked ? 'Shot is LOCKED (Click to unlock)' : 'Shot is UNLOCKED (Click to lock)'}
           data-testid={`shot-lock-toggle-${shot.id}`}

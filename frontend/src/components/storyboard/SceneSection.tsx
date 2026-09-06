@@ -1,17 +1,37 @@
 import React, { useState } from 'react';
 import type { Scene, Shot, GenerationJob } from '../../api/types';
 import { ShotCard } from './ShotCard';
-import { Plus, Edit2, Trash2, Check, Lock, Unlock, Clapperboard } from 'lucide-react';
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Check,
+  Lock,
+  Unlock,
+  Clapperboard,
+  Copy,
+  ChevronUp,
+  ChevronDown,
+} from 'lucide-react';
 
 interface SceneSectionProps {
   scene: Scene;
   shots: Shot[];
   jobsByShotId: Record<string, GenerationJob>;
   selectedShotId: string | null;
+  selectedShotIds?: Set<string>;
+  canMoveSceneUp?: boolean;
+  canMoveSceneDown?: boolean;
   onSelectShot: (shot: Shot) => void;
+  onToggleSelectShot?: (shotId: string) => void;
   onAddShot: (sceneId: string) => void;
   onUpdateScene: (sceneId: string, payload: Partial<Scene>) => void;
   onDeleteScene: (sceneId: string) => void;
+  onDuplicateScene?: (sceneId: string) => void;
+  onMoveSceneUp?: (sceneId: string) => void;
+  onMoveSceneDown?: (sceneId: string) => void;
+  onMoveShotUp?: (sceneId: string, shotId: string) => void;
+  onMoveShotDown?: (sceneId: string, shotId: string) => void;
   onToggleShotLock: (shot: Shot) => void;
   onToggleSceneLock: (scene: Scene) => void;
 }
@@ -21,10 +41,19 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
   shots,
   jobsByShotId,
   selectedShotId,
+  selectedShotIds,
+  canMoveSceneUp = false,
+  canMoveSceneDown = false,
   onSelectShot,
+  onToggleSelectShot,
   onAddShot,
   onUpdateScene,
   onDeleteScene,
+  onDuplicateScene,
+  onMoveSceneUp,
+  onMoveSceneDown,
+  onMoveShotUp,
+  onMoveShotDown,
   onToggleShotLock,
   onToggleSceneLock,
 }) => {
@@ -36,6 +65,9 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
     onUpdateScene(scene.id, { heading, setting });
     setIsEditing(false);
   };
+
+  // Sort shots by shot_number
+  const sortedShots = [...shots].sort((a, b) => a.shot_number - b.shot_number);
 
   return (
     <div
@@ -105,7 +137,40 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
         </div>
 
         {/* Scene Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Reorder Scene buttons */}
+          {canMoveSceneUp && onMoveSceneUp && (
+            <button
+              className="btn btn-xs btn-outline"
+              onClick={() => onMoveSceneUp(scene.id)}
+              title="Move Scene Up"
+            >
+              <ChevronUp size={12} />
+            </button>
+          )}
+          {canMoveSceneDown && onMoveSceneDown && (
+            <button
+              className="btn btn-xs btn-outline"
+              onClick={() => onMoveSceneDown(scene.id)}
+              title="Move Scene Down"
+            >
+              <ChevronDown size={12} />
+            </button>
+          )}
+
+          {/* Duplicate Scene */}
+          {onDuplicateScene && (
+            <button
+              className="btn btn-xs btn-secondary"
+              onClick={() => onDuplicateScene(scene.id)}
+              title="Duplicate Scene (and shots)"
+              data-testid={`duplicate-scene-${scene.id}`}
+            >
+              <Copy size={12} /> Duplicate
+            </button>
+          )}
+
+          {/* Lock/Unlock */}
           <button
             className="btn btn-xs btn-outline"
             onClick={() => onToggleSceneLock(scene)}
@@ -129,7 +194,7 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
           <button
             className="btn btn-xs btn-danger"
             onClick={() => {
-              if (confirm(`Delete Scene #${scene.scene_number}? All shots in this scene will be deleted.`)) {
+              if (confirm(`Delete Scene #${scene.scene_number}? All shots without recorded generation history will be removed.`)) {
                 onDeleteScene(scene.id);
               }
             }}
@@ -151,7 +216,7 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
       </div>
 
       {/* Shots Grid */}
-      {shots.length === 0 ? (
+      {sortedShots.length === 0 ? (
         <div
           style={{
             padding: '24px',
@@ -173,13 +238,40 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
             gap: '16px',
           }}
         >
-          {shots.map((shot) => (
+          {sortedShots.map((shot, idx) => (
             <ShotCard
               key={shot.id}
               shot={shot}
               latestJob={jobsByShotId[shot.id]}
               isSelected={selectedShotId === shot.id}
+              isMultiSelected={selectedShotIds ? selectedShotIds.has(shot.id) : false}
+              canMoveUp={idx > 0}
+              canMoveDown={idx < sortedShots.length - 1}
               onSelect={() => onSelectShot(shot)}
+              onToggleSelect={
+                onToggleSelectShot
+                  ? (e) => {
+                      e.stopPropagation();
+                      onToggleSelectShot(shot.id);
+                    }
+                  : undefined
+              }
+              onMoveUp={
+                onMoveShotUp
+                  ? (e) => {
+                      e.stopPropagation();
+                      onMoveShotUp(scene.id, shot.id);
+                    }
+                  : undefined
+              }
+              onMoveDown={
+                onMoveShotDown
+                  ? (e) => {
+                      e.stopPropagation();
+                      onMoveShotDown(scene.id, shot.id);
+                    }
+                  : undefined
+              }
               onToggleLock={(e) => {
                 e.stopPropagation();
                 onToggleShotLock(shot);

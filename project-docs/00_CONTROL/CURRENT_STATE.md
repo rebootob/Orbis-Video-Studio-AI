@@ -9,20 +9,19 @@
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-MAIN_HEAD_AFTER_WP007: 9cb098dea7fc2948b023ad48163c729f566573a7
+MAIN_HEAD_AFTER_WP009: 9f094a5e01eb521191fcadceb3b27b9a5da7ea30
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
-P2-WP007_PR: "#15"
-P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
-P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
-
 P2-WP008: PASS / CLOSED / MERGED
-P2-WP008_PR: "#19"
+P2-WP009: PASS / CLOSED / MERGED
+P2-WP009_PR: "#23"
 
-ACTIVE_WORK_PACKAGE: P2-WP009
+ACTIVE_WORK_PACKAGE: P2-WP010
 CURRENT_GATE: CHATGPT INDEPENDENT REVIEW
-P2-WP009: IMPLEMENTED / WAITING CHATGPT REVIEW
+P2-WP010: CORRECTIVE IMPLEMENTED / WAITING CHATGPT REVIEW
+P2-WP010_PR: "#25"
+P2-WP010_BRANCH: ai/p2-wp010-mode-aware-web-workspace
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -49,54 +48,26 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 
 ## Detailed Status Matrix
 
-| Component / Layer | Status | Notes |
-| :--- | :--- | :--- |
-| Governance & Documentation (P0-WP001) | PASS / CLOSED / MERGED | Foundation complete. |
-| Backend Core Framework (P1-WP002) | PASS / CLOSED / MERGED | Backend/database foundation complete. |
-| Object Storage & Asset API (P1-WP003) | PASS / CLOSED / MERGED | S3-compatible asset layer complete. |
-| Document Ingestion Engine (P1-WP004) | PASS / CLOSED / MERGED | PDF/DOCX/PPTX/text ingestion complete. |
-| Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | OpenAI creative generation service complete. |
-| Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
-| Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | PR #15 merged; durable claim/lease fencing, retry/poll scheduling, cancellation, reconciliation, secret safety and mocked Vidu contract tests complete. |
-| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | PR #19 merged; hybrid shot engine, asset ownership validation, AssetLock machine with audit trail, Core V1 video modes, config inheritance, migration 008. |
-| Cost Control & Granular Usage Audit Ledger (P2-WP009) | IMPLEMENTED / WAITING REVIEW | Provider-neutral usage ledger, idempotency deduplication, project budget controls (soft warning & hard cap), provider pricing abstraction, manual adjustment audit trail, migration 009. |
-| Watcher / Dispatcher automation | PAUSED | Do not depend on it for production project delivery until separate no-credit UAT passes. |
+| Work Package | Feature / Deliverable | Status | PR | Reviewer |
+| :--- | :--- | :--- | :--- | :--- |
+| **P0-WP001** | Architecture Baseline & Repository Ingestion | PASS / MERGED | #1 | ChatGPT / Owner |
+| **P1-WP002** | Secure Environment & Cloud Storage Foundations | PASS / MERGED | #2 | ChatGPT / Owner |
+| **P1-WP003** | Core Video Domain Models & Schema | PASS / MERGED | #3 | ChatGPT / Owner |
+| **P1-WP004** | Document Ingestion & Context Parser | PASS / MERGED | #4 | ChatGPT / Owner |
+| **P1-WP005** | Continuity Bible & Reference Management | PASS / MERGED | #5 | ChatGPT / Owner |
+| **P2-WP006** | Mode-Aware Story Generation Engine | PASS / MERGED | #6 | ChatGPT / Owner |
+| **P2-WP007** | Vidu Adapter & Job Queue Engine | PASS / MERGED | #15 | ChatGPT / Owner |
+| **P2-WP008** | Hybrid Shot & Asset Lock Engine | PASS / MERGED | #19 | ChatGPT / Owner |
+| **P2-WP009** | Cost Control & Granular Usage Audit Ledger | PASS / MERGED | #23 | ChatGPT / Owner |
+| **P2-WP010** | Mode-Aware Web Workspace & Production UI | CORRECTIVE COMPLETE / AWAITING REVIEW | #25 | ChatGPT / Owner |
 
 ---
 
-## Locked Product Direction
+## Verification Evidence
 
-Orbis Video Studio AI is a cloud-first, provider-independent, reference-driven, shot-based, **multi-mode** video production platform.
-
-The system MUST NOT require a complete Story -> Script workflow for every project.
-
-Core V1 modes:
-
-```text
-STORY
-SHORT
-LOOP
-SCENE
-```
-
-Architecture-ready future modes:
-
-```text
-PRODUCT
-EXPLAINER
-PRESENTER
-MONTAGE
-```
-
-Video Mode is separate from Purpose, Target Platform, Aspect Ratio and Output Preset.
-
----
-
-## Next Allowed Action
-
-1. Keep WP007 closed; do not reopen without a proven regression.
-2. Review the P2-WP008 proposal.
-3. Start P2-WP008 only after explicit Project Owner authorization.
-4. Do not automatically start any later WP.
-
-Live GitHub/repository truth newer than this document is authoritative.
+- Backend Tests: 152 passed in 15.64s (`backend/tests`)
+- Frontend Tests: 13 passed in 2.46s (`frontend/src/test`)
+- Frontend Lint: Oxlint 0 errors
+- Frontend Build: Vite production bundle built in 500ms
+- Whitespace Check: `git diff --check` clean (0 warnings / 0 errors)
+- Zero live credits consumed ($0.00 spent)

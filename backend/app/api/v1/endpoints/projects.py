@@ -1,14 +1,18 @@
 import uuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.db.session import get_db
 from app.models.project import Project
 from app.models.scene import Scene
+from app.models.shot import Shot
+from app.models.generation_job import GenerationJob
+from app.models.usage_ledger import UsageLedger
 from app.services.video_modes import validate_video_mode
 from app.schemas.project import ProjectCreateRequest, ProjectResponse, ProjectUpdateRequest
-from app.schemas.shot import SceneCreateRequest, SceneUpdateRequest, SceneDetailResponse
+from app.schemas.shot import SceneCreateRequest, SceneUpdateRequest, SceneDetailResponse, ReorderRequest
 from app.services.lock_machine import LockMachineService
 
 router = APIRouter()
@@ -20,9 +24,13 @@ router = APIRouter()
     status_code=status.HTTP_200_OK,
 )
 def list_projects(
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
 ):
-    projects = db.query(Project).order_by(Project.updated_at.desc()).all()
+    query = db.query(Project)
+    if not include_archived:
+        query = query.filter(Project.status != "ARCHIVED")
+    projects = query.order_by(Project.updated_at.desc()).all()
     return projects
 
 
@@ -95,7 +103,11 @@ def update_project(
     if request.description is not None:
         project.description = request.description
     if request.status is not None:
-        project.status = request.status
+        try:
+            norm_status = request.validate_and_normalize_status()
+            project.status = norm_status
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if request.purpose is not None:
         project.purpose = request.purpose
     if request.target_platform is not None:
@@ -116,9 +128,32 @@ def update_project(
 
 @router.delete(
     "/projects/{project_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=ProjectResponse,
+    status_code=status.HTTP_200_OK,
 )
 def delete_project(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Soft-archive project to preserve full historical and auditable records."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project '{project_id}' not found",
+        )
+    project.status = "ARCHIVED"
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post(
+    "/projects/{project_id}/archive",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_200_OK,
+)
+def archive_project(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
@@ -128,9 +163,118 @@ def delete_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project '{project_id}' not found",
         )
-    db.delete(project)
+    project.status = "ARCHIVED"
     db.commit()
-    return None
+    db.refresh(project)
+    return project
+
+
+@router.post(
+    "/projects/{project_id}/unarchive",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_200_OK,
+)
+def unarchive_project(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project '{project_id}' not found",
+        )
+    project.status = "DRAFT"
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post(
+    "/projects/{project_id}/duplicate",
+    response_model=ProjectResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def duplicate_project(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    orig = db.get(Project, project_id)
+    if not orig:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project '{project_id}' not found",
+        )
+
+    new_proj = Project(
+        id=uuid.uuid4(),
+        title=f"Copy of {orig.title}",
+        description=orig.description,
+        video_mode=orig.video_mode,
+        purpose=orig.purpose,
+        target_platform=orig.target_platform,
+        target_duration_seconds=orig.target_duration_seconds,
+        preferred_aspect_ratio=orig.preferred_aspect_ratio,
+        mode_config=orig.mode_config,
+        default_config=orig.default_config,
+        budget_limit=orig.budget_limit,
+        budget_currency=orig.budget_currency,
+        budget_threshold_percentage=orig.budget_threshold_percentage,
+        status="DRAFT",
+    )
+    db.add(new_proj)
+    db.flush()
+
+    orig_scenes = (
+        db.query(Scene)
+        .filter((Scene.project_id == orig.id) | (Scene.story.has(project_id=orig.id)))
+        .order_by(Scene.scene_number)
+        .all()
+    )
+    for oscene in orig_scenes:
+        nscene = Scene(
+            id=uuid.uuid4(),
+            project_id=new_proj.id,
+            scene_number=oscene.scene_number,
+            heading=oscene.heading,
+            description=oscene.description,
+            purpose=oscene.purpose,
+            setting=oscene.setting,
+            duration_seconds=oscene.duration_seconds,
+            narration=oscene.narration,
+            dialogue=oscene.dialogue,
+            scene_config=oscene.scene_config,
+            is_locked=False,
+        )
+        db.add(nscene)
+        db.flush()
+
+        orig_shots = db.query(Shot).filter(Shot.scene_id == oscene.id).order_by(Shot.shot_number).all()
+        for oshot in orig_shots:
+            nshot = Shot(
+                id=uuid.uuid4(),
+                scene_id=nscene.id,
+                shot_number=oshot.shot_number,
+                shot_type=oshot.shot_type,
+                source_asset_id=oshot.source_asset_id,
+                source_metadata=oshot.source_metadata,
+                provider_config=oshot.provider_config,
+                visual_prompt=oshot.visual_prompt,
+                image_prompt=oshot.image_prompt,
+                video_prompt=oshot.video_prompt,
+                camera=oshot.camera,
+                subject=oshot.subject,
+                action=oshot.action,
+                duration_seconds=oshot.duration_seconds,
+                is_locked=False,
+                status="DRAFT",
+            )
+            db.add(nshot)
+
+    db.commit()
+    db.refresh(new_proj)
+    return new_proj
+
 
 
 @router.post(
@@ -241,6 +385,99 @@ def update_scene(
     return scene
 
 
+@router.patch(
+    "/projects/{project_id}/scenes/reorder",
+    response_model=List[SceneDetailResponse],
+    status_code=status.HTTP_200_OK,
+)
+def reorder_project_scenes(
+    project_id: uuid.UUID,
+    request: ReorderRequest,
+    db: Session = Depends(get_db),
+):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project '{project_id}' not found",
+        )
+
+    for item in request.items:
+        scene = db.get(Scene, item.id)
+        if scene and (scene.project_id == project_id or (scene.story and scene.story.project_id == project_id)):
+            LockMachineService.check_mutation_allowed(db, "SCENE", scene.id)
+            scene.scene_number = item.order
+
+    db.commit()
+    return list_project_scenes(project_id=project_id, db=db)
+
+
+@router.post(
+    "/scenes/{scene_id}/duplicate",
+    response_model=SceneDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def duplicate_scene(
+    scene_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    orig = db.get(Scene, scene_id)
+    if not orig:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scene '{scene_id}' not found",
+        )
+
+    # Find highest scene number in project
+    max_num = db.query(func.max(Scene.scene_number)).filter(
+        (Scene.project_id == orig.project_id)
+    ).scalar() or 1
+
+    new_scene = Scene(
+        id=uuid.uuid4(),
+        project_id=orig.project_id,
+        story_id=orig.story_id,
+        scene_number=max_num + 1,
+        heading=f"{orig.heading or 'Scene'} (Copy)",
+        description=orig.description,
+        purpose=orig.purpose,
+        setting=orig.setting,
+        duration_seconds=orig.duration_seconds,
+        narration=orig.narration,
+        dialogue=orig.dialogue,
+        scene_config=orig.scene_config,
+        is_locked=False,
+    )
+    db.add(new_scene)
+    db.flush()
+
+    orig_shots = db.query(Shot).filter(Shot.scene_id == orig.id).order_by(Shot.shot_number).all()
+    for oshot in orig_shots:
+        nshot = Shot(
+            id=uuid.uuid4(),
+            scene_id=new_scene.id,
+            shot_number=oshot.shot_number,
+            shot_type=oshot.shot_type,
+            source_asset_id=oshot.source_asset_id,
+            source_metadata=oshot.source_metadata,
+            provider_config=oshot.provider_config,
+            visual_prompt=oshot.visual_prompt,
+            image_prompt=oshot.image_prompt,
+            video_prompt=oshot.video_prompt,
+            camera=oshot.camera,
+            subject=oshot.subject,
+            action=oshot.action,
+            duration_seconds=oshot.duration_seconds,
+            is_locked=False,
+            status="DRAFT",
+        )
+        db.add(nshot)
+
+    db.commit()
+    db.refresh(new_scene)
+    return new_scene
+
+
 @router.delete(
     "/scenes/{scene_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -257,6 +494,17 @@ def delete_scene(
         )
 
     LockMachineService.check_mutation_allowed(db, "SCENE", scene_id)
+
+    # Check if any shots in this scene have existing generation jobs or ledger audit records
+    shots = db.query(Shot).filter(Shot.scene_id == scene_id).all()
+    for s in shots:
+        has_jobs = db.query(GenerationJob).filter(GenerationJob.shot_id == s.id).first() is not None
+        has_ledger = db.query(UsageLedger).filter(UsageLedger.shot_id == s.id).first() is not None
+        if has_jobs or has_ledger:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot delete Scene containing shots with recorded generation jobs or ledger audit history (Shot '{s.id}').",
+            )
 
     db.delete(scene)
     db.commit()

@@ -1,17 +1,18 @@
 import React from 'react';
-import type { Project, ApprovalStatus, GenerationJob } from '../../api/types';
+import type { Project, ApprovalStatus, GenerationJob, BudgetSummary } from '../../api/types';
 import { CheckSquare, History, ShieldCheck, FileCheck } from 'lucide-react';
-
 
 interface QCHistoryPanelProps {
   project: Project;
   jobs: GenerationJob[];
+  budget?: BudgetSummary | null;
   onUpdateStatus: (status: ApprovalStatus) => void;
 }
 
 export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
   project,
   jobs,
+  budget,
   onUpdateStatus,
 }) => {
   const completedJobs = jobs.filter((j) => j.status === 'COMPLETED');
@@ -19,29 +20,46 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
 
   const qcChecklist = [
     {
-      title: 'Storyboard Script & Prompt Alignment',
-      checked: true,
-      desc: 'Visual shot prompts align with scene settings and project goal.',
+      title: 'Budget Compliance & Hard Limit Check',
+      isAutomated: true,
+      passed: !budget?.hard_limit_exceeded,
+      statusLabel: budget?.hard_limit_exceeded ? 'FAIL: Hard Limit Exceeded' : 'PASS: Within Budget Limit',
+      desc: budget?.hard_limit_exceeded
+        ? 'Current commitments exceed hard budget limit. Dispatch is blocked.'
+        : `Confirmed cost $${budget?.confirmed_cost?.toFixed(2) || '0.00'} / Limit $${project.budget_limit ?? 'None'}.`,
     },
     {
-      title: 'Continuity Bibles Enforcement',
-      checked: true,
-      desc: 'Character, location, and brand continuity locks verified.',
+      title: 'Asset Generation Reliability Check',
+      isAutomated: true,
+      passed: completedJobs.length > 0 && failedJobs.length === 0,
+      statusLabel:
+        failedJobs.length > 0
+          ? `${failedJobs.length} Failed Job(s)`
+          : completedJobs.length > 0
+          ? `${completedJobs.length} Completed`
+          : 'Pending Generation',
+      desc: `${completedJobs.length} job(s) completed successfully, ${failedJobs.length} failed.`,
     },
     {
-      title: 'Aspect Ratio & Resolution Integrity',
-      checked: true,
-      desc: `Project aspect ratio (${project.preferred_aspect_ratio || '16:9'}) uniformly inherited across all shots.`,
+      title: 'Aspect Ratio & Resolution Consistency',
+      isAutomated: true,
+      passed: Boolean(project.preferred_aspect_ratio),
+      statusLabel: project.preferred_aspect_ratio || 'Configured',
+      desc: `Target aspect ratio: ${project.preferred_aspect_ratio || '16:9'} assigned to project.`,
     },
     {
-      title: 'Budget Compliance & Charge Safety',
-      checked: !project.budget_limit || (project.budget_limit > 0),
-      desc: 'Audit ledger reflects zero duplicate reservations.',
+      title: 'Storyboard Script & Prompt Creative Review',
+      isAutomated: false,
+      passed: false,
+      statusLabel: 'Manual Review Required',
+      desc: 'Editorial check: verify that visual shot prompts align with creative vision.',
     },
     {
-      title: 'Asset Generation Success',
-      checked: completedJobs.length > 0 && failedJobs.length === 0,
-      desc: `${completedJobs.length} shots generated cleanly; ${failedJobs.length} failures.`,
+      title: 'Continuity Bibles & Character Review',
+      isAutomated: false,
+      passed: false,
+      statusLabel: 'Manual Review Required',
+      desc: 'Creative check: inspect character appearance and location continuity across generated shots.',
     },
   ];
 
@@ -56,15 +74,20 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
           padding: '20px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <ShieldCheck size={20} color="#818cf8" />
-            <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
-              Quality Control & Approval Stage
-            </h3>
+            <div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
+                Quality Control & Approval Stage
+              </h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                Stage gates and pre-release verification checklist
+              </p>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {(['DRAFT', 'READY_FOR_REVIEW', 'APPROVED', 'LOCKED', 'NEEDS_ATTENTION'] as ApprovalStatus[]).map((st) => (
               <button
                 key={st}
@@ -94,11 +117,31 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
             >
               <CheckSquare
                 size={16}
-                color={item.checked ? '#34d399' : 'var(--text-muted)'}
+                color={
+                  item.isAutomated
+                    ? item.passed
+                      ? '#34d399'
+                      : 'var(--accent-rose)'
+                    : 'var(--accent-amber)'
+                }
                 style={{ marginTop: '2px' }}
               />
-              <div>
-                <h4 style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{item.title}</h4>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h4 style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{item.title}</h4>
+                  <span
+                    className={`badge ${
+                      item.isAutomated
+                        ? item.passed
+                          ? 'badge-approved'
+                          : 'badge-attention'
+                        : 'badge-review'
+                    }`}
+                    style={{ fontSize: '0.65rem' }}
+                  >
+                    {item.statusLabel}
+                  </span>
+                </div>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                   {item.desc}
                 </p>
@@ -119,9 +162,14 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
           <History size={20} color="#818cf8" />
-          <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
-            Production & Generation History
-          </h3>
+          <div>
+            <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
+              Generation Dispatch Audit Log & Discovered Assets
+            </h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              Full historical log of generation dispatches and output assets per shot. Full asset provenance is preserved across retries.
+            </p>
+          </div>
         </div>
 
         {jobs.length === 0 ? (
