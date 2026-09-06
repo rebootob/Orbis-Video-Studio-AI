@@ -192,6 +192,24 @@ def batch_generate_project_shots(
     req = request or BatchJobCreateRequest()
     eff_provider = req.provider_name or provider_name
     from app.services.batch_resume import BatchResumeService
+
+    estimate = BatchResumeService.estimate_batch(
+        db=db,
+        project_id=project_id,
+        operation_type=req.operation_type,
+        shot_ids=req.shot_ids,
+        provider_name=eff_provider,
+        only_incomplete=req.only_incomplete,
+    )
+    if estimate.get("shot_count", 0) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Batch operation exceeds legacy endpoint list capacity ({estimate['shot_count']} eligible shots > 100 limit). "
+                "Use canonical 'POST /projects/{project_id}/jobs/resume' for large or unbounded batch runs."
+            ),
+        )
+
     batch_run, jobs = BatchResumeService.execute_batch(
         db=db,
         project_id=project_id,

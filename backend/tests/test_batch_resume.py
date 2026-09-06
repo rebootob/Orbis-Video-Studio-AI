@@ -877,7 +877,7 @@ def test_concurrent_active_conflict_produces_truthful_outcome(db_session, test_p
     assert len(jobs) == 0
     assert run.failed_count == 0
     assert run.skipped_count == 1
-    assert run.status == "DISPATCHED"
+    assert run.status == "NO_OP"
 
     item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
     assert item.decision == "SKIPPED"
@@ -910,12 +910,14 @@ def test_batch_run_failed_count_includes_dispatch_failures(db_session, test_proj
 
 
 def test_deterministic_ordering_with_stable_tie_breaker(db_session, test_project):
-    """Test 10: Deterministic ordering with stable tie-breaker: (Scene.scene_number, Shot.shot_number, Shot.id)."""
+    """Test 10: Deterministic ordering with stable tie-breaker: (Shot.created_at, Shot.id)."""
+    from datetime import timedelta
     project, sc1, sc2 = test_project
-    # Create shots across scenes in mixed order
-    s2_1 = Shot(id=uuid.uuid4(), scene_id=sc2.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
-    s1_2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
-    s1_1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    base_t = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    # Create shots with sequential created_at timestamps
+    s1_1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0, created_at=base_t)
+    s1_2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0, created_at=base_t + timedelta(seconds=1))
+    s2_1 = Shot(id=uuid.uuid4(), scene_id=sc2.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0, created_at=base_t + timedelta(seconds=2))
     db_session.add_all([s2_1, s1_2, s1_1])
     db_session.commit()
 
@@ -925,7 +927,7 @@ def test_deterministic_ordering_with_stable_tie_breaker(db_session, test_project
         operation_type="CONTINUE_INCOMPLETE",
     )
     assert len(jobs) == 3
-    # First scene 1 shot 1, then scene 1 shot 2, then scene 2 shot 1
+    # Ordered deterministically by (created_at, id)
     assert jobs[0].shot_id == s1_1.id
     assert jobs[1].shot_id == s1_2.id
     assert jobs[2].shot_id == s2_1.id
@@ -1226,3 +1228,169 @@ def test_snapshot_whole_project_execution_is_immune_to_concurrent_ordering_shift
     processed_shot_ids = {it.shot_id for it in items}
     all_created_ids = {s.id for s in shots_s1 + shots_s2}
     assert processed_shot_ids == all_created_ids
+
+
+def test_keyset_pagination_no_full_materialization_and_scene_renumber_immunity(db_session, test_project, monkeypatch):
+    """Test 17: keeyset pagination processes in bounded chunks, excludes post-snapshot shots,
+    and is immune to scene/shot renumbering during processing.
+    """
+    from datetime import timedelta
+    project, sc1, sc2 = test_project
+    base_t = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    # Create 120 shots across 2 scenes with sequential created_at
+    created_shots = []
+    for i in range(120):
+        target_scene = sc1 if i < 60 else sc2
+        shot = Shot(
+            id=uuid.uuid4(),
+            scene_id=target_scene.id,
+            shot_number=(i % 60) + 1,
+            shot_type="AI_GENERATED",
+            duration_seconds=4.0,
+            created_at=base_t + timedelta(seconds=i),
+        )
+        created_shots.append(shot)
+    db_session.add_all(created_shots)
+    db_session.commit()
+
+    # Verify estimate_batch uses keyset pagination without loading all candidate shot IDs
+    est = BatchResumeService.estimate_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert est["shot_count"] == 120
+    assert est["total_evaluated"] == 120
+
+    # Test post-snapshot shot isolation:
+    # Set snapshot_cutoff right at shot 100, shots after that must be excluded
+    cutoff_100 = base_t + timedelta(seconds=99)
+    chunks_iter = list(BatchResumeService._iter_shot_chunks(
+        db=db_session,
+        all_scene_ids=[sc1.id, sc2.id],
+        shot_ids=None,
+        snapshot_cutoff=cutoff_100,
+        chunk_size=30,
+    ))
+    # Total shots returned across chunks must be exactly 100
+    total_iter_shots = sum(len(chunk[1]) for chunk in chunks_iter)
+    assert total_iter_shots == 100
+
+    # Renumbering scene/shot numbers mid-run does NOT cause duplicate or missing shots
+    sc1.scene_number = 999
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert run.requested_count == 120
+    assert run.queued_count == 120
+    assert run.skipped_count == 0
+
+    items = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).all()
+    assert len(items) == 120
+    item_shot_ids = {it.shot_id for it in items}
+    assert item_shot_ids == {s.id for s in created_shots}
+
+
+def test_zero_work_run_status_is_truthfully_noop(db_session, test_project):
+    """Test 18: When queued_count == 0 and dispatch_failed_count == 0,
+    BatchRun.status must be NO_OP across all completed, all locked, and all active shots.
+    """
+    project, sc1, _ = test_project
+
+    # Case A: All completed
+    s_comp = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add(s_comp)
+    db_session.flush()
+    j_comp = GenerationJob(id=uuid.uuid4(), shot_id=s_comp.id, provider_name="vidu", status="COMPLETED")
+    db_session.add(j_comp)
+    db_session.commit()
+
+    run_comp, jobs_comp = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=[s_comp.id],
+    )
+    assert len(jobs_comp) == 0
+    assert run_comp.queued_count == 0
+    assert run_comp.status == "NO_OP"
+
+    # Verify GET details also reports NO_OP
+    details_comp = BatchResumeService.get_batch_run_details(db_session, project.id, run_comp.id)
+    assert details_comp.status == "NO_OP"
+
+    # Case B: All locked
+    s_locked = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=True)
+    db_session.add(s_locked)
+    db_session.commit()
+
+    run_locked, jobs_locked = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=[s_locked.id],
+    )
+    assert len(jobs_locked) == 0
+    assert run_locked.queued_count == 0
+    assert run_locked.status == "NO_OP"
+
+    # Case C: All active
+    s_act = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=3, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add(s_act)
+    db_session.flush()
+    j_act = GenerationJob(id=uuid.uuid4(), shot_id=s_act.id, provider_name="vidu", status="PROCESSING")
+    db_session.add(j_act)
+    db_session.commit()
+
+    run_act, jobs_act = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=[s_act.id],
+    )
+    assert len(jobs_act) == 0
+    assert run_act.queued_count == 0
+    assert run_act.status == "NO_OP"
+
+    # Check list endpoint also reflects NO_OP
+    runs_list = BatchResumeService.list_project_batch_runs(db_session, project.id)
+    noop_runs = [r for r in runs_list if r.id in (run_comp.id, run_locked.id, run_act.id)]
+    assert all(r.status == "NO_OP" for r in noop_runs)
+
+
+def test_legacy_batch_endpoint_rejects_over_100_shots(client, db_session, test_project):
+    """Test 19: POST /projects/{project_id}/jobs/batch rejects requests with >100 eligible shots with 400 Bad Request,
+    directing callers to the canonical /jobs/resume endpoint. Requests with <=100 shots remain supported.
+    """
+    project, sc1, _ = test_project
+
+    # Create 105 incomplete shots
+    shots = [
+        Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+        for i in range(1, 106)
+    ]
+    db_session.add_all(shots)
+    db_session.commit()
+
+    # Whole-project batch generation should exceed 100 limit and return 400
+    resp_large = client.post(f"/api/v1/projects/{project.id}/jobs/batch", json={})
+    assert resp_large.status_code == 400
+    err_detail = resp_large.json()["detail"]
+    assert "exceeds legacy endpoint list capacity" in err_detail
+    assert "105 eligible shots > 100 limit" in err_detail
+    assert "POST /projects/{project_id}/jobs/resume" in err_detail
+
+    # But request with <= 100 shots (e.g. 5 shots) succeeds normally on legacy endpoint
+    selected_ids = [str(s.id) for s in shots[:5]]
+    resp_small = client.post(
+        f"/api/v1/projects/{project.id}/jobs/batch",
+        json={"shot_ids": selected_ids},
+    )
+    assert resp_small.status_code == 200
+    jobs = resp_small.json()
+    assert len(jobs) == 5

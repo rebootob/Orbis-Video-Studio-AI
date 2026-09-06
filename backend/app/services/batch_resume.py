@@ -275,6 +275,67 @@ class BatchResumeService:
         return True, None
 
     @classmethod
+    def _iter_shot_chunks(
+        cls,
+        db: Session,
+        all_scene_ids: List[uuid.UUID],
+        shot_ids: Optional[List[uuid.UUID]],
+        snapshot_cutoff: datetime,
+        chunk_size: int = EXECUTE_CHUNK_SIZE,
+    ):
+        """Yield bounded chunks of shots without unbounded materialization or OFFSET.
+
+        When shot_ids is specified, yields chunks of (shots_by_id, chunk_ids_order).
+        When shot_ids is None, uses keyset pagination on (Shot.created_at, Shot.id)
+        bounded by snapshot_cutoff.
+        """
+        if shot_ids is not None:
+            requested_ids = list(dict.fromkeys(shot_ids))
+            for i in range(0, len(requested_ids), chunk_size):
+                chunk_req_ids = requested_ids[i:i + chunk_size]
+                chunk_shots = (
+                    db.query(Shot)
+                    .filter(
+                        Shot.scene_id.in_(all_scene_ids),
+                        Shot.id.in_(chunk_req_ids),
+                    )
+                    .all()
+                ) if all_scene_ids else []
+                shots_by_id = {s.id: s for s in chunk_shots}
+                yield shots_by_id, chunk_req_ids
+        else:
+            if not all_scene_ids:
+                return
+
+            last_created_at: Optional[datetime] = None
+            last_id: Optional[uuid.UUID] = None
+
+            while True:
+                q = (
+                    db.query(Shot)
+                    .filter(
+                        Shot.scene_id.in_(all_scene_ids),
+                        Shot.created_at <= snapshot_cutoff,
+                    )
+                )
+                if last_created_at is not None and last_id is not None:
+                    q = q.filter(
+                        (Shot.created_at > last_created_at)
+                        | ((Shot.created_at == last_created_at) & (Shot.id > last_id))
+                    )
+                q = q.order_by(Shot.created_at.asc(), Shot.id.asc()).limit(chunk_size)
+                page_shots = q.all()
+                if not page_shots:
+                    break
+
+                shots_by_id = {s.id: s for s in page_shots}
+                chunk_ids = [s.id for s in page_shots]
+                last_created_at = page_shots[-1].created_at
+                last_id = page_shots[-1].id
+
+                yield shots_by_id, chunk_ids
+
+    @classmethod
     def evaluate_project_candidates(
         cls,
         db: Session,
@@ -292,6 +353,7 @@ class BatchResumeService:
             )
 
         op_enum = cls._validate_operation_type(operation_type)
+        snapshot_cutoff = datetime.now(timezone.utc)
 
         scenes = (
             db.query(Scene)
@@ -335,34 +397,21 @@ class BatchResumeService:
         skipped_items: List[Tuple[Shot, CandidateSkipReason]] = []
         evaluations_by_shot_id: Dict[uuid.UUID, CandidateEvaluation] = {}
 
-        if shot_ids is not None:
-            requested_ids = list(dict.fromkeys(shot_ids))
-            found_shots_by_id: Dict[uuid.UUID, Shot] = {}
-            if all_scene_ids:
-                for i in range(0, len(requested_ids), CHUNK_SIZE):
-                    chunk_req_ids = requested_ids[i:i + CHUNK_SIZE]
-                    chunk_shots = (
-                        db.query(Shot)
-                        .filter(
-                            Shot.scene_id.in_(all_scene_ids),
-                            Shot.id.in_(chunk_req_ids),
-                        )
-                        .all()
-                    )
-                    for s in chunk_shots:
-                        found_shots_by_id[s.id] = s
-
-            found_shot_ids = list(found_shots_by_id.keys())
+        for shots_by_id, chunk_ids in cls._iter_shot_chunks(
+            db=db,
+            all_scene_ids=all_scene_ids,
+            shot_ids=shot_ids,
+            snapshot_cutoff=snapshot_cutoff,
+            chunk_size=CHUNK_SIZE,
+        ):
+            found_ids = list(shots_by_id.keys())
             job_rows: List[Tuple[uuid.UUID, str]] = []
-            for i in range(0, len(found_shot_ids), CHUNK_SIZE):
-                chunk_ids = found_shot_ids[i:i + CHUNK_SIZE]
-                rows = (
+            if found_ids:
+                job_rows = (
                     db.query(GenerationJob.shot_id, GenerationJob.status)
-                    .filter(GenerationJob.shot_id.in_(chunk_ids))
+                    .filter(GenerationJob.shot_id.in_(found_ids))
                     .all()
                 )
-                job_rows.extend(rows)
-
             (
                 shot_has_completed,
                 shot_has_cancelling,
@@ -371,15 +420,15 @@ class BatchResumeService:
                 shot_has_failed,
             ) = cls._categorize_job_rows(job_rows)
 
-            for req_id in requested_ids:
-                if req_id not in found_shots_by_id:
+            for req_id in chunk_ids:
+                if req_id not in shots_by_id:
                     dummy_shot = Shot(id=req_id, shot_number=0, shot_type="UNKNOWN")
                     ev = CandidateEvaluation(shot=dummy_shot, is_eligible=False, skip_reason=CandidateSkipReason.NOT_FOUND)
                     skipped_items.append((dummy_shot, CandidateSkipReason.NOT_FOUND))
                     evaluations_by_shot_id[req_id] = ev
                     continue
 
-                shot = found_shots_by_id[req_id]
+                shot = shots_by_id[req_id]
                 cls._evaluate_single_shot(
                     shot=shot,
                     archived_scene_ids=archived_scene_ids,
@@ -398,66 +447,6 @@ class BatchResumeService:
                     skipped_items=skipped_items,
                     evaluations_by_shot_id=evaluations_by_shot_id,
                 )
-
-        else:
-            if not all_scene_ids:
-                return BatchEvaluationResult(
-                    project=project,
-                    total_evaluated=0,
-                    eligible_shots=[],
-                    skipped_items=[],
-                    evaluations_by_shot_id={},
-                )
-
-            offset = 0
-            while True:
-                chunk_shots = (
-                    db.query(Shot)
-                    .join(Scene, Shot.scene_id == Scene.id)
-                    .filter(Scene.id.in_(all_scene_ids))
-                    .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
-                    .offset(offset)
-                    .limit(CHUNK_SIZE)
-                    .all()
-                )
-                if not chunk_shots:
-                    break
-
-                chunk_shot_ids = [s.id for s in chunk_shots]
-                job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
-                    .filter(GenerationJob.shot_id.in_(chunk_shot_ids))
-                    .all()
-                )
-                (
-                    shot_has_completed,
-                    shot_has_cancelling,
-                    shot_has_reconciliation,
-                    shot_has_active,
-                    shot_has_failed,
-                ) = cls._categorize_job_rows(job_rows)
-
-                for shot in chunk_shots:
-                    cls._evaluate_single_shot(
-                        shot=shot,
-                        archived_scene_ids=archived_scene_ids,
-                        scene_story_map=scene_story_map,
-                        locked_shot_ids=locked_shot_ids,
-                        locked_scene_ids=locked_scene_ids,
-                        locked_story_ids=locked_story_ids,
-                        shot_has_completed=shot_has_completed,
-                        shot_has_cancelling=shot_has_cancelling,
-                        shot_has_reconciliation=shot_has_reconciliation,
-                        shot_has_active=shot_has_active,
-                        shot_has_failed=shot_has_failed,
-                        op_enum=op_enum,
-                        only_incomplete=only_incomplete,
-                        eligible_shots=eligible_shots,
-                        skipped_items=skipped_items,
-                        evaluations_by_shot_id=evaluations_by_shot_id,
-                    )
-
-                offset += CHUNK_SIZE
 
         total_evaluated = len(eligible_shots) + len(skipped_items)
 
@@ -489,6 +478,7 @@ class BatchResumeService:
 
         op_enum = cls._validate_operation_type(operation_type)
         eff_provider = provider_name or ProviderFactory.get_default_provider_name()
+        snapshot_cutoff = datetime.now(timezone.utc)
 
         scenes = (
             db.query(Scene)
@@ -527,40 +517,21 @@ class BatchResumeService:
         total_cost = 0.0
         has_unknown = False
 
-        if shot_ids is not None:
-            candidate_shot_ids = list(dict.fromkeys(shot_ids))
-        else:
-            if all_scene_ids:
-                candidate_shot_ids = [
-                    row[0]
-                    for row in (
-                        db.query(Shot.id)
-                        .join(Scene, Shot.scene_id == Scene.id)
-                        .filter(Scene.id.in_(all_scene_ids))
-                        .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
-                        .all()
-                    )
-                ]
-            else:
-                candidate_shot_ids = []
-
-        for i in range(0, len(candidate_shot_ids), EXECUTE_CHUNK_SIZE):
-            chunk_req_ids = candidate_shot_ids[i:i + EXECUTE_CHUNK_SIZE]
-            chunk_shots = (
-                db.query(Shot)
-                .filter(
-                    Shot.scene_id.in_(all_scene_ids),
-                    Shot.id.in_(chunk_req_ids),
+        for shots_by_id, chunk_req_ids in cls._iter_shot_chunks(
+            db=db,
+            all_scene_ids=all_scene_ids,
+            shot_ids=shot_ids,
+            snapshot_cutoff=snapshot_cutoff,
+            chunk_size=EXECUTE_CHUNK_SIZE,
+        ):
+            found_ids = list(shots_by_id.keys())
+            job_rows: List[Tuple[uuid.UUID, str]] = []
+            if found_ids:
+                job_rows = (
+                    db.query(GenerationJob.shot_id, GenerationJob.status)
+                    .filter(GenerationJob.shot_id.in_(found_ids))
+                    .all()
                 )
-                .all()
-            ) if all_scene_ids else []
-            shots_by_id = {s.id: s for s in chunk_shots}
-
-            job_rows = (
-                db.query(GenerationJob.shot_id, GenerationJob.status)
-                .filter(GenerationJob.shot_id.in_(chunk_req_ids))
-                .all()
-            )
             (
                 shot_has_completed,
                 shot_has_cancelling,
@@ -658,6 +629,7 @@ class BatchResumeService:
         op_enum = cls._validate_operation_type(operation_type)
         eff_provider = provider_name or ProviderFactory.get_default_provider_name()
         now = datetime.now(timezone.utc)
+        snapshot_cutoff = now
 
         # 1. Prefetch scenes and active locks
         scenes = (
@@ -717,41 +689,22 @@ class BatchResumeService:
         has_dispatch_failure = False
         created_jobs: List[GenerationJob] = []
 
-        # 3. Stream processing in chunks using immutable candidate shot ID snapshot
-        if shot_ids is not None:
-            candidate_shot_ids = list(dict.fromkeys(shot_ids))
-        else:
-            if all_scene_ids:
-                candidate_shot_ids = [
-                    row[0]
-                    for row in (
-                        db.query(Shot.id)
-                        .join(Scene, Shot.scene_id == Scene.id)
-                        .filter(Scene.id.in_(all_scene_ids))
-                        .order_by(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())
-                        .all()
-                    )
-                ]
-            else:
-                candidate_shot_ids = []
-
-        for i in range(0, len(candidate_shot_ids), EXECUTE_CHUNK_SIZE):
-            chunk_req_ids = candidate_shot_ids[i:i + EXECUTE_CHUNK_SIZE]
-            chunk_shots = (
-                db.query(Shot)
-                .filter(
-                    Shot.scene_id.in_(all_scene_ids),
-                    Shot.id.in_(chunk_req_ids),
+        # 3. Stream processing in chunks using keyset/snapshot pagination
+        for shots_by_id, chunk_req_ids in cls._iter_shot_chunks(
+            db=db,
+            all_scene_ids=all_scene_ids,
+            shot_ids=shot_ids,
+            snapshot_cutoff=snapshot_cutoff,
+            chunk_size=EXECUTE_CHUNK_SIZE,
+        ):
+            found_ids = list(shots_by_id.keys())
+            job_rows: List[Tuple[uuid.UUID, str]] = []
+            if found_ids:
+                job_rows = (
+                    db.query(GenerationJob.shot_id, GenerationJob.status)
+                    .filter(GenerationJob.shot_id.in_(found_ids))
+                    .all()
                 )
-                .all()
-            ) if all_scene_ids else []
-            shots_by_id = {s.id: s for s in chunk_shots}
-
-            job_rows = (
-                db.query(GenerationJob.shot_id, GenerationJob.status)
-                .filter(GenerationJob.shot_id.in_(chunk_req_ids))
-                .all()
-            )
             (
                 shot_has_completed,
                 shot_has_cancelling,
@@ -911,6 +864,8 @@ class BatchResumeService:
             batch_run.updated_at = datetime.now(timezone.utc)
             if has_dispatch_failure:
                 batch_run.status = "PARTIAL_FAILED" if queued_count > 0 else "FAILED"
+            elif queued_count == 0:
+                batch_run.status = "NO_OP"
             else:
                 batch_run.status = "DISPATCHED"
             db.commit()
@@ -923,6 +878,8 @@ class BatchResumeService:
         batch_run.failed_count = dispatch_failed_count
         if has_dispatch_failure:
             batch_run.status = "PARTIAL_FAILED" if queued_count > 0 else "FAILED"
+        elif queued_count == 0:
+            batch_run.status = "NO_OP"
         else:
             batch_run.status = "DISPATCHED"
         batch_run.updated_at = datetime.now(timezone.utc)
@@ -965,7 +922,7 @@ class BatchResumeService:
             batch_run.failed_count = failed_jobs + dispatch_failures
 
             if queued_items == 0:
-                batch_run.status = "FAILED" if dispatch_failures > 0 else "DISPATCHED"
+                batch_run.status = "FAILED" if dispatch_failures > 0 else "NO_OP"
             else:
                 total_terminal = completed_jobs + failed_jobs
                 has_failures = (failed_jobs + dispatch_failures) > 0
@@ -1045,7 +1002,7 @@ class BatchResumeService:
                 r.failed_count = failed_jobs + dispatch_failures
 
                 if queued_items == 0:
-                    r.status = "FAILED" if dispatch_failures > 0 else "DISPATCHED"
+                    r.status = "FAILED" if dispatch_failures > 0 else "NO_OP"
                 else:
                     total_terminal = completed_jobs + failed_jobs
                     has_failures = (failed_jobs + dispatch_failures) > 0
