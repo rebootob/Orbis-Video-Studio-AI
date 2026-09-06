@@ -69,24 +69,37 @@ graph TD
   - **Final Review:** PASS / READY TO MERGE (Review ID 5124386306)
   - **Scope delivered:** Mode-aware workspace (Story/Short/Loop/Scene), staged workflow with production approval gates, soft-delete / version lineage retention (FULL_HISTORY_RETENTION / NO_SILENT_HISTORY_LOSS), dashboard project management (rename/duplicate/archive/search/sort), actionable queue controls (Generate Selected / Continue incomplete / safe cost confirmation), and provider submission stage fencing.
 
+- **P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #28
+  - **PR:** #29
+  - **Reviewed Head:** `b2f349adb6d5704fa1aadfb19e06644b40a37080`
+  - **Merge Commit:** `643614b089a295ea96be179e470707609cbe4b53`
+  - **Final Review:** PASS / READY TO MERGE (Review ID 5124729394)
+  - **Scope Delivered:**
+    - Canonical `BatchResumeService` supporting Generate Selected, Continue Incomplete, and Retry Failed.
+    - Shot-level deduplication (at most ONE new job per shot, even with multiple historical failed jobs).
+    - Repeat-safe resume semantics (no duplicate active work, preservation of completed assets).
+    - Transactional `GenerationJob` + `UsageLedger` + `BatchRunItem` atomic persistence with savepoint rollback isolation.
+    - Strictly bounded keyset processing via `(created_at, id)` snapshot, eliminating full-project candidate in-memory materialization.
+    - Streaming chunk processing (`EXECUTE_CHUNK_SIZE = 50`) and set-based DB queries (zero N+1 queries).
+    - Strictly bounded memory retention (`MAX_COMPATIBILITY_RETURNED_JOBS = 100`, `accumulate_jobs=False` on canonical resume).
+    - Fail-closed legacy `/jobs/batch` execution boundary ($\le 100$) with atomic rollback on capacity breach.
+    - Lightweight `BatchRun` & `BatchRunItem` audit trail with truthful skip reasons and dynamic read reconciliation.
+    - Migration `011_batch_resume_runs_and_indexes.py` with targeted indexes.
+    - Full frontend integration removing client-side retry loops and guarding stage transitions.
+
 ---
 
 ## 3. Active Work Package
 
-- **P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails**
-  - **Status:** **AUTHORIZED / IMPLEMENTED / WAITING CHATGPT REVIEW**
-  - **Issue:** #28
-  - **Branch:** `ai/p2-wp011-batch-resume`
-  - **Current gate:** ChatGPT independent review -> Owner merge decision.
+```text
+ACTIVE_WORK_PACKAGE = NONE
+```
 
-### WP011 Scope Delivered:
-- Canonical `BatchResumeService` supporting Generate Selected, Continue Incomplete, Retry Failed.
-- Shot-level deduplication (at most ONE new job per shot, even with multiple historical failed jobs).
-- Repeat-safe resume semantics (no duplicate active work, preservation of completed assets).
-- Lightweight `BatchRun` & `BatchRunItem` audit trail with truthful skip reasons.
-- Set-based candidate selection eliminating N+1 database queries.
-- Migration `011_batch_resume_runs_and_indexes.py` with targeted indexes.
-- Full frontend integration removing client-side retry loops.
+- **Current Status:** WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
+- No work package is currently active.
+- P2-WP012 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP012 without explicit Owner authorization.
 
 ---
 
@@ -103,6 +116,31 @@ The roadmap should prioritize end-to-end production automation rather than build
 - **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
   - **Status:** PROPOSED / NOT AUTHORIZED
   - Dedicated ImageProvider abstraction, batch storyboard/keyframe generation, continuity/reference mapping and retry/resume.
+
+### Future Provider Planning Note — ComfyUI / Cloud GPU
+
+Preserve provider-neutral architecture. ComfyUI + Cloud GPU is a FUTURE provider/execution candidate.
+
+Concept:
+```text
+Orbis
+-> GenerationJob
+-> Provider Adapter
+-> ComfyUI Provider
+-> Cloud GPU Worker
+-> Object Storage
+-> Orbis Asset / Version / History
+```
+
+Status: `PROPOSED / NOT AUTHORIZED / NOT IMPLEMENTED`
+
+Important product locks:
+- Vidu remains the only currently implemented registered VideoProvider.
+- ComfyUI must not replace the provider abstraction.
+- Do not add ComfyUI source code in this docs sync.
+- Do not select a GPU cloud vendor yet.
+- `LOCAL_AI` remains disallowed.
+- Cloud-hosted ComfyUI is compatible with `CLOUD_AI` direction.
 
 ### Phase 3 — Audio, Assembly, QC & Cloud Rendering
 

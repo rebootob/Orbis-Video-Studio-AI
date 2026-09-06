@@ -23,6 +23,7 @@ P2-WP007 = PASS / CLOSED / MERGED
 P2-WP008 = PASS / CLOSED / MERGED
 P2-WP009 = PASS / CLOSED / MERGED
 P2-WP010 = PASS / CLOSED / MERGED
+P2-WP011 = PASS / CLOSED / MERGED
 ```
 
 Key reviewed/merge truth:
@@ -38,9 +39,14 @@ WP009 reviewed HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
 WP009 merge: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
 WP010 reviewed HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
-WP010 merge / current documented main HEAD: 639e61fb69b6abee8598074add458035db906ceb
+WP010 merge: 639e61fb69b6abee8598074add458035db906ceb
 WP010 PR: #25 (MERGED / CLOSED)
 WP010 Final Review: PASS / READY TO MERGE (Review ID 5124386306)
+
+WP011 reviewed HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
+WP011 merge / current documented main HEAD: 643614b089a295ea96be179e470707609cbe4b53
+WP011 PR: #29 (MERGED / CLOSED)
+WP011 Final Review: PASS / READY TO MERGE (Review ID 5124729394)
 ```
 
 ---
@@ -48,30 +54,57 @@ WP010 Final Review: PASS / READY TO MERGE (Review ID 5124386306)
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = P2-WP011
-ISSUE = #28
-BRANCH = ai/p2-wp011-batch-resume
-STATUS = AUTHORIZED / IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
-ANTIGRAVITY = STOP / WAITING REVIEW
+ACTIVE WORK PACKAGE = NONE
+STATUS = WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
+ANTIGRAVITY = STOP / NONE
 CODEX = STOP
 CLAUDE_CODE = STOP
 ```
 
-P2-WP011 is fully implemented and tested. Do not merge without Owner approval.
-Do NOT start or implement WP012 without explicit Owner authorization.
+P2-WP011 is merged into `main`. Do NOT start or implement WP012 without explicit Owner authorization.
+P2-WP012 remains: `PROPOSED / NOT AUTHORIZED`.
 
-### Future WP011 Planning Consideration
+### Performance & Scalability Guardrails Delivered in WP011
 
 `PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
 
-When P2-WP011 is authorized, the design must account for:
-- selective/batch operations must avoid unbounded loading
-- avoid N+1 database behavior
-- pagination/chunking for large job/shot sets
-- required DB indexes for batch/resume paths
-- bounded concurrency
-- truthful progress for large batches
-- performance/load regression tests
+The following guardrails were delivered and verified in P2-WP011:
+- Keyset-based pagination `(created_at, id)` eliminating unbounded in-memory candidate materialization
+- Streaming execution in chunks of $\le 50$ (`EXECUTE_CHUNK_SIZE = 50`)
+- Set-based DB queries in candidate evaluation and batch run listings (zero N+1 queries)
+- Reversible Alembic migration `011_batch_resume_runs_and_indexes.py` with targeted indexes
+- Bounded memory retention for created jobs (`MAX_COMPATIBILITY_RETURNED_JOBS = 100`, `accumulate_jobs=False` on canonical resume)
+- Fail-closed legacy `/jobs/batch` execution boundary ($\le 100$) with atomic rollback on capacity breach
+
+### ComfyUI / Cloud GPU Future Planning Note
+
+Preserve provider-neutral architecture.
+
+ComfyUI + Cloud GPU is a FUTURE provider/execution candidate.
+
+Concept:
+```text
+Orbis
+-> GenerationJob
+-> Provider Adapter
+-> ComfyUI Provider
+-> Cloud GPU Worker
+-> Object Storage
+-> Orbis Asset / Version / History
+```
+
+Status:
+```text
+PROPOSED / NOT AUTHORIZED / NOT IMPLEMENTED
+```
+
+Important product locks:
+- Vidu remains the only currently implemented registered VideoProvider.
+- ComfyUI must not replace the provider abstraction.
+- Do not add ComfyUI source code in this docs sync.
+- Do not select a GPU cloud vendor yet.
+- `LOCAL_AI` remains disallowed.
+- Cloud-hosted ComfyUI is compatible with `CLOUD_AI` direction.
 
 ### Future-Performance Backlog Note (Preserved)
 
@@ -193,12 +226,12 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD.
+1. Fresh-fetch current `main` HEAD (`643614b089a295ea96be179e470707609cbe4b53`).
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
 5. Read `DOCUMENT_INDEX.md`.
 6. Read this handoff.
-7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for Owner authorization before starting implementation.
+7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for explicit Owner authorization before starting implementation.
 8. Do not repeat closed work.
-9. Do not start WP011 without explicit Owner authorization.
+9. Do not start WP012 automatically. P2-WP012 remains PROPOSED / NOT AUTHORIZED.
