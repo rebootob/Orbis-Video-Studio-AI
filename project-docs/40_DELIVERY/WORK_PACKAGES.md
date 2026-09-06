@@ -60,33 +60,26 @@ graph TD
   - **Merge Commit:** `9f094a5cbe9a4faeb5741231d0a819da0da283c1`
   - **Scope delivered:** provider-neutral usage ledger, configurable pricing service, project budget controls, manual adjustment audit, DB-level idempotency/uniqueness and concurrency-safe accounting behavior.
 
+- **P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #24
+  - **PR:** #25
+  - **Reviewed Head:** `0f0a16fa95c8110bc8ab7a0c52d45351eaa82182`
+  - **Merge Commit:** `639e61fb69b6abee8598074add458035db906ceb`
+  - **Final Review:** PASS / READY TO MERGE (Review ID 5124386306)
+  - **Scope delivered:** Mode-aware workspace (Story/Short/Loop/Scene), staged workflow with production approval gates, soft-delete / version lineage retention (FULL_HISTORY_RETENTION / NO_SILENT_HISTORY_LOSS), dashboard project management (rename/duplicate/archive/search/sort), actionable queue controls (Generate Selected / Continue incomplete / safe cost confirmation), and provider submission stage fencing.
+
 ---
 
 ## 3. Active Work Package
 
-- **P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX**
-  - **Status:** **AUTHORIZED / FIRST PASS IMPLEMENTED / CHANGES REQUIRED**
-  - **Issue:** #24
-  - **PR:** #25
-  - **Branch:** `ai/p2-wp010-mode-aware-web-workspace`
-  - **Last reviewed Head:** `291ea773681831a0a68e585eb7e0664902102be3`
-  - **Current gate:** Antigravity corrective on the same branch/PR -> ChatGPT independent review -> Owner merge decision.
+```text
+ACTIVE_WORK_PACKAGE = NONE
+CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
+```
 
-### WP010 corrective focus
-
-- preserve full history; remove unsafe hard-delete behavior
-- multi-project dashboard usability
-- approval-gated staged workflow: Story -> Storyboard -> Shot Plan -> Images -> Video
-- Guided Flexibility / Next Recommended Action
-- real reference upload and truthful UI states
-- Generate Selected / continue incomplete / actionable queue behavior
-- safe cost confirmation before chargeable batch generation
-- lightweight History / Version entry point
-- reorder/autosave/unsaved-state readiness
-- safe CORS configuration
-- keep the UI professional, simple and progressively disclose advanced controls
-
-WP010 must not expand into the full audio engine, final renderer or WP011 implementation.
+No active Work Package is currently authorized for execution.
+Do not implement or start the next Work Package without explicit Owner authorization.
 
 ---
 
@@ -99,6 +92,24 @@ The roadmap should prioritize end-to-end production automation rather than build
 - **P2-WP011 — Selective / Batch Regeneration & Resume Service**
   - **Status:** PROPOSED / NOT AUTHORIZED
   - Regenerate selected unlocked/failed/incomplete work only; preserve completed assets and history.
+  - **Planning Note for WP011:**
+    `PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
+    For WP011 planning specifically consider:
+    - selective/batch operations must avoid unbounded loading
+    - avoid N+1 database behavior
+    - pagination/chunking for large job/shot sets
+    - required DB indexes for batch/resume paths
+    - bounded concurrency
+    - truthful progress for large batches
+    - performance/load regression tests
+    *(Do not implement these items during documentation closure).*
+  - **Future-Performance Backlog Note (Preserved):**
+    - server-side Project pagination
+    - Asset/Job history pagination
+    - media thumbnail/lazy-loading
+    - streaming/multipart large-file upload
+    - media preview streaming
+    - frontend virtualization where needed
 
 - **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
   - **Status:** PROPOSED / NOT AUTHORIZED
