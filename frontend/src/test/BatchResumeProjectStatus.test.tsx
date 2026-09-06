@@ -117,6 +117,8 @@ describe('Batch Generation Status Advancement Safety', () => {
     const projectCard = await screen.findByText('Batch Safety Project');
     fireEvent.click(projectCard);
 
+    await screen.findByText('Spaceship dock');
+
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
 
@@ -153,6 +155,8 @@ describe('Batch Generation Status Advancement Safety', () => {
 
     const projectCard = await screen.findByText('Batch Safety Project');
     fireEvent.click(projectCard);
+
+    await screen.findByText('Spaceship dock');
 
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
