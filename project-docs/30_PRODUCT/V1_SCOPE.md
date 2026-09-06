@@ -6,64 +6,88 @@
 
 ## 1. Official Core V1 PASS Definition
 
-V1 is **NOT PASS** until a user can perform the primary end-to-end production path in the Web Workspace UI:
+V1 is NOT PASS until a user can complete an end-to-end browser production flow appropriate to the selected Video Mode:
 
-```
+```text
 Create Project
-  └─► Upload Brief / Script / Documents / References
-        └─► Create / Edit Story
-              └─► Create Scenes
-                    └─► Create Shots
-                          └─► Generate video via Vidu AND/OR Import existing shots
-                                └─► Lock approved assets (Script, Scene, Shot, Character, Voice)
-                                      └─► Configure Dialogue / VO / Music / SFX / Subtitle
-                                            └─► Preview / Edit using simplified Timeline
-                                                  └─► Selective regeneration (affected shots only)
-                                                        └─► Cloud Render
-                                                              └─► Export complete Final MP4
+-> Select Video Mode
+-> Add Brief / Documents / Prompt / References
+-> Build only the creative structure required by that mode
+-> Create Shots
+-> Generate via provider adapter and/or import media
+-> Review and lock approved assets
+-> Configure dialogue / VO / music / SFX / subtitle where applicable
+-> Preview / edit using simplified timeline
+-> Selectively regenerate affected unlocked shots
+-> Human approval
+-> Cloud render
+-> Export final MP4 and approved output variants
 ```
 
 ---
 
-## 2. Architectural Readiness vs Operational Execution
+## 2. Core V1 Video Modes
 
-- **Integration Architecture Readiness (LOCKED FOR V1):** The system design MUST preserve REST/API boundaries, webhook-ready hooks, authentication boundaries, permission models, audit logging, and idempotent job control (`X-Idempotency-Key`).
-- **Operational Integration Gateway (POST-CORE V1 / V1.x):** Full operational integration with external systems (Hermes, n8n) is scheduled as post-core V1 / V1.x delivery, ensuring core browser production flows remain unblocked.
-- **Multi-Output Readiness (LOCKED FOR V1):** The master project asset model preserves aspect ratio metadata and track parameters, delivering core export presets (16:9 YouTube, 9:16 TikTok/Reels, 1:1 Instagram).
-
----
-
-## 3. V1 Feature Scope Matrix
-
-| Feature Module | V1 Requirement Status | Implementation Strategy |
+| Mode | V1 Status | Required Creative Path |
 | :--- | :--- | :--- |
-| **Web Workspace UI** | **REQUIRED FOR CORE V1** | Browser-accessible client workspace UI. |
-| **Document Ingestion** | **REQUIRED FOR CORE V1** | Supports text brief, PDF, Word (.docx), PowerPoint (.pptx). |
-| **Story & Script Engine** | **REQUIRED FOR CORE V1** | Generates narrative outline, formatted script, scenes, and shots. |
-| **Reference Asset Library** | **REQUIRED FOR CORE V1** | Character, Location, Prop, Style, Image, Audio Bibles. |
-| **Vidu Provider Adapter** | **REQUIRED FOR CORE V1** | Default Vidu video generation API integration. |
-| **Hybrid Shot Support** | **REQUIRED FOR CORE V1** | Mix AI generated, imported video, image, recorded, stock. |
-| **Asset Lock Mechanism** | **REQUIRED FOR CORE V1** | Lock Script, Scene, Shot, Character, Voice, Timing entities. |
-| **Audio & Subtitle Engine** | **REQUIRED FOR CORE V1** | Dubbing/VO, Music, SFX, Subtitle generation, Auto-ducking. |
-| **Simplified Timeline** | **REQUIRED FOR CORE V1** | Multi-track timeline preview (shot layout, trimming, audio placement). |
-| **Selective Regeneration** | **REQUIRED FOR CORE V1** | Regenerate only missing or selected unlocked shots. |
-| **Cost & Usage Controls** | **REQUIRED FOR CORE V1** | Budget safety caps and cost audit logging needed for generation safety. |
-| **Cloud Master Render** | **REQUIRED FOR CORE V1** | Cloud video compositing worker render exporting final MP4 video. |
-| **Multi-Output Presets** | **REQUIRED FOR CORE V1** | Basic approved presets for 16:9 (YouTube), 9:16 (TikTok/Reels), 1:1 (Instagram). |
-| **Integration Architecture Readiness** | **REQUIRED FOR V1 DESIGN** | REST API boundary, webhook hooks, auth/permissions, audit logs, idempotency model. |
-| **Full Operational Integration Gateway** | **POST-CORE V1 / V1.x** | Active Hermes / n8n operational integration connectors. |
+| STORY | REQUIRED | Story -> Script -> Scenes -> Shots |
+| SHORT | REQUIRED | Hook/Concept -> Scene -> Shots; Story optional |
+| LOOP | REQUIRED | Loop Spec -> Shot(s); Story/Script optional |
+| SCENE | REQUIRED | Scene -> 1-N Shots; Story optional |
+| PRODUCT | ARCHITECTURE-READY | Later activation only |
+| EXPLAINER | ARCHITECTURE-READY | Later activation only |
+| PRESENTER | ARCHITECTURE-READY | Later activation only |
+| MONTAGE | ARCHITECTURE-READY | Later activation only |
+
+Video Mode is separate from Purpose, Target Platform, Aspect Ratio and Output Preset.
 
 ---
 
-## 4. Explicit Out-of-V1 Scope Boundaries
+## 3. Architectural Readiness vs Operational Execution
 
-> [!WARNING]
-> The following features are strictly **OUT OF V1** and MUST NOT be introduced without formal scope amendment:
-> - Enterprise multi-user tenant administration
-> - Native mobile apps (iOS / Android)
-> - Real-time collaborative multi-user editing (Google Docs style)
-> - Premiere Pro-class NLE video editing capabilities
-> - Training proprietary video foundation models from scratch
-> - Local GPU or local client hardware execution dependencies
-> - Fine-tuning custom AI models
-> - Implementing non-Vidu video generation provider adapters in initial build
+- **Integration Architecture Readiness — REQUIRED FOR V1 DESIGN:** REST/API boundaries, webhook-ready hooks, auth/permissions, audit and idempotent job control.
+- **Operational Integration Gateway — POST-CORE V1 / V1.x:** Full Hermes/n8n operational connectors must not block Core V1.
+- **Multi-Output Readiness — REQUIRED:** One master project preserves enough metadata for approved 16:9, 9:16, 1:1 and other output variants.
+- **Provider Abstraction — REQUIRED:** Core domain code does not directly depend on Vidu or future providers.
+- **Cloud-First — REQUIRED:** No local GPU or local AI runtime dependency.
+
+---
+
+## 4. V1 Feature Scope Matrix
+
+| Feature Module | Requirement |
+| :--- | :--- |
+| Web Workspace UI | REQUIRED FOR CORE V1 |
+| Document Ingestion | REQUIRED FOR CORE V1 |
+| Story & Script Engine | REQUIRED FOR STORY mode; reusable creative service elsewhere |
+| Video Mode Configuration | REQUIRED FOR STORY / SHORT / LOOP / SCENE |
+| Reference Asset Library | REQUIRED FOR CORE V1 |
+| Vidu Provider Adapter | REQUIRED FOR CORE V1 |
+| Durable Generation Queue | REQUIRED FOR CORE V1 |
+| Hybrid Shot Support | REQUIRED FOR CORE V1 |
+| Asset Lock Mechanism | REQUIRED FOR CORE V1 |
+| Audio & Subtitle Engine | REQUIRED FOR CORE V1 where applicable |
+| Simplified Timeline | REQUIRED FOR CORE V1 |
+| Selective Regeneration | REQUIRED FOR CORE V1 |
+| Cost & Usage Controls | REQUIRED FOR CORE V1 |
+| Human Approval / QC | REQUIRED FOR CORE V1 |
+| Cloud Master Render | REQUIRED FOR CORE V1 |
+| Multi-Output Presets | REQUIRED FOR CORE V1 |
+| Integration Architecture Readiness | REQUIRED FOR V1 DESIGN |
+| Full Operational Integration Gateway | POST-CORE V1 / V1.x |
+
+---
+
+## 5. Explicit Out-of-V1 Boundaries
+
+Without formal scope amendment, V1 excludes:
+
+- enterprise multi-tenant administration
+- native iOS / Android apps
+- real-time Google-Docs-style collaborative editing
+- Premiere Pro-class NLE features
+- training proprietary foundation models from scratch
+- local GPU / local AI runtime dependencies
+- custom-model fine tuning
+- dedicated non-Vidu video-provider implementation in the initial build
+- full PRODUCT / EXPLAINER / PRESENTER / MONTAGE workflows unless separately promoted into V1 by Owner decision
