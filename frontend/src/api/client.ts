@@ -26,6 +26,10 @@ import type {
   OrchestrationSettingsPayload,
   AudioClip,
   AudioPlan,
+  AssemblyTimeline,
+  AssemblyShotPlacement,
+  TimelineCheckpoint,
+  AssemblyBlocker,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -643,6 +647,73 @@ export const api = {
   async computeAudioMix(projectId: string): Promise<any> {
     return request<any>(`/projects/${projectId}/audio/mix`, {
       method: 'POST',
+    });
+  },
+
+  // Assembly Timeline
+  async getAssemblyTimeline(projectId: string): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly`);
+  },
+
+  async autoAssembleTimeline(projectId: string): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly/auto-assemble`, {
+      method: 'POST',
+    });
+  },
+
+  async updateShotPlacement(projectId: string, placementId: string, payload: any): Promise<AssemblyShotPlacement> {
+    return request<AssemblyShotPlacement>(`/projects/${projectId}/assembly/placements/${placementId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async reorderAssemblyScenes(projectId: string, payload: { orders: { scene_id: string; order: number }[] }): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly/reorder-scenes`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async reorderShotsInScene(projectId: string, sceneId: string, payload: { orders: { shot_id: string; order: number }[] }): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly/reorder-shots?scene_id=${encodeURIComponent(sceneId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async moveShotToScene(projectId: string, payload: { shot_id: string; target_scene_id: string; target_position: number }): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly/move-shot`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async createTimelineCheckpoint(projectId: string, payload: { label: string }): Promise<TimelineCheckpoint> {
+    return request<TimelineCheckpoint>(`/projects/${projectId}/assembly/checkpoints`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async listTimelineCheckpoints(projectId: string, limit: number = 50, offset: number = 0): Promise<TimelineCheckpoint[]> {
+    return request<TimelineCheckpoint[]>(`/projects/${projectId}/assembly/checkpoints?limit=${limit}&offset=${offset}`);
+  },
+
+  async restoreTimelineCheckpoint(projectId: string, checkpointId: string): Promise<AssemblyTimeline> {
+    return request<AssemblyTimeline>(`/projects/${projectId}/assembly/checkpoints/${checkpointId}/restore`, {
+      method: 'POST',
+    });
+  },
+
+  async getTimelineBlockers(projectId: string): Promise<AssemblyBlocker[]> {
+    return request<AssemblyBlocker[]>(`/projects/${projectId}/assembly/blockers`);
+  },
+
+  async applyTimelineFix(projectId: string, payload: { blocker_code: string; target_id?: string; fix_code: string }): Promise<any> {
+    return request<any>(`/projects/${projectId}/assembly/blockers/apply-fix`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 };

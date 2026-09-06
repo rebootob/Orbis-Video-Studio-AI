@@ -426,3 +426,91 @@ export interface PaginatedAudioClipsResponse {
   limit: number;
   offset: number;
 }
+
+export interface RecommendedFix {
+  fix_code: string;
+  label: string;
+  action_type: string;
+  payload?: Record<string, any> | null;
+}
+
+export interface AssemblyBlocker {
+  code: string;
+  message: string;
+  severity: string;
+  target_id?: string | null;
+  recommended_fixes: RecommendedFix[];
+}
+
+export interface AssemblyShotPlacement {
+  id: string;
+  timeline_id: string;
+  assembly_scene_id: string;
+  scene_id: string;
+  shot_id: string;
+  shot_order: number;
+  visual_asset_id?: string | null;
+  source_type: string;
+  trim_in: number;
+  trim_out?: number | null;
+  effective_duration: number;
+  still_duration: number;
+  transition_to_next: string;
+  is_locked: boolean;
+  version: number;
+  asset_url?: string | null;
+  asset_thumbnail_url?: string | null;
+  shot_title?: string | null;
+  shot_prompt?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssemblyScene {
+  id: string;
+  timeline_id: string;
+  scene_id: string;
+  scene_order: number;
+  scene_title?: string | null;
+  placements: AssemblyShotPlacement[];
+}
+
+export interface AudioClipSummary {
+  id: string;
+  audio_type: string;
+  scope: string;
+  name: string;
+  start_time: number;
+  duration_seconds?: number | null;
+  volume: number;
+  is_muted: boolean;
+  scene_id?: string | null;
+  shot_id?: string | null;
+}
+
+export interface AssemblyTimeline {
+  id: string;
+  project_id: string;
+  version: number;
+  status: string;
+  is_active: boolean;
+  total_duration: number;
+  scene_count: number;
+  shot_count: number;
+  scenes: AssemblyScene[];
+  audio_clips: AudioClipSummary[];
+  blockers: AssemblyBlocker[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelineCheckpoint {
+  id: string;
+  project_id: string;
+  timeline_id: string;
+  checkpoint_number: number;
+  label: string;
+  snapshot_data: Record<string, any>;
+  actor: string;
+  created_at: string;
+}

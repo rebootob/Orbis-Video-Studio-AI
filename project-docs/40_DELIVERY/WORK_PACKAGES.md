@@ -153,13 +153,16 @@ Important product locks:
 ### Phase 3 — Audio, Assembly, QC & Cloud Rendering
 
 - **P3-WP014 — Core V1 Audio Production Automation**
-  - **Status:** ACTIVE / AUTHORIZED
+  - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #35
+  - **PR:** #36
   - **Branch:** `ai/p3-wp014-audio-production`
   - VO, BGM, SFX, ambience, batch audio planning/generation/assignment and basic mixing/ducking.
 
 - **P3-WP015 — Simplified Assembly / Timeline Preview**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - **Status:** ACTIVE / AUTHORIZED
+  - **Issue:** #37
+  - **Branch:** `ai/p3-wp015-simplified-assembly`
   - Shot ordering, duration, simple trim, basic audio layers and preview; not a Premiere-class editor.
 
 - **P3-WP016 — QC / Approval Pipeline**
