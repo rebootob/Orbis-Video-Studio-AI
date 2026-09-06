@@ -7,7 +7,7 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P2-WP013
+ACTIVE_WORK_PACKAGE = P3-WP014
 ```
 
 Status:
@@ -19,12 +19,12 @@ ACTIVE / AUTHORIZED
 Current Work Tracking:
 
 ```text
-Active Package: P2-WP013 (Provider-Neutral Storyboard Image / Keyframe Pipeline)
-Issue: #33
+Active Package: P3-WP014 (Core V1 Audio Production Automation)
+Issue: #35
 PR: To be opened
-Branch: ai/p2-wp013-image-keyframe-pipeline
-Start HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
-Canonical main HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+Branch: ai/p3-wp014-audio-production
+Start HEAD: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
+Canonical main HEAD: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
 Gate: IMPLEMENTATION / IN PROGRESS
 ```
 
@@ -40,69 +40,63 @@ Claude Code = STOP
 
 ---
 
-## Prior Delivery: P2-WP012 Closure Truth
+## Prior Delivery: P2-WP013 Closure Truth
 
-- **P2-WP012**: PASS / CLOSED / MERGED
-- Issue: #31
-- PR: #32
-- Reviewed HEAD: `a781926bbf607cad1b992d089920be6f094e41c9`
-- Merge commit: `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`
-- Final Independent Review: PASS / READY TO MERGE (Review ID: 5125098674)
+- **P2-WP013**: PASS / CLOSED / MERGED
+- Issue: #33
+- PR: #34
+- Reviewed HEAD: `f9fd46b917390224a5ab58bad0d3be238edbd7b3`
+- Merge commit: `c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd`
+- Final Independent Review: PASS / READY TO MERGE
 
 ---
 
-## P2-WP013 Scope & Requirements (Issue #33)
+## P3-WP014 Scope & Requirements (Issue #35)
 
-1. **Provider-Neutral Image Provider**:
-   - `ImageProvider` abstraction / boundary.
-   - Provider implementation isolated behind adapter pattern.
-   - Capability & config resolution via provider-neutral configuration.
-   - No hardcoded provider endpoints in core orchestrator.
-   - No ComfyUI in WP013.
+1. **Provider-Neutral Audio Boundary**:
+   - `AudioProvider` abstraction / adapter boundary (VO, BGM, SFX, Ambience).
+   - VideoProvider capability discovery (`supports_native_audio`, `supports_dialogue`, `supports_lip_sync`).
+   - Provider-neutral configuration and capability resolution without hardcoded provider endpoints.
 
-2. **Storyboard / Keyframe Pipeline**:
-   - Generate image/keyframe assets for eligible storyboard shots.
-   - Persist through existing Asset / Object Storage model.
-   - Preserve project -> story/scene -> shot -> asset lineage and version history.
-   - Never silently overwrite locked or historical assets.
+2. **Locked Three-Dimensional Audio Model**:
+   - Source Type: `EMBEDDED_VIDEO_AUDIO`, `GENERATED_AUDIO`, `IMPORTED_AUDIO`, `RECORDED_AUDIO`.
+   - Audio Type: `ORIGINAL_AUDIO`, `VO`, `DIALOGUE`, `BGM`, `SFX`, `AMBIENCE`.
+   - Generation Mode: `WITH_VIDEO`, `SEPARATE_AUDIO`, `EMBEDDED_EXISTING`.
+   - Never conflate these three orthogonal dimensions.
 
-3. **Continuity & Reference Mapping**:
-   - Reuse Reference Library truth (character, location, style).
-   - Map relevant references into ImageProvider request.
-   - Respect hierarchy and reference locks.
-   - Preserve provenance/source metadata for audit and regeneration.
+3. **Audio Scope & Ownership Model**:
+   - Scopes: `PROJECT`, `SCENE`, `SHOT`, `VIDEO_CLIP`.
+   - Lineage through `project_id`, `scene_id`, `shot_id`, `video_asset_id`.
+   - Automatic scope assignment with safe human override.
 
-4. **Batch & Selective Operations**:
-   - `GENERATE_SELECTED_KEYFRAMES`, `CONTINUE_INCOMPLETE_KEYFRAMES`, `RETRY_FAILED_KEYFRAMES`.
-   - Repeat-safe, idempotent, no duplicate active jobs.
-   - Completed assets preserved; ambiguous provider outcomes remain fail-closed / reconciliation-required.
-   - Set-based / bounded processing; no N+1.
+4. **Canonical AudioSpec**:
+   - Structured AudioSpec renderable into VideoProvider prompt, TTS request, Music request, SFX request, or manual prompt.
 
-5. **Cost & Approval Safety**:
-   - Image jobs participate in UsageLedger / Budget model.
-   - Respect hard budget caps.
-   - AUTO mode must not silently incur chargeable image generation without explicit cost authorization.
-   - Human approval gates remain authoritative.
+5. **Embedded / Original Video Audio**:
+   - First-class non-destructive handling of original clip audio (volume, mute, retain).
 
-6. **Production Orchestrator Integration**:
-   - Stage flow: `SHOT_PLAN_APPROVED` -> Keyframe/image generation -> `IMAGES_GENERATED` -> `IMAGES_APPROVED` -> Video generation.
-   - Browser Recommended Next Action is backend-owned.
-   - No generic PATCH status bypass; fail-closed reconciliation.
+6. **Audio Plan & Automated Actions**:
+   - `GENERATE_AUDIO_PLAN`, `GENERATE_ALL_VO`, `GENERATE_SELECTED_AUDIO`, `ASSIGN_BGM`, `ASSIGN_SFX`, `ASSIGN_AMBIENCE`, `CONTINUE_INCOMPLETE_AUDIO`, `RETRY_FAILED_AUDIO`, `AUTO_MIX_AUDIO`.
 
-7. **Frontend Workflow**:
-   - Web workspace displays keyframe/image generation status, recommended action, blocked reasons.
-   - Support selective and batch keyframe generation from UI.
-   - Display generated image assets and history with lazy/bounded media loading.
+7. **Basic Mixing & Auto-Ducking (Core V1)**:
+   - Volume, mute, fade in/out, speech-over-music auto-ducking metadata.
+
+8. **Cost, Budget & Concurrency Safety**:
+   - `UsageLedger`, `BudgetService`, hard caps, atomic pre-provider claim, in-flight reservations, fail-closed reconciliation.
+
+9. **Production Orchestrator & Web Workspace**:
+   - Progression after video generation: `AUDIO_PLAN` -> `AUDIO_GENERATION` -> `AUDIO_MIX_READY` -> `AUDIO_APPROVED` -> Ready for WP015 assembly.
+   - Web workspace audio controls, review, status, and recommended actions.
 
 ---
 
 ## Next Allowed Action
 
-1. Implement authorized P2-WP013 contract on branch `ai/p2-wp013-image-keyframe-pipeline`.
+1. Implement authorized P3-WP014 contract on branch `ai/p3-wp014-audio-production`.
 2. Run full backend tests, frontend tests, lint, typecheck, build, git diff check.
-3. Push branch and open PR against main referencing Issue #33.
+3. Push branch and open PR against main referencing Issue #35.
 4. Codex: STOP.
 5. Claude Code: STOP.
-6. Await ChatGPT Independent Review on PR for Issue #33.
+6. Await ChatGPT Independent Review on PR for Issue #35.
 7. Do NOT merge without Owner approval.
-8. Do NOT start WP014.
+8. Do NOT start WP015.

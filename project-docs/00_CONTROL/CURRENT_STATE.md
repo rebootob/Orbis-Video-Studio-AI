@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-MAIN_HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+MAIN_HEAD: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -51,13 +51,20 @@ P2-WP012_REVIEWED_HEAD: a781926bbf607cad1b992d089920be6f094e41c9
 P2-WP012_MERGE_COMMIT: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
 P2-WP012_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5125098674)
 
-ACTIVE_WORK_PACKAGE: P2-WP013
+P2-WP013: PASS / CLOSED / MERGED
+P2-WP013_ISSUE: "#33"
+P2-WP013_PR: "#34"
+P2-WP013_BRANCH: ai/p2-wp013-image-keyframe-pipeline
+P2-WP013_REVIEWED_HEAD: f9fd46b917390224a5ab58bad0d3be238edbd7b3
+P2-WP013_MERGE_COMMIT: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
+
+ACTIVE_WORK_PACKAGE: P3-WP014
 CURRENT_GATE: IMPLEMENTATION / IN PROGRESS
 
-P2-WP013: ACTIVE / AUTHORIZED
-P2-WP013_ISSUE: "#33"
-P2-WP013_BRANCH: ai/p2-wp013-image-keyframe-pipeline
-P2-WP013_STARTING_HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+P3-WP014: ACTIVE / AUTHORIZED
+P3-WP014_ISSUE: "#35"
+P3-WP014_BRANCH: ai/p3-wp014-audio-production
+P3-WP014_STARTING_HEAD: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -160,15 +167,15 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP012 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = P2-WP013`.
+1. Keep WP001-WP013 closed unless a proven regression exists.
+2. `ACTIVE_WORK_PACKAGE = P3-WP014`.
 3. `CURRENT_GATE = IMPLEMENTATION / IN PROGRESS`.
-4. Branch: `ai/p2-wp013-image-keyframe-pipeline`.
-5. Implement authorized P2-WP013 contract per Issue #33.
+4. Branch: `ai/p3-wp014-audio-production`.
+5. Implement authorized P3-WP014 contract per Issue #35.
 6. Antigravity = bounded low-credit Execution Plane.
 7. Codex = STOP.
 8. Claude Code = STOP.
 9. Do NOT merge without Owner approval.
-10. Do NOT start WP014.
+10. Do NOT start WP015.
 
 Live GitHub/repository truth newer than this document is authoritative.

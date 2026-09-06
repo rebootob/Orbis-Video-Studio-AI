@@ -23,6 +23,8 @@ import type {
   ApproveStagePayload,
   ApproveStageResponse,
   OrchestrationSettingsPayload,
+  AudioClip,
+  AudioPlan,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -526,5 +528,64 @@ export const api = {
     return request<OrchestrationHistoryResponse>(
       `/projects/${projectId}/orchestration/history${qs ? `?${qs}` : ''}`
     );
+  },
+
+  // Audio Production
+  async getAudioPlan(projectId: string): Promise<AudioPlan> {
+    return request<AudioPlan>(`/projects/${projectId}/audio/plan`);
+  },
+
+  async generateAudioPlan(projectId: string): Promise<AudioPlan> {
+    return request<AudioPlan>(`/projects/${projectId}/audio/plan`, {
+      method: 'POST',
+    });
+  },
+
+  async approveAudioPlan(projectId: string): Promise<AudioPlan> {
+    return request<AudioPlan>(`/projects/${projectId}/audio/plan/approve`, {
+      method: 'POST',
+    });
+  },
+
+  async listAudioClips(projectId: string): Promise<AudioClip[]> {
+    return request<AudioClip[]>(`/projects/${projectId}/audio/clips`);
+  },
+
+  async generateClipAudio(
+    projectId: string,
+    clipId: string,
+    payload: { provider_name?: string; cost_authorized?: boolean; actor?: string } = {}
+  ): Promise<any> {
+    return request<any>(`/projects/${projectId}/audio/clips/${clipId}/generate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateAudioClip(
+    projectId: string,
+    clipId: string,
+    payload: Partial<AudioClip>
+  ): Promise<AudioClip> {
+    return request<AudioClip>(`/projects/${projectId}/audio/clips/${clipId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async executeAudioBatch(
+    projectId: string,
+    payload: { action: string; provider_name?: string; cost_authorized?: boolean; actor?: string }
+  ): Promise<any> {
+    return request<any>(`/projects/${projectId}/audio/batch`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async computeAudioMix(projectId: string): Promise<any> {
+    return request<any>(`/projects/${projectId}/audio/mix`, {
+      method: 'POST',
+    });
   },
 };

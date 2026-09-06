@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     locks,
     cost_ledger,
     orchestration,
+    audio,
 )
 
 api_router = APIRouter()
@@ -25,5 +26,6 @@ api_router.include_router(generation_queue.router, tags=["generation-queue"])
 api_router.include_router(shots.router, tags=["shots"])
 api_router.include_router(locks.router, tags=["locks"])
 api_router.include_router(cost_ledger.router, tags=["costs"])
+api_router.include_router(audio.router, tags=["audio"])
 
 

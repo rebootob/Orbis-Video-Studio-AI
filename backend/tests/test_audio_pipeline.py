@@ -1,0 +1,635 @@
+"""Comprehensive Test Suite for P3-WP014 Core V1 Audio Production Automation."""
+import uuid
+import pytest
+import struct
+from unittest.mock import patch
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from fastapi.testclient import TestClient
+
+from app.models.project import Project
+from app.models.scene import Scene
+from app.models.shot import Shot
+from app.models.asset import Asset
+from app.models.usage_ledger import UsageLedger
+from app.models.audio_clip import (
+    AudioClip,
+    AudioSourceType,
+    AudioType,
+    AudioGenerationMode,
+    AudioScope,
+    DuckingRole,
+)
+from app.models.audio_plan import AudioPlan
+from app.schemas.audio_spec import AudioSpec
+from app.providers.audio.base import AudioGenerationParams, AudioJobResult
+from app.providers.audio.mock_adapter import MockAudioProviderAdapter
+from app.providers.audio.factory import AudioProviderFactory
+from app.services.audio_production import AudioProductionService
+from app.services.production_orchestrator import ProductionOrchestrator
+from app.services.pricing import CostStatus
+
+
+# ----------------- 1. Provider Neutral Contract & Mock Adapter Tests -----------------
+
+def test_mock_audio_provider_wav_header_and_costs():
+    """Verify mock audio provider generates deterministic 44-byte WAV header and calculates costs."""
+    adapter = MockAudioProviderAdapter(provider_id="mock_audio")
+    caps = adapter.get_capabilities()
+    assert "VO" in caps.supported_audio_types
+    assert "BGM" in caps.supported_audio_types
+    assert caps.supports_tts is True
+    assert caps.supports_music is True
+
+    # Test VO Generation (cost = $0.02)
+    import asyncio
+    vo_params = AudioGenerationParams(
+        clip_id="test-vo-1",
+        audio_type="VO",
+        prompt="Voiceover narration test",
+        duration_seconds=3.0,
+    )
+    vo_result = asyncio.run(adapter.generate_audio(vo_params))
+    assert vo_result.status == "COMPLETED"
+    assert vo_result.cost_usd == 0.02
+    assert vo_result.content_type == "audio/wav"
+    assert len(vo_result.audio_data) >= 44
+    assert vo_result.audio_data[:4] == b"RIFF"
+    assert vo_result.audio_data[8:12] == b"WAVE"
+
+    # Test BGM Generation (cost = $0.05)
+    bgm_params = AudioGenerationParams(
+        clip_id="test-bgm-1",
+        audio_type="BGM",
+        prompt="Orchestral film score",
+        duration_seconds=10.0,
+    )
+    bgm_result = asyncio.run(adapter.generate_audio(bgm_params))
+    assert bgm_result.status == "COMPLETED"
+    assert bgm_result.cost_usd == 0.05
+
+
+# ----------------- 2. Three-Dimensional Audio Model & Orthogonality -----------------
+
+def test_locked_three_dimensional_model_and_overrides():
+    """Verify source_type, audio_type, and generation_mode are strictly orthogonal."""
+    # Default VO classification
+    vo_cls = AudioProductionService.auto_classify_clip(AudioType.VO)
+    assert vo_cls["source_type"] == AudioSourceType.GENERATED_AUDIO.value
+    assert vo_cls["generation_mode"] == AudioGenerationMode.SEPARATE_AUDIO.value
+    assert vo_cls["scope"] == AudioScope.SHOT.value
+    assert vo_cls["ducking_role"] == DuckingRole.FOREGROUND.value
+
+    # Default BGM classification
+    bgm_cls = AudioProductionService.auto_classify_clip(AudioType.BGM)
+    assert bgm_cls["source_type"] == AudioSourceType.GENERATED_AUDIO.value
+    assert bgm_cls["generation_mode"] == AudioGenerationMode.SEPARATE_AUDIO.value
+    assert bgm_cls["scope"] == AudioScope.PROJECT.value
+    assert bgm_cls["ducking_role"] == DuckingRole.BACKGROUND.value
+    assert bgm_cls["ducking_amount_db"] == -12.0
+
+    # Human Override is preserved
+    override_cls = AudioProductionService.auto_classify_clip(
+        audio_type=AudioType.BGM,
+        source_type=AudioSourceType.IMPORTED_AUDIO,
+        generation_mode=AudioGenerationMode.EMBEDDED_EXISTING,
+        scope=AudioScope.SCENE,
+    )
+    assert override_cls["source_type"] == AudioSourceType.IMPORTED_AUDIO.value
+    assert override_cls["generation_mode"] == AudioGenerationMode.EMBEDDED_EXISTING.value
+    assert override_cls["scope"] == AudioScope.SCENE.value
+
+
+def test_voice_generation_policy():
+    """Verify VO defaults to SEPARATE_AUDIO; Dialogue defaults to SEPARATE_AUDIO unless native video audio is supported."""
+    # VO is always SEPARATE_AUDIO
+    vo = AudioProductionService.auto_classify_clip(AudioType.VO, video_supports_native_audio=True)
+    assert vo["generation_mode"] == AudioGenerationMode.SEPARATE_AUDIO.value
+
+    # Dialogue without native audio support -> SEPARATE_AUDIO
+    diag_sep = AudioProductionService.auto_classify_clip(AudioType.DIALOGUE, video_supports_native_audio=False)
+    assert diag_sep["generation_mode"] == AudioGenerationMode.SEPARATE_AUDIO.value
+
+    # Dialogue with native video provider audio support -> WITH_VIDEO
+    diag_native = AudioProductionService.auto_classify_clip(AudioType.DIALOGUE, video_supports_native_audio=True)
+    assert diag_native["generation_mode"] == AudioGenerationMode.WITH_VIDEO.value
+
+
+# ----------------- 3. Canonical AudioSpec Rendering -----------------
+
+def test_audio_spec_rendering():
+    """Verify structured AudioSpec renders into various provider formats."""
+    spec = AudioSpec(
+        clip_id="c-1",
+        audio_type=AudioType.VO,
+        source_type=AudioSourceType.GENERATED_AUDIO,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO,
+        scope=AudioScope.SHOT,
+        prompt="A young hero embarks on a great journey.",
+        speaker="Narrator",
+        language="en",
+        duration_seconds=5.0,
+    )
+
+    # Video prompt
+    v_prompt = spec.to_video_prompt()
+    assert "[Native Audio / Dialogue]" in v_prompt
+    assert "Narrator:" in v_prompt
+
+    # TTS request
+    tts_req = spec.to_tts_request()
+    assert tts_req["text"] == "A young hero embarks on a great journey."
+    assert tts_req["voice_id"] == "Narrator"
+    assert tts_req["language"] == "en"
+
+    # Copy prompt
+    copy = spec.to_copy_prompt()
+    assert "=== Audio Spec: VO (SHOT) ===" in copy
+    assert "Generation Mode: SEPARATE_AUDIO" in copy
+
+
+# ----------------- 4. Audio Plan Generation & Approval -----------------
+
+def test_generate_and_approve_audio_plan(db_session: Session):
+    """Test generating a structured AudioPlan and approving it."""
+    # Create test project, scene, shot
+    project = Project(
+        id=uuid.uuid4(),
+        title="Audio Adventure",
+        video_mode="STORY",
+        status="VIDEO_IN_PROGRESS",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    scene = Scene(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        scene_number=1,
+        heading="Forest Glade",
+    )
+    db_session.add(scene)
+    db_session.flush()
+
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        visual_prompt="Hero steps into the trees",
+        action="The woods were quiet.",
+        subject="Hero",
+        duration_seconds=4.0,
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    # 1. Generate plan
+    plan = AudioProductionService.generate_audio_plan(db_session, project.id)
+    assert plan.status == "DRAFT"
+    assert plan.plan_data["summary"]["total_audio_clips"] >= 3  # BGM, Ambience, VO
+    assert project.status == "AUDIO_PLAN_GENERATED"
+
+    # Verify created clips
+    clips = db_session.query(AudioClip).filter(AudioClip.project_id == project.id).all()
+    clip_types = {c.audio_type for c in clips}
+    assert AudioType.BGM.value in clip_types
+    assert AudioType.AMBIENCE.value in clip_types
+    assert AudioType.VO.value in clip_types
+
+    # 2. Approve plan
+    approved_plan = AudioProductionService.approve_audio_plan(db_session, project.id)
+    assert approved_plan.status == "APPROVED"
+    assert project.status == "AUDIO_PLAN_APPROVED"
+
+
+# ----------------- 5. Atomic Pre-Provider Claim & UsageLedger Reservation -----------------
+
+def test_atomic_pre_provider_claim_and_cost_confirmation(db_session: Session):
+    """Test that clip generation atomically claims SUBMITTING and creates in-flight UsageLedger reservation."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Audio Claim Test",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+        budget_limit=10.0,
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Shot 1 VO",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        prompt="Voiceover test",
+        duration_seconds=4.0,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    # Generate clip
+    ready_clip = AudioProductionService.generate_clip_audio(
+        db=db_session,
+        project_id=project.id,
+        clip_id=clip.id,
+        cost_authorized=True,
+    )
+
+    assert ready_clip.status == "READY"
+    assert ready_clip.asset_id is not None
+
+    # Check asset created in storage
+    asset = db_session.get(Asset, ready_clip.asset_id)
+    assert asset is not None
+    assert asset.asset_type == "AUDIO"
+    assert asset.file_size_bytes > 0
+
+    # Verify UsageLedger was confirmed
+    ledger = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.project_id == project.id)
+        .first()
+    )
+    assert ledger is not None
+    assert ledger.cost_status == CostStatus.CONFIRMED
+    assert ledger.actual_cost == 0.02
+
+
+def test_concurrency_and_active_clip_conflict(db_session: Session):
+    """Test that attempting to generate an active or submitting clip raises 409 Conflict."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Audio Concurrency Test",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Submitting Clip",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        status="SUBMITTING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        AudioProductionService.generate_clip_audio(
+            db=db_session,
+            project_id=project.id,
+            clip_id=clip.id,
+        )
+    assert exc.value.status_code == 409
+    assert "active generation in progress" in str(exc.value.detail)
+
+
+def test_ambiguous_provider_exception_fails_closed(db_session: Session):
+    """Test that ambiguous provider exceptions transition clip to RECONCILIATION_REQUIRED and preserve reservation."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Ambiguous Audio Test",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Ambiguous Clip",
+        audio_type=AudioType.BGM.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.PROJECT.value,
+        ducking_role=DuckingRole.BACKGROUND.value,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    # Mock provider throwing transport error
+    mock_prov = AudioProviderFactory.get_provider("mock_audio")
+    with patch.object(mock_prov, "generate_audio", side_effect=ConnectionResetError("Socket reset")):
+        with pytest.raises(HTTPException) as exc:
+            AudioProductionService.generate_clip_audio(
+                db=db_session,
+                project_id=project.id,
+                clip_id=clip.id,
+            )
+        assert exc.value.status_code == 502
+        assert "RECONCILIATION_REQUIRED" in str(exc.value.detail)
+
+    # Verify clip status is RECONCILIATION_REQUIRED
+    db_session.refresh(clip)
+    assert clip.status == "RECONCILIATION_REQUIRED"
+
+    # Verify UsageLedger reservation is NOT zeroed out (preserved as ESTIMATED)
+    ledger = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.project_id == project.id)
+        .first()
+    )
+    assert ledger is not None
+    assert ledger.cost_status == CostStatus.ESTIMATED
+    assert ledger.estimated_cost == 0.05
+
+
+# ----------------- 6. Budget & Cost Authorization Safety -----------------
+
+def test_hard_budget_limit_blocks_audio_generation(db_session: Session):
+    """Verify that hard budget cap blocks audio generation dispatch with 402."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Budget Capped Audio",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+        budget_limit=0.01,  # limit is $0.01, clip cost is $0.02
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Blocked VO",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        AudioProductionService.generate_clip_audio(
+            db=db_session,
+            project_id=project.id,
+            clip_id=clip.id,
+        )
+    assert exc.value.status_code == 402
+    assert "hard budget limit exceeded" in str(exc.value.detail)
+
+
+def test_auto_mode_requires_cost_authorization(db_session: Session):
+    """Verify that in AUTO mode, audio generation requires explicit cost authorization."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Auto Mode Audio",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+        automation_mode="AUTO",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Auto VO",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        AudioProductionService.generate_clip_audio(
+            db=db_session,
+            project_id=project.id,
+            clip_id=clip.id,
+            cost_authorized=False,
+            actor="AUTO",
+        )
+    assert exc.value.status_code == 402
+    assert "Explicit cost authorization required in AUTO mode" in str(exc.value.detail)
+
+
+# ----------------- 7. Embedded Video Audio Non-Destructive Handling -----------------
+
+def test_embedded_original_audio_preservation(db_session: Session):
+    """Verify that embedded video audio clips are marked READY non-destructively without paid external calls."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Embedded Audio Test",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    video_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Source Video Clip",
+        original_filename="clip.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1000,
+        checksum_sha256="abc123",
+        storage_bucket="test-bucket",
+        storage_key="test-key.mp4",
+    )
+    db_session.add(video_asset)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        video_asset_id=video_asset.id,
+        name="Embedded Track",
+        audio_type=AudioType.ORIGINAL_AUDIO.value,
+        source_type=AudioSourceType.EMBEDDED_VIDEO_AUDIO.value,
+        generation_mode=AudioGenerationMode.EMBEDDED_EXISTING.value,
+        scope=AudioScope.VIDEO_CLIP.value,
+        ducking_role=DuckingRole.EMBEDDED.value,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    ready_clip = AudioProductionService.generate_clip_audio(
+        db=db_session,
+        project_id=project.id,
+        clip_id=clip.id,
+    )
+    assert ready_clip.status == "READY"
+
+    # Verify no paid UsageLedger row was created
+    ledgers = db_session.query(UsageLedger).filter(UsageLedger.project_id == project.id).all()
+    assert len(ledgers) == 0
+
+
+# ----------------- 8. Auto-Ducking Mixing Metadata -----------------
+
+def test_auto_ducking_mixing_metadata(db_session: Session):
+    """Verify compute_auto_mix calculates speech intervals and ducking attenuation."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Ducking Mix Test",
+        video_mode="STORY",
+        status="AUDIO_IN_PROGRESS",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    plan = AudioPlan(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        status="DRAFT",
+        version=1,
+    )
+    db_session.add(plan)
+
+    # Add BGM (Background, start 0, duration 30)
+    bgm = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Score",
+        audio_type=AudioType.BGM.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.PROJECT.value,
+        ducking_role=DuckingRole.BACKGROUND.value,
+        ducking_amount_db=-12.0,
+        start_time=0.0,
+        duration_seconds=30.0,
+        status="READY",
+    )
+    db_session.add(bgm)
+
+    # Add VO (Foreground, start 2.0, duration 5.0)
+    vo = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Dialogue",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        ducking_amount_db=0.0,
+        start_time=2.0,
+        duration_seconds=5.0,
+        status="READY",
+    )
+    db_session.add(vo)
+    db_session.commit()
+
+    mix = AudioProductionService.compute_auto_mix(db_session, project.id)
+    assert len(mix["speech_intervals"]) == 1
+    assert mix["speech_intervals"][0]["start"] == 2.0
+    assert mix["speech_intervals"][0]["end"] == 7.0
+
+    # Background track receives ducking attenuation
+    bgm_track = next(t for t in mix["tracks"] if t["audio_type"] == "BGM")
+    assert bgm_track["ducking_attenuation_db"] == -12.0
+
+
+# ----------------- 9. Orchestrator Audio Stage Progression -----------------
+
+def test_production_orchestrator_audio_workflow(db_session: Session):
+    """Test end-to-end stage progression through orchestrator audio actions."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Orchestrator Audio Workflow",
+        video_mode="STORY",
+        status="FINAL_REVIEW",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    # 1. GENERATE_AUDIO_PLAN
+    resp1 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="GENERATE_AUDIO_PLAN",
+    )
+    assert resp1.to_stage == "AUDIO_PLAN_GENERATED"
+    assert project.status == "AUDIO_PLAN_GENERATED"
+
+    # 2. APPROVE_AUDIO_PLAN
+    resp2 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="APPROVE_AUDIO_PLAN",
+    )
+    assert resp2.to_stage == "AUDIO_PLAN_APPROVED"
+    assert project.status == "AUDIO_PLAN_APPROVED"
+
+    # 3. START_AUDIO_GENERATION
+    resp3 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="START_AUDIO_GENERATION",
+        parameters={"cost_authorized": True},
+    )
+    assert resp3.to_stage == "AUDIO_IN_PROGRESS"
+    assert project.status == "AUDIO_IN_PROGRESS"
+
+    # 4. AUTO_MIX_AUDIO
+    resp4 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="AUTO_MIX_AUDIO",
+    )
+    assert resp4.to_stage == "AUDIO_MIX_READY"
+    assert project.status == "AUDIO_MIX_READY"
+
+    # 5. APPROVE_AUDIO_MIX
+    resp5 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="APPROVE_AUDIO_MIX",
+    )
+    assert resp5.to_stage == "AUDIO_APPROVED"
+    assert project.status == "AUDIO_APPROVED"
+
+    # 6. PROCEED_TO_ASSEMBLY
+    resp6 = ProductionOrchestrator.execute_action(
+        db=db_session,
+        project_id=project.id,
+        action="PROCEED_TO_ASSEMBLY",
+    )
+    assert resp6.to_stage == "READY_FOR_ASSEMBLY"
+    assert project.status == "READY_FOR_ASSEMBLY"
+
+
+# ----------------- 10. Direct PATCH Bypass Prevention -----------------
+
+def test_patch_project_status_bypass_prevention(client: TestClient, db_session: Session):
+    """Verify that attempting to patch project status directly is blocked with 400."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Status Patch Test",
+        video_mode="STORY",
+        status="DRAFT",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    resp = client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"status": "AUDIO_APPROVED"},
+    )
+    assert resp.status_code == 400
+    assert "Direct modification of project status via generic PATCH /projects is disallowed" in resp.json()["detail"]

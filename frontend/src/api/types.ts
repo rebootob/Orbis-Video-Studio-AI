@@ -21,6 +21,12 @@ export type ApprovalStatus =
   | 'IMAGES_APPROVED'
   | 'VIDEO_IN_PROGRESS'
   | 'FINAL_REVIEW'
+  | 'AUDIO_PLAN_GENERATED'
+  | 'AUDIO_PLAN_APPROVED'
+  | 'AUDIO_IN_PROGRESS'
+  | 'AUDIO_MIX_READY'
+  | 'AUDIO_APPROVED'
+  | 'READY_FOR_ASSEMBLY'
   | 'APPROVED'
   | 'COMPLETED'
   | 'ARCHIVED';
@@ -373,4 +379,43 @@ export interface ApproveStageResponse {
 
 export interface OrchestrationSettingsPayload {
   automation_mode: AutomationMode;
+}
+
+export interface AudioClip {
+  id: string;
+  project_id: string;
+  scene_id?: string | null;
+  shot_id?: string | null;
+  video_asset_id?: string | null;
+  asset_id?: string | null;
+  audio_type: 'ORIGINAL_AUDIO' | 'VO' | 'DIALOGUE' | 'BGM' | 'SFX' | 'AMBIENCE';
+  source_type: string;
+  generation_mode: string;
+  scope: string;
+  name: string;
+  prompt?: string | null;
+  start_time: number;
+  duration_seconds?: number | null;
+  volume: number;
+  mute: boolean;
+  fade_in: number;
+  fade_out: number;
+  ducking_role: string;
+  ducking_amount_db: number;
+  speaker?: string | null;
+  language?: string | null;
+  is_locked: boolean;
+  status: string;
+  version: number;
+  provenance?: Record<string, any> | null;
+  updated_at?: string | null;
+}
+
+export interface AudioPlan {
+  id: string;
+  project_id: string;
+  status: string;
+  version: number;
+  plan_data?: Record<string, any> | null;
+  updated_at?: string | null;
 }
