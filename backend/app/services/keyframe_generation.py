@@ -310,6 +310,8 @@ class KeyframeGenerationService:
             provider_specific_params=provider_specific_params,
         )
 
+        provider = ImageProviderFactory.get_provider(eff_provider_name)
+
         now = datetime.now(timezone.utc)
         job_id = uuid.uuid4()
 
@@ -380,39 +382,35 @@ class KeyframeGenerationService:
             )
 
         # 5. EXECUTE GENERATION VIA PROVIDER (Only the winning claimer reaches here!)
-        provider = ImageProviderFactory.get_provider(eff_provider_name)
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    result: ImageJobResult = executor.submit(asyncio.run, provider.generate_image(params)).result()
-            else:
-                result = loop.run_until_complete(provider.generate_image(params))
-        except RuntimeError:
+        def _invoke_provider() -> ImageJobResult:
             try:
-                result = asyncio.run(provider.generate_image(params))
-            except Exception as exc:
-                now_err = datetime.now(timezone.utc)
-                job.status = "FAILED"
-                job.error_message = f"Local failure before provider acceptance: {str(exc)}"
-                job.updated_at = now_err
-                CostLedgerService.confirm_job_cost(db, job_id=job.id, actual_cost=0.0)
-                db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Image generation failed: {str(exc)}",
-                )
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        return executor.submit(asyncio.run, provider.generate_image(params)).result()
+                return loop.run_until_complete(provider.generate_image(params))
+            except RuntimeError:
+                return asyncio.run(provider.generate_image(params))
+
+        try:
+            result: ImageJobResult = _invoke_provider()
         except Exception as exc:
+            # Once external provider invocation has begun:
+            # Generic transport/timeout/connection/unknown exceptions must be treated as ambiguous.
+            # Update SAME GenerationJob to RECONCILIATION_REQUIRED.
+            # Preserve estimated UsageLedger reservation (do NOT confirm 0.0 cost!).
+            # Do NOT release active-shot uniqueness (RECONCILIATION_REQUIRED remains active).
+            # Do NOT automatically retry.
             now_err = datetime.now(timezone.utc)
-            job.status = "FAILED"
-            job.error_message = f"Local failure before provider acceptance: {str(exc)}"
+            job.status = "RECONCILIATION_REQUIRED"
+            job.error_message = f"Ambiguous provider exception during submission: {str(exc)}"
+            job.cost_usd = estimated_cost
             job.updated_at = now_err
-            CostLedgerService.confirm_job_cost(db, job_id=job.id, actual_cost=0.0)
             db.commit()
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Image generation failed: {str(exc)}",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Provider invocation failed with ambiguous outcome: {str(exc)}. Job placed in RECONCILIATION_REQUIRED.",
             )
 
         now = datetime.now(timezone.utc)

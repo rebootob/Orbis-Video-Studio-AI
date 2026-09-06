@@ -1015,3 +1015,85 @@ def test_concurrent_submissions_near_hard_budget_cannot_overspend(tmp_path):
         assert len(ledger_entries) == 1
 
     file_engine.dispose()
+
+
+def test_provider_invocation_exception_fail_closed_reconciliation(db_session):
+    """
+    AMBIGUOUS PROVIDER EXCEPTION SAFETY:
+    - Provider invocation raises transport/timeout/decode exception during/after submit attempt.
+    - GenerationJob transitions to RECONCILIATION_REQUIRED (NOT FAILED).
+    - UsageLedger reservation remains in ESTIMATED status (does NOT confirm 0.0 cost).
+    - Second generation attempt for the same shot is blocked (409 Conflict).
+    - Provider generate method is NOT called a second time.
+    """
+    from unittest.mock import patch
+
+    p = Project(
+        title="Ambiguous Exception Test",
+        video_mode="STORY",
+        status="SHOT_PLAN_APPROVED",
+        budget_limit=10.0,
+        budget_currency="USD",
+    )
+    db_session.add(p)
+    db_session.flush()
+
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.flush()
+
+    shot = Shot(scene_id=sc.id, shot_number=1, shot_type="AI_GENERATED", visual_prompt="Cyberpunk flying car in storm")
+    db_session.add(shot)
+    db_session.commit()
+
+    provider_calls = []
+
+    async def throwing_generate_image(self, params):
+        provider_calls.append(params)
+        raise TimeoutError("Connection to image provider timed out after request was sent")
+
+    # 1. First submission raises timeout exception
+    with patch.object(MockImageProviderAdapter, "generate_image", throwing_generate_image):
+        with pytest.raises(HTTPException) as exc_info:
+            KeyframeGenerationService.generate_shot_keyframe(
+                db=db_session,
+                project_id=p.id,
+                shot_id=shot.id,
+                cost_authorized=True,
+            )
+        assert exc_info.value.status_code == 502
+        assert "reconciliation_required" in exc_info.value.detail.lower() or "ambiguous" in exc_info.value.detail.lower()
+
+    # 2. GenerationJob is RECONCILIATION_REQUIRED
+    job = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot.id).first()
+    assert job is not None
+    assert job.status == "RECONCILIATION_REQUIRED"
+    assert "timed out" in job.error_message.lower()
+
+    # 3. UsageLedger reservation remains in ESTIMATED status (NOT confirmed 0.0)
+    ledger_entries = db_session.query(UsageLedger).filter(UsageLedger.project_id == p.id).all()
+    assert len(ledger_entries) == 1
+    assert ledger_entries[0].job_id == job.id
+    assert ledger_entries[0].cost_status == CostStatus.ESTIMATED
+    assert ledger_entries[0].estimated_cost == 0.04
+    assert ledger_entries[0].actual_cost is None or ledger_entries[0].actual_cost > 0.0
+    # Committed cost still accounts for the reservation
+    assert BudgetService.get_project_committed_cost(db_session, p.id) == 0.04
+
+    # Provider was called once
+    assert len(provider_calls) == 1
+
+    # 4. Second generation attempt for the same shot is blocked (409 Conflict)
+    with patch.object(MockImageProviderAdapter, "generate_image", throwing_generate_image):
+        with pytest.raises(HTTPException) as exc_info2:
+            KeyframeGenerationService.generate_shot_keyframe(
+                db=db_session,
+                project_id=p.id,
+                shot_id=shot.id,
+                cost_authorized=True,
+            )
+        assert exc_info2.value.status_code == 409
+        assert "reconciliation" in exc_info2.value.detail.lower() or "active" in exc_info2.value.detail.lower()
+
+    # 5. Provider generate method was NOT called a second time
+    assert len(provider_calls) == 1
