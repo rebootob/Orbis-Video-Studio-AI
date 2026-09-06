@@ -538,6 +538,23 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleGenerateKeyframe = async (shotId: string) => {
+    if (!selectedProject) return;
+    try {
+      setAutomationStep('Generating keyframe...');
+      await api.executeOrchestrationAction(selectedProject.id, {
+        action: 'GENERATE_SHOT_KEYFRAME',
+        parameters: { shot_id: shotId },
+      });
+      await loadWorkspaceData(selectedProject);
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Keyframe generation failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
   // Lock Toggles
   const handleToggleShotLock = async (shot: Shot) => {
     if (!selectedProject) return;
@@ -749,6 +766,7 @@ export const App: React.FC = () => {
                 onToggleShotLock={handleToggleShotLock}
                 onToggleSceneLock={handleToggleSceneLock}
                 onGenerateShot={handleGenerateShot}
+                onGenerateKeyframe={handleGenerateKeyframe}
                 onStageReview={(st) => {
                   if (st === 'STORY') {
                     setIsStoryInspectionOpen(true);

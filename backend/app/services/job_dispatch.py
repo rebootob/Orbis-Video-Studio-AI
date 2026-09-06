@@ -29,6 +29,7 @@ from app.providers.safety import (
 ALLOWED_PRODUCTION_STATUSES = {
     "SHOT_PLAN_APPROVED",
     "IMAGES_GENERATED",
+    "IMAGES_APPROVED",
     "VIDEO_IN_PROGRESS",
 }
 

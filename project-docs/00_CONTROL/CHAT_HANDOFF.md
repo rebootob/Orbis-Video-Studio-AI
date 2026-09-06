@@ -49,9 +49,15 @@ WP011 PR: #29 (MERGED / CLOSED)
 WP011 Final Review: PASS / READY TO MERGE (Review ID 5124729394)
 
 WP012 Issue: #31
-WP012 Branch: ai/p2-wp012-production-orchestrator
-WP012 Base HEAD: 3be8ffed28f8807ae89bab22fb64a8018a8fbdb7
-WP012 Status: IMPLEMENTED / READY FOR CHATGPT INDEPENDENT REVIEW
+WP012 PR: #32 (MERGED / CLOSED)
+WP012 Reviewed HEAD: a781926bbf607cad1b992d089920be6f094e41c9
+WP012 Merge commit: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+WP012 Final Review: PASS / READY TO MERGE (Review ID 5125098674)
+
+WP013 Issue: #33
+WP013 Branch: ai/p2-wp013-image-keyframe-pipeline
+WP013 Base HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+WP013 Status: ACTIVE / AUTHORIZED
 ```
 
 ---
@@ -59,16 +65,17 @@ WP012 Status: IMPLEMENTED / READY FOR CHATGPT INDEPENDENT REVIEW
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = P2-WP012
-STATUS = AWAITING CHATGPT INDEPENDENT REVIEW
-ANTIGRAVITY = STOP / NONE
+ACTIVE WORK PACKAGE = P2-WP013
+STATUS = IMPLEMENTATION / IN PROGRESS
+BRANCH = ai/p2-wp013-image-keyframe-pipeline
+ANTIGRAVITY = Bounded Low-Credit Execution Plane
 CODEX = STOP
 CLAUDE_CODE = STOP
 ```
 
-P2-WP012 implementation is complete on branch `ai/p2-wp012-production-orchestrator`.
+P2-WP013 implementation is active per Issue #33 on branch `ai/p2-wp013-image-keyframe-pipeline`.
 Do NOT merge without Owner approval.
-Do NOT start or implement WP013.
+Do NOT start or implement WP014.
 
 ### Performance & Scalability Guardrails Delivered in WP011
 

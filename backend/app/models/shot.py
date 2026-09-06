@@ -35,6 +35,12 @@ class Shot(Base):
         nullable=True,
         index=True,
     )
+    keyframe_asset_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     source_metadata: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     provider_config: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     visual_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -57,6 +63,7 @@ class Shot(Base):
     # Relationships
     scene: Mapped["Scene"] = relationship("Scene", back_populates="shots")
     source_asset: Mapped[Optional["Asset"]] = relationship("Asset", foreign_keys=[source_asset_id])
+    keyframe_asset: Mapped[Optional["Asset"]] = relationship("Asset", foreign_keys=[keyframe_asset_id])
     generation_jobs: Mapped[List["GenerationJob"]] = relationship(
         "GenerationJob", back_populates="shot", cascade="all, delete-orphan"
     )

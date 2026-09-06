@@ -48,12 +48,19 @@ def db_session() -> Generator[Session, None, None]:
 
 
 from app.services.storage.mock import InMemoryObjectStorageProvider
-from app.services.storage.factory import get_storage_provider
+from app.services.storage.factory import get_storage_provider, set_storage_provider_override
 
 
 @pytest.fixture
 def mock_storage() -> InMemoryObjectStorageProvider:
     return InMemoryObjectStorageProvider()
+
+
+@pytest.fixture(autouse=True)
+def configure_test_storage(mock_storage: InMemoryObjectStorageProvider):
+    set_storage_provider_override(mock_storage)
+    yield mock_storage
+    set_storage_provider_override(None)
 
 
 @pytest.fixture

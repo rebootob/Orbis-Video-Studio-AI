@@ -32,6 +32,7 @@ from app.services.creative_generation.base import (
 from app.services.creative_generation.factory import get_creative_provider
 from app.services.creative_generation.service import StoryGenerationService
 from app.services.batch_resume import BatchResumeService
+from app.services.keyframe_generation import KeyframeGenerationService
 
 ACTIVE_JOB_STATUSES = {
     "PENDING",
@@ -53,7 +54,9 @@ STAGE_DISPLAY_NAMES = {
     "STORYBOARD_APPROVED": "Storyboard Approved",
     "SHOT_PLAN_GENERATED": "Shot Plan & Prompts Generated",
     "SHOT_PLAN_APPROVED": "Shot Plan Approved",
+    "IMAGES_IN_PROGRESS": "Keyframe Images In Progress",
     "IMAGES_GENERATED": "Keyframe Images Generated",
+    "IMAGES_APPROVED": "Keyframe Images Approved",
     "VIDEO_IN_PROGRESS": "Video Generation In Progress",
     "FINAL_REVIEW": "Final Cut Review",
     "READY_FOR_REVIEW": "Final Cut Review",
@@ -70,8 +73,10 @@ STAGE_DESCRIPTIONS = {
     "STORYBOARD_GENERATED": "Storyboard scenes and narrative pacing generated. Requires review.",
     "STORYBOARD_APPROVED": "Storyboard structure is approved. Ready to plan detailed visual shots.",
     "SHOT_PLAN_GENERATED": "Detailed visual shot plans and AI prompts generated. Requires final review.",
-    "SHOT_PLAN_APPROVED": "Shot plan is approved. Ready to dispatch video generation jobs.",
-    "IMAGES_GENERATED": "Keyframe reference images generated and verified.",
+    "SHOT_PLAN_APPROVED": "Shot plan is approved. Ready to dispatch keyframe image or video generation jobs.",
+    "IMAGES_IN_PROGRESS": "Keyframe reference image generation jobs are actively processing.",
+    "IMAGES_GENERATED": "Keyframe reference images generated and verified. Ready for approval.",
+    "IMAGES_APPROVED": "Keyframe reference images approved. Ready to dispatch video generation jobs.",
     "VIDEO_IN_PROGRESS": "AI video generation jobs are actively processing in the provider queue.",
     "FINAL_REVIEW": "All video shots have completed generation. Inspect assembly for final approval.",
     "READY_FOR_REVIEW": "Ready for final production quality review.",
@@ -197,19 +202,29 @@ class ProductionOrchestrator:
         # 4. Job Counts and Distinct Production-Ready Calculation
         active_shot_ids = [s.id for s in active_shots]
         if active_shot_ids:
-            job_counts_query = (
-                db.query(GenerationJob.status, func.count(GenerationJob.id))
+            job_rows = (
+                db.query(GenerationJob.job_type, GenerationJob.status, func.count(GenerationJob.id))
                 .filter(GenerationJob.shot_id.in_(active_shot_ids))
-                .group_by(GenerationJob.status)
+                .group_by(GenerationJob.job_type, GenerationJob.status)
                 .all()
             )
-            job_counts: Dict[str, int] = {s: cnt for s, cnt in job_counts_query}
+            job_counts: Dict[str, int] = {}
+            image_job_counts: Dict[str, int] = {}
+            video_job_counts: Dict[str, int] = {}
+            for jtype, status_val, cnt in job_rows:
+                jt = (jtype or "VIDEO").upper()
+                job_counts[status_val] = job_counts.get(status_val, 0) + cnt
+                if jt == "IMAGE":
+                    image_job_counts[status_val] = image_job_counts.get(status_val, 0) + cnt
+                else:
+                    video_job_counts[status_val] = video_job_counts.get(status_val, 0) + cnt
 
             completed_job_shot_ids = set(
                 s_id for (s_id,) in (
                     db.query(GenerationJob.shot_id)
                     .filter(
                         GenerationJob.shot_id.in_(active_shot_ids),
+                        func.coalesce(GenerationJob.job_type, "VIDEO") == "VIDEO",
                         GenerationJob.status == "COMPLETED",
                     )
                     .distinct()
@@ -218,18 +233,20 @@ class ProductionOrchestrator:
             )
         else:
             job_counts = {}
+            image_job_counts = {}
+            video_job_counts = {}
             completed_job_shot_ids = set()
 
         active_jobs = sum(job_counts.get(s, 0) for s in ACTIVE_JOB_STATUSES)
+        active_image_jobs = sum(image_job_counts.get(s, 0) for s in ACTIVE_JOB_STATUSES)
+        active_video_jobs = sum(video_job_counts.get(s, 0) for s in ACTIVE_JOB_STATUSES)
         completed_jobs = job_counts.get("COMPLETED", 0)
         failed_jobs = job_counts.get("FAILED", 0)
+        failed_image_jobs = image_job_counts.get("FAILED", 0)
+        failed_video_jobs = video_job_counts.get("FAILED", 0)
         recon_jobs = job_counts.get("RECONCILIATION_REQUIRED", 0)
 
         # Distinct production-ready shots:
-        # A shot is production-ready if:
-        # 1. It has at least one COMPLETED GenerationJob
-        # OR
-        # 2. It is an imported/source-backed shot (not AI_GENERATED/MIXED) with a source_asset_id or status == 'COMPLETED'
         production_ready_shot_ids = {
             s.id for s in active_shots
             if (s.id in completed_job_shot_ids) or (
@@ -239,13 +256,25 @@ class ProductionOrchestrator:
         }
         production_ready_count = len(production_ready_shot_ids)
 
-        # Candidate ungenerated shots (for locking checks)
+        # Distinct keyframe-ready shots:
+        keyframe_ready_shot_ids = {s.id for s in active_shots if s.keyframe_asset_id is not None}
+        keyframe_ready_count = len(keyframe_ready_shot_ids)
+
+        # Candidate ungenerated shots (for video locking checks)
         candidate_shots = [
             s for s in active_shots
             if s.id not in production_ready_shot_ids
             and s.shot_type in ("AI_GENERATED", "MIXED")
         ]
         all_candidates_locked = len(candidate_shots) > 0 and all(is_shot_locked(s) for s in candidate_shots)
+
+        # Candidate keyframe shots (for image locking checks)
+        candidate_keyframe_shots = [
+            s for s in active_shots
+            if s.id not in keyframe_ready_shot_ids
+            and s.shot_type in ("AI_GENERATED", "MIXED")
+        ]
+        all_keyframe_candidates_locked = len(candidate_keyframe_shots) > 0 and all(is_shot_locked(s) for s in candidate_keyframe_shots)
 
         # Check budget summary
         budget_summary = BudgetService.get_budget_status(db, project_id)
@@ -279,8 +308,10 @@ class ProductionOrchestrator:
         # Stage truth: Never spoof effective_stage as FINAL_REVIEW when persisted status is still VIDEO_IN_PROGRESS!
         effective_stage = current_stage
         if current_stage not in ("COMPLETED", "APPROVED", "ARCHIVED"):
-            if active_jobs > 0 and current_stage != "VIDEO_IN_PROGRESS":
+            if active_video_jobs > 0 and current_stage != "VIDEO_IN_PROGRESS":
                 effective_stage = "VIDEO_IN_PROGRESS"
+            elif active_image_jobs > 0 and current_stage not in ("IMAGES_IN_PROGRESS", "VIDEO_IN_PROGRESS"):
+                effective_stage = "IMAGES_IN_PROGRESS"
             elif recon_jobs > 0 and current_stage not in ALLOWED_PRODUCTION_STATUSES:
                 effective_stage = "NEEDS_ATTENTION"
 
@@ -288,6 +319,7 @@ class ProductionOrchestrator:
             "STORY_GENERATED",
             "STORYBOARD_GENERATED",
             "SHOT_PLAN_GENERATED",
+            "IMAGES_GENERATED",
             "FINAL_REVIEW",
             "READY_FOR_REVIEW",
         )
@@ -308,6 +340,10 @@ class ProductionOrchestrator:
             hard_limit_exceeded=hard_limit_exceeded,
             all_candidates_locked=all_candidates_locked,
             candidate_count=len(candidate_shots),
+            keyframe_ready_count=keyframe_ready_count,
+            active_image_jobs=active_image_jobs,
+            failed_image_jobs=failed_image_jobs,
+            all_keyframe_candidates_locked=all_keyframe_candidates_locked,
         )
 
         stage_name = STAGE_DISPLAY_NAMES.get(effective_stage, effective_stage.replace("_", " ").title())
@@ -319,12 +355,19 @@ class ProductionOrchestrator:
             "shot_count": shot_count,
             "locked_shots": locked_shot_count,
             "production_ready_shots": production_ready_count,
+            "keyframe_ready_shots": keyframe_ready_count,
             "candidate_shots": len(candidate_shots),
+            "candidate_keyframe_shots": len(candidate_keyframe_shots),
             "all_candidates_locked": all_candidates_locked,
+            "all_keyframe_candidates_locked": all_keyframe_candidates_locked,
             "active_jobs": active_jobs,
+            "active_image_jobs": active_image_jobs,
+            "active_video_jobs": active_video_jobs,
             "completed_jobs": completed_jobs,
             "distinct_completed_shots": len(completed_job_shot_ids),
             "failed_jobs": failed_jobs,
+            "failed_image_jobs": failed_image_jobs,
+            "failed_video_jobs": failed_video_jobs,
             "recon_jobs": recon_jobs,
             "hard_limit_exceeded": hard_limit_exceeded,
             "threshold_exceeded": threshold_exceeded,
@@ -364,6 +407,10 @@ class ProductionOrchestrator:
         hard_limit_exceeded: bool,
         all_candidates_locked: bool = False,
         candidate_count: int = 0,
+        keyframe_ready_count: int = 0,
+        active_image_jobs: int = 0,
+        failed_image_jobs: int = 0,
+        all_keyframe_candidates_locked: bool = False,
     ) -> Tuple[Optional[OrchestrationActionModel], List[OrchestrationActionModel]]:
         recommended: Optional[OrchestrationActionModel] = None
         available: List[OrchestrationActionModel] = []
@@ -605,19 +652,180 @@ class ProductionOrchestrator:
 
         # ----------------- Downstream Stages (All modes) -----------------
         if current_stage == "SHOT_PLAN_APPROVED":
-            is_gen_blocked = hard_limit_exceeded or all_candidates_locked
-            blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
+            is_keyframe_blocked = hard_limit_exceeded or all_keyframe_candidates_locked
+            keyframe_blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
+                "All candidate keyframe shots are locked" if all_keyframe_candidates_locked else None
+            )
+
+            is_video_blocked = hard_limit_exceeded or all_candidates_locked
+            video_blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
                 f"All {candidate_count} candidate shots are locked" if all_candidates_locked else None
             )
 
+            if shot_count > 0 and keyframe_ready_count >= shot_count:
+                recommended = OrchestrationActionModel(
+                    action="APPROVE_IMAGES",
+                    display_name="Approve Keyframe Images & Proceed",
+                    description="All keyframe images are generated. Approve to proceed to video generation.",
+                    action_type=OrchestrationActionType.APPROVAL,
+                    is_chargeable=False,
+                    parameters={"stage": "IMAGES_GENERATED"},
+                )
+                available.append(OrchestrationActionModel(
+                    action="START_VIDEO_GENERATION",
+                    display_name="Start Video Generation",
+                    description="Dispatch eligible AI video generation jobs to the provider queue.",
+                    action_type=OrchestrationActionType.GENERATION,
+                    is_chargeable=True,
+                    is_blocked=is_video_blocked,
+                    blocked_reason=video_blocked_msg,
+                ))
+            else:
+                recommended = OrchestrationActionModel(
+                    action="START_KEYFRAME_GENERATION",
+                    display_name="Generate Keyframe Images",
+                    description="Generate visual keyframe reference images for storyboard shots.",
+                    action_type=OrchestrationActionType.GENERATION,
+                    is_chargeable=True,
+                    is_blocked=is_keyframe_blocked,
+                    blocked_reason=keyframe_blocked_msg,
+                )
+                available.append(OrchestrationActionModel(
+                    action="START_VIDEO_GENERATION",
+                    display_name="Start Video Generation",
+                    description="Dispatch AI video generation jobs directly.",
+                    action_type=OrchestrationActionType.GENERATION,
+                    is_chargeable=True,
+                    is_blocked=is_video_blocked,
+                    blocked_reason=video_blocked_msg,
+                ))
+            available.append(OrchestrationActionModel(
+                action="GENERATE_SELECTED_KEYFRAMES",
+                display_name="Generate Selected Keyframes",
+                description="Generate keyframe images for selected shots only.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+                is_blocked=is_keyframe_blocked,
+                blocked_reason=keyframe_blocked_msg,
+            ))
+            available.append(OrchestrationActionModel(
+                action="REVISE_SHOT_PLAN",
+                display_name="Revise Shot Plan",
+                description="Make adjustments to shot prompts or camera instructions.",
+                action_type=OrchestrationActionType.REVISION,
+            ))
+
+        elif current_stage == "IMAGES_IN_PROGRESS":
+            if active_image_jobs > 0:
+                recommended = OrchestrationActionModel(
+                    action="POLL_STATUS",
+                    display_name="Monitor Active Keyframe Jobs",
+                    description=f"{active_image_jobs} keyframe job(s) actively processing.",
+                    action_type=OrchestrationActionType.NAVIGATION,
+                    is_chargeable=False,
+                )
+            elif failed_image_jobs > 0:
+                recommended = OrchestrationActionModel(
+                    action="RETRY_FAILED_KEYFRAMES",
+                    display_name="Retry Failed Keyframes",
+                    description=f"Retry {failed_image_jobs} failed keyframe image job(s).",
+                    action_type=OrchestrationActionType.RECOVERY,
+                    is_chargeable=True,
+                    is_blocked=hard_limit_exceeded,
+                    blocked_reason="Hard budget limit exceeded" if hard_limit_exceeded else None,
+                )
+            elif shot_count > 0 and keyframe_ready_count >= shot_count:
+                recommended = OrchestrationActionModel(
+                    action="APPROVE_IMAGES",
+                    display_name="Approve Keyframe Images & Proceed",
+                    description="All keyframes generated. Approve keyframes for video generation.",
+                    action_type=OrchestrationActionType.APPROVAL,
+                    is_chargeable=False,
+                    parameters={"stage": "IMAGES_GENERATED"},
+                )
+            else:
+                recommended = OrchestrationActionModel(
+                    action="CONTINUE_INCOMPLETE_KEYFRAMES",
+                    display_name="Continue Incomplete Keyframes",
+                    description="Dispatch remaining ungenerated keyframe images.",
+                    action_type=OrchestrationActionType.GENERATION,
+                    is_chargeable=True,
+                    is_blocked=hard_limit_exceeded,
+                    blocked_reason="Hard budget limit exceeded" if hard_limit_exceeded else None,
+                )
+            available.append(OrchestrationActionModel(
+                action="START_VIDEO_GENERATION",
+                display_name="Start Video Generation",
+                description="Dispatch video generation jobs directly.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+            available.append(OrchestrationActionModel(
+                action="REVISE_SHOT_PLAN",
+                display_name="Revise Shot Plan",
+                description="Return to storyboard to regenerate shots.",
+                action_type=OrchestrationActionType.REVISION,
+            ))
+
+        elif current_stage == "IMAGES_GENERATED":
+            recommended = OrchestrationActionModel(
+                action="APPROVE_IMAGES",
+                display_name="Approve Keyframe Images & Proceed",
+                description="Lock keyframe reference images and proceed to video generation.",
+                action_type=OrchestrationActionType.APPROVAL,
+                is_chargeable=False,
+                parameters={"stage": "IMAGES_GENERATED"},
+            )
+            available.append(OrchestrationActionModel(
+                action="START_VIDEO_GENERATION",
+                display_name="Start Video Generation",
+                description="Dispatch video generation jobs directly.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+            available.append(OrchestrationActionModel(
+                action="GENERATE_SELECTED_KEYFRAMES",
+                display_name="Regenerate Selected Keyframes",
+                description="Regenerate keyframe images for selected shots.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+            if failed_image_jobs > 0:
+                available.append(OrchestrationActionModel(
+                    action="RETRY_FAILED_KEYFRAMES",
+                    display_name="Retry Failed Keyframes",
+                    description="Retry failed keyframe jobs.",
+                    action_type=OrchestrationActionType.RECOVERY,
+                    is_chargeable=True,
+                ))
+            if shot_count > 0 and keyframe_ready_count < shot_count:
+                available.append(OrchestrationActionModel(
+                    action="CONTINUE_INCOMPLETE_KEYFRAMES",
+                    display_name="Continue Incomplete Keyframes",
+                    description="Generate missing keyframes.",
+                    action_type=OrchestrationActionType.GENERATION,
+                    is_chargeable=True,
+                ))
+            available.append(OrchestrationActionModel(
+                action="REVISE_SHOT_PLAN",
+                display_name="Revise Shot Plan",
+                description="Return to modify shot plan.",
+                action_type=OrchestrationActionType.REVISION,
+            ))
+
+        elif current_stage == "IMAGES_APPROVED":
+            is_video_blocked = hard_limit_exceeded or all_candidates_locked
+            video_blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
+                f"All {candidate_count} candidate shots are locked" if all_candidates_locked else None
+            )
             recommended = OrchestrationActionModel(
                 action="START_VIDEO_GENERATION",
                 display_name="Start Video Generation",
-                description="Dispatch eligible AI video generation jobs to the provider queue.",
+                description="Dispatch eligible AI video generation jobs using approved keyframe references.",
                 action_type=OrchestrationActionType.GENERATION,
                 is_chargeable=True,
-                is_blocked=is_gen_blocked,
-                blocked_reason=blocked_msg,
+                is_blocked=is_video_blocked,
+                blocked_reason=video_blocked_msg,
             )
             available.append(OrchestrationActionModel(
                 action="GENERATE_SELECTED_SHOTS",
@@ -625,13 +833,20 @@ class ProductionOrchestrator:
                 description="Dispatch selected shots only.",
                 action_type=OrchestrationActionType.GENERATION,
                 is_chargeable=True,
-                is_blocked=is_gen_blocked,
-                blocked_reason=blocked_msg,
+                is_blocked=is_video_blocked,
+                blocked_reason=video_blocked_msg,
+            ))
+            available.append(OrchestrationActionModel(
+                action="GENERATE_SELECTED_KEYFRAMES",
+                display_name="Regenerate Selected Keyframes",
+                description="Regenerate keyframe images for selected shots.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
             ))
             available.append(OrchestrationActionModel(
                 action="REVISE_SHOT_PLAN",
                 display_name="Revise Shot Plan",
-                description="Make adjustments to shot prompts or camera instructions.",
+                description="Return to modify shot plan.",
                 action_type=OrchestrationActionType.REVISION,
             ))
 
@@ -723,6 +938,7 @@ class ProductionOrchestrator:
             "STORY_GENERATED": "STORY_APPROVED",
             "STORYBOARD_GENERATED": "STORYBOARD_APPROVED",
             "SHOT_PLAN_GENERATED": "SHOT_PLAN_APPROVED",
+            "IMAGES_GENERATED": "IMAGES_APPROVED",
             "FINAL_REVIEW": "COMPLETED",
             "READY_FOR_REVIEW": "COMPLETED",
         }
@@ -895,6 +1111,9 @@ class ProductionOrchestrator:
                     provider=provider,
                 )
             elif target_stage == "SHOT_PLAN_APPROVED":
+                # Mandatory STOP: Keyframe and video generation require explicit authorization
+                pass
+            elif target_stage == "IMAGES_APPROVED":
                 # Mandatory STOP: Video generation ALWAYS requires explicit human confirmation!
                 pass
 
@@ -933,12 +1152,13 @@ class ProductionOrchestrator:
         creative_prov = _resolve_creative_provider(provider)
 
         # ----------------- Canonical Approval Actions -----------------
-        if action_upper in ("APPROVE_STORY", "APPROVE_STORYBOARD", "APPROVE_SHOT_PLAN", "APPROVE_FINAL"):
+        if action_upper in ("APPROVE_STORY", "APPROVE_STORYBOARD", "APPROVE_SHOT_PLAN", "APPROVE_IMAGES", "APPROVE_FINAL"):
             # Enforce gate matching for approval actions
             expected_current = {
                 "APPROVE_STORY": ("STORY_GENERATED", "STORY_APPROVED"),
                 "APPROVE_STORYBOARD": ("STORYBOARD_GENERATED", "STORYBOARD_APPROVED"),
                 "APPROVE_SHOT_PLAN": ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"),
+                "APPROVE_IMAGES": ("IMAGES_GENERATED", "IMAGES_APPROVED"),
                 "APPROVE_FINAL": ("FINAL_REVIEW", "READY_FOR_REVIEW", "COMPLETED"),
             }
             allowed_stages = expected_current[action_upper]
@@ -965,6 +1185,7 @@ class ProductionOrchestrator:
                 "APPROVE_STORY": "STORY_APPROVED",
                 "APPROVE_STORYBOARD": "STORYBOARD_APPROVED",
                 "APPROVE_SHOT_PLAN": "SHOT_PLAN_APPROVED",
+                "APPROVE_IMAGES": "IMAGES_APPROVED",
                 "APPROVE_FINAL": "COMPLETED",
             }[action_upper]
 
@@ -1258,9 +1479,142 @@ class ProductionOrchestrator:
             )
             db.commit()
 
+        # ----------------- 3b. Keyframe Generation Actions -----------------
+        elif action_upper in (
+            "START_KEYFRAME_GENERATION",
+            "GENERATE_KEYFRAMES",
+            "CONTINUE_INCOMPLETE_KEYFRAMES",
+            "RETRY_FAILED_KEYFRAMES",
+            "GENERATE_SELECTED_KEYFRAMES",
+        ):
+            if current not in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED", "IMAGES_APPROVED", "IMAGES_IN_PROGRESS"):
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="STAGE_NOT_APPROVED",
+                    detail=f"Keyframe generation requires approved shot plan or images stage, current status is '{current}'.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Keyframe generation requires 'SHOT_PLAN_APPROVED' or images stage, current status is '{current}'.",
+                )
+
+            # Check reconciliation safety: fail closed if any job requires reconciliation
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_count = (
+                db.query(func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .scalar()
+                or 0
+            )
+            if recon_count > 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="RECONCILIATION_REQUIRED",
+                    detail=f"Cannot dispatch keyframe generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot dispatch keyframe generation: {recon_count} job(s) require reconciliation before workflow continuation.",
+                )
+
+            # Check hard limit
+            b_summary = BudgetService.get_budget_status(db, project_id)
+            if b_summary.get("is_hard_limit_exceeded"):
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="HARD_BUDGET_LIMIT_EXCEEDED",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Project hard budget limit exceeded. Keyframe generation dispatch is blocked.",
+                )
+
+            # Determine operation type
+            if action_upper in ("START_KEYFRAME_GENERATION", "GENERATE_KEYFRAMES", "CONTINUE_INCOMPLETE_KEYFRAMES"):
+                op_type = "CONTINUE_INCOMPLETE"
+                shot_ids = None
+            elif action_upper == "RETRY_FAILED_KEYFRAMES":
+                op_type = "RETRY_FAILED"
+                shot_ids = None
+            else:  # GENERATE_SELECTED_KEYFRAMES
+                op_type = "GENERATE_SELECTED"
+                raw_shot_ids = params.get("shot_ids") or params.get("selected_shot_ids") or []
+                shot_ids = [uuid.UUID(s) if isinstance(s, str) else s for s in raw_shot_ids]
+
+            batch_run, _ = KeyframeGenerationService.execute_keyframe_batch(
+                db=db,
+                project_id=project_id,
+                operation_type=op_type,
+                shot_ids=shot_ids,
+                actor=actor,
+            )
+
+            updated_state = cls.evaluate_state(db, project_id)
+            return ExecuteActionResponse(
+                success=True,
+                action=action_upper,
+                from_stage=current,
+                to_stage=project.status or current,
+                result=OrchestrationActionResult.APPLIED,
+                message=f"Keyframe batch execution completed: {batch_run.completed_count} generated, {batch_run.failed_count} failed, {batch_run.skipped_count} skipped.",
+                orchestration_state=updated_state,
+            )
+
+        elif action_upper == "GENERATE_SHOT_KEYFRAME":
+            raw_shot_id = params.get("shot_id")
+            if not raw_shot_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Parameter 'shot_id' is required for GENERATE_SHOT_KEYFRAME.",
+                )
+            shot_id = uuid.UUID(raw_shot_id) if isinstance(raw_shot_id, str) else raw_shot_id
+            force = bool(params.get("force", False))
+            asset, job = KeyframeGenerationService.generate_shot_keyframe(
+                db=db,
+                shot_id=shot_id,
+                force=force,
+            )
+            updated_state = cls.evaluate_state(db, project_id)
+            return ExecuteActionResponse(
+                success=True,
+                action=action_upper,
+                from_stage=current,
+                to_stage=project.status or current,
+                result=OrchestrationActionResult.APPLIED,
+                message=f"Keyframe generated successfully for shot '{shot_id}'.",
+                orchestration_state=updated_state,
+            )
+
         # ----------------- 4a. Action: START_VIDEO_GENERATION -----------------
         elif action_upper == "START_VIDEO_GENERATION":
-            if current != "SHOT_PLAN_APPROVED":
+            if current not in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED", "IMAGES_APPROVED"):
                 cls.record_audit(
                     db=db,
                     project_id=project_id,
@@ -1389,7 +1743,7 @@ class ProductionOrchestrator:
 
         # ----------------- 4b. Action: CONTINUE_INCOMPLETE -----------------
         elif action_upper == "CONTINUE_INCOMPLETE":
-            if current not in ("SHOT_PLAN_APPROVED", "VIDEO_IN_PROGRESS"):
+            if current not in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED", "IMAGES_APPROVED", "VIDEO_IN_PROGRESS"):
                 cls.record_audit(
                     db=db,
                     project_id=project_id,
@@ -1518,7 +1872,7 @@ class ProductionOrchestrator:
 
         # ----------------- 5. Action: GENERATE_SELECTED_SHOTS -----------------
         elif action_upper == "GENERATE_SELECTED_SHOTS":
-            if current not in ("SHOT_PLAN_APPROVED", "VIDEO_IN_PROGRESS"):
+            if current not in ("SHOT_PLAN_APPROVED", "IMAGES_GENERATED", "IMAGES_APPROVED", "VIDEO_IN_PROGRESS"):
                 cls.record_audit(
                     db=db,
                     project_id=project_id,
@@ -1985,7 +2339,7 @@ class ProductionOrchestrator:
                                 sh.status = "ARCHIVED"
 
             elif action_upper == "REVISE_SHOT_PLAN":
-                if current not in ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"):
+                if current not in ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED", "IMAGES_GENERATED", "IMAGES_APPROVED"):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Cannot revise shot plan from stage '{current}'.",

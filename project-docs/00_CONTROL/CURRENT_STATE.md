@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-MAIN_HEAD: 643614b089a295ea96be179e470707609cbe4b53
+MAIN_HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -43,12 +43,21 @@ P2-WP011_REVIEWED_HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
 P2-WP011_MERGE_COMMIT: 643614b089a295ea96be179e470707609cbe4b53
 P2-WP011_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124729394)
 
-ACTIVE_WORK_PACKAGE: P2-WP012
-CURRENT_GATE: IMPLEMENTATION COMPLETE / READY FOR CHATGPT INDEPENDENT REVIEW
-
-P2-WP012: IMPLEMENTED / AWAITING INDEPENDENT REVIEW
+P2-WP012: PASS / CLOSED / MERGED
 P2-WP012_ISSUE: "#31"
+P2-WP012_PR: "#32"
 P2-WP012_BRANCH: ai/p2-wp012-production-orchestrator
+P2-WP012_REVIEWED_HEAD: a781926bbf607cad1b992d089920be6f094e41c9
+P2-WP012_MERGE_COMMIT: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
+P2-WP012_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5125098674)
+
+ACTIVE_WORK_PACKAGE: P2-WP013
+CURRENT_GATE: IMPLEMENTATION / IN PROGRESS
+
+P2-WP013: ACTIVE / AUTHORIZED
+P2-WP013_ISSUE: "#33"
+P2-WP013_BRANCH: ai/p2-wp013-image-keyframe-pipeline
+P2-WP013_STARTING_HEAD: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -102,7 +111,8 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
 | Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
 | Selective / Batch Regeneration & Resume Service (P2-WP011) | PASS / CLOSED / MERGED | Canonical candidate selection, shot deduplication, repeat-safe resume, set-based DB queries (no N+1), transactional job/audit persistence, bounded keyset execution, memory-bounded created_jobs accumulation, and BatchRun audit complete. PR #29 merged into main at 643614b089a295ea96be179e470707609cbe4b53. |
-| Production Orchestrator & Staged Approval State Machine (P2-WP012) | IMPLEMENTED / AWAITING REVIEW | Server-side orchestrator service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration replacing client status mutations. Branch ai/p2-wp012-production-orchestrator. |
+| Production Orchestrator & Staged Approval State Machine (P2-WP012) | PASS / CLOSED / MERGED | Server-side orchestrator service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration. PR #32 merged at cdd79aaa80eaefa8be6c4e4894cb40db0b097a60. |
+| Storyboard Image / Keyframe Pipeline (P2-WP013) | ACTIVE / AUTHORIZED | Issue #33 authorized by Owner. Provider-neutral ImageProvider, storyboard keyframe generation, continuity/reference integration, and batch generation. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -150,14 +160,15 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP011 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = P2-WP012`.
-3. `CURRENT_GATE = IMPLEMENTATION COMPLETE / READY FOR CHATGPT INDEPENDENT REVIEW`.
-4. Await ChatGPT Independent Review for P2-WP012 PR.
-5. Antigravity = STOP / NONE.
-6. Codex = STOP.
-7. Claude Code = STOP.
-8. Do NOT merge without Owner approval.
-9. Do NOT start WP013.
+1. Keep WP001-WP012 closed unless a proven regression exists.
+2. `ACTIVE_WORK_PACKAGE = P2-WP013`.
+3. `CURRENT_GATE = IMPLEMENTATION / IN PROGRESS`.
+4. Branch: `ai/p2-wp013-image-keyframe-pipeline`.
+5. Implement authorized P2-WP013 contract per Issue #33.
+6. Antigravity = bounded low-credit Execution Plane.
+7. Codex = STOP.
+8. Claude Code = STOP.
+9. Do NOT merge without Owner approval.
+10. Do NOT start WP014.
 
 Live GitHub/repository truth newer than this document is authoritative.

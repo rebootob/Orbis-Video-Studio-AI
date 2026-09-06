@@ -101,9 +101,26 @@ def test_story_mode_happy_path(client, db_session):
     )
     assert appr_sp.status_code == 200
     assert appr_sp.json()["to_stage"] == "SHOT_PLAN_APPROVED"
-    assert appr_sp.json()["orchestration_state"]["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+    assert appr_sp.json()["orchestration_state"]["recommended_action"]["action"] == "START_KEYFRAME_GENERATION"
 
-    # 9. Execute START_VIDEO_GENERATION
+    # 9. Execute START_KEYFRAME_GENERATION -> IMAGES_GENERATED
+    exec_kf = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "START_KEYFRAME_GENERATION"},
+    )
+    assert exec_kf.status_code == 200
+    assert exec_kf.json()["to_stage"] == "IMAGES_GENERATED"
+
+    # 10. Approve Images -> IMAGES_APPROVED
+    appr_img = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/approve",
+        json={"stage": "IMAGES_GENERATED"},
+    )
+    assert appr_img.status_code == 200
+    assert appr_img.json()["to_stage"] == "IMAGES_APPROVED"
+    assert appr_img.json()["orchestration_state"]["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+
+    # 11. Execute START_VIDEO_GENERATION
     exec_vg = client.post(
         f"/api/v1/projects/{p_id}/orchestration/execute",
         json={"action": "START_VIDEO_GENERATION"},
@@ -295,7 +312,7 @@ def test_auto_mode_safe_continuation_and_mandatory_stops(client, db_session):
     assert appr_sp.status_code == 200
     sp_state = appr_sp.json()["orchestration_state"]
     assert sp_state["current_stage"] == "SHOT_PLAN_APPROVED"
-    assert sp_state["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+    assert sp_state["recommended_action"]["action"] == "START_KEYFRAME_GENERATION"
     assert sp_state["recommended_action"]["is_chargeable"] is True
     # Verify it did not silently dispatch video generation jobs
     db_session.refresh(p)
@@ -326,7 +343,7 @@ def test_assisted_mode_does_not_silently_charge(client, db_session):
     resp = client.get(f"/api/v1/projects/{p_id}/orchestration")
     assert resp.status_code == 200
     state = resp.json()
-    assert state["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+    assert state["recommended_action"]["action"] == "START_KEYFRAME_GENERATION"
     assert state["recommended_action"]["is_chargeable"] is True
     db_session.refresh(p)
     assert p.status == "SHOT_PLAN_APPROVED"
@@ -910,7 +927,7 @@ def test_full_roundtrip_revision_lifecycle_no_dead_ends(client, db_session):
     app_sp = client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "SHOT_PLAN_GENERATED"}).json()
     assert app_sp["to_stage"] == "SHOT_PLAN_APPROVED"
     st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
-    assert st["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+    assert st["recommended_action"]["action"] == "START_KEYFRAME_GENERATION"
 
     # 10. Revise Shot Plan -> reverts to STORYBOARD_APPROVED
     rev_sp = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "REVISE_SHOT_PLAN"}).json()

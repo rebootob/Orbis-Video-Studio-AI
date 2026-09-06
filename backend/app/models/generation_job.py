@@ -20,6 +20,7 @@ class GenerationJob(Base):
     __table_args__ = (
         UniqueConstraint("shot_id", "idempotency_key", name="uq_generation_jobs_shot_idempotency_key"),
         Index("ix_generation_jobs_status", "status"),
+        Index("ix_generation_jobs_job_type", "job_type"),
         Index(
             "uq_generation_jobs_active_shot",
             "shot_id",
@@ -36,6 +37,9 @@ class GenerationJob(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("shots.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    job_type: Mapped[str] = mapped_column(
+        String(50), default="VIDEO", nullable=False
     )
     provider_name: Mapped[str] = mapped_column(String(50), nullable=False)
     provider_job_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

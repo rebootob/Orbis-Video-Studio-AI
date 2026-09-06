@@ -31,6 +31,13 @@ export const ShotCard: React.FC<ShotCardProps> = ({
 }) => {
   const getJobStatusBadge = () => {
     if (!latestJob) {
+      if (shot.keyframe_url) {
+        return (
+          <span style={{ color: '#38bdf8', fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <CheckCircle2 size={11} /> Keyframe
+          </span>
+        );
+      }
       return (
         <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
           Not Generated
@@ -139,6 +146,31 @@ export const ShotCard: React.FC<ShotCardProps> = ({
             onMouseOver={(e) => (e.target as HTMLVideoElement).play()}
             onMouseOut={(e) => (e.target as HTMLVideoElement).pause()}
           />
+        ) : shot.keyframe_url ? (
+          <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+            <img
+              src={shot.keyframe_url}
+              alt={`Shot ${shot.shot_number} Keyframe`}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              loading="lazy"
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '4px',
+                right: '4px',
+                backgroundColor: 'rgba(0,0,0,0.7)',
+                color: '#38bdf8',
+                fontSize: '0.6rem',
+                padding: '1px 5px',
+                borderRadius: '3px',
+                fontWeight: 600,
+                letterSpacing: '0.5px',
+              }}
+            >
+              KEYFRAME
+            </div>
+          </div>
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
             <Film size={24} style={{ marginBottom: '4px' }} />

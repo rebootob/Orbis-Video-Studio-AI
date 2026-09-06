@@ -41,6 +41,8 @@ class ShotDetailResponse(BaseModel):
     shot_number: int
     shot_type: str
     source_asset_id: Optional[uuid.UUID] = None
+    keyframe_asset_id: Optional[uuid.UUID] = None
+    keyframe_url: Optional[str] = None
     source_metadata: Optional[Dict[str, Any]] = None
     provider_config: Optional[Dict[str, Any]] = None
     visual_prompt: Optional[str] = None

@@ -16,7 +16,9 @@ export type ApprovalStatus =
   | 'STORYBOARD_APPROVED'
   | 'SHOT_PLAN_GENERATED'
   | 'SHOT_PLAN_APPROVED'
+  | 'IMAGES_IN_PROGRESS'
   | 'IMAGES_GENERATED'
+  | 'IMAGES_APPROVED'
   | 'VIDEO_IN_PROGRESS'
   | 'FINAL_REVIEW'
   | 'APPROVED'
@@ -86,6 +88,8 @@ export interface Shot {
   shot_number: number;
   shot_type: ShotType;
   source_asset_id?: string | null;
+  keyframe_asset_id?: string | null;
+  keyframe_url?: string | null;
   source_metadata?: Record<string, any> | null;
   provider_config?: Record<string, any> | null;
   visual_prompt?: string | null;
@@ -141,6 +145,7 @@ export interface GenerationJob {
   id: string;
   shot_id: string;
   provider_name: string;
+  job_type?: string;
   status: JobStatus;
   provider_job_id?: string | null;
   result_video_url?: string | null;
