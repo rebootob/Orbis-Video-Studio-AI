@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.shot import Shot
 from app.models.scene import Scene
 from app.services.hybrid_shot import HybridShotService
+from app.services.lock_machine import LockMachineService
 from app.schemas.shot import (
     ShotCreateRequest,
     ShotUpdateRequest,
@@ -80,6 +81,28 @@ def update_shot(
 ):
     shot = HybridShotService.update_shot(db=db, shot_id=shot_id, request=request)
     return shot
+
+
+@router.delete(
+    "/shots/{shot_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_shot(
+    shot_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    shot = db.get(Shot, shot_id)
+    if not shot:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Shot '{shot_id}' not found",
+        )
+
+    LockMachineService.check_mutation_allowed(db, "SHOT", shot_id)
+
+    db.delete(shot)
+    db.commit()
+    return None
 
 
 @router.get(

@@ -77,6 +77,19 @@ class SceneCreateRequest(BaseModel):
     scene_config: Optional[Dict[str, Any]] = None
 
 
+class SceneUpdateRequest(BaseModel):
+    scene_number: Optional[int] = Field(default=None, ge=1)
+    heading: Optional[str] = None
+    description: Optional[str] = None
+    purpose: Optional[str] = None
+    setting: Optional[str] = None
+    duration_seconds: Optional[float] = Field(default=None, gt=0.0)
+    narration: Optional[str] = None
+    dialogue: Optional[Any] = None
+    scene_config: Optional[Dict[str, Any]] = None
+
+
+
 class SceneDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

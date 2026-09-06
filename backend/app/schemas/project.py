@@ -16,6 +16,18 @@ class ProjectCreateRequest(BaseModel):
     default_config: Optional[Any] = None
 
 
+class ProjectUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    status: Optional[str] = None
+    purpose: Optional[str] = None
+    target_platform: Optional[str] = None
+    target_duration_seconds: Optional[float] = Field(default=None, gt=0.0)
+    preferred_aspect_ratio: Optional[str] = None
+    mode_config: Optional[Any] = None
+    default_config: Optional[Any] = None
+
+
 class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,5 +42,8 @@ class ProjectResponse(BaseModel):
     preferred_aspect_ratio: Optional[str] = None
     mode_config: Optional[Any] = None
     default_config: Optional[Any] = None
+    budget_limit: Optional[float] = None
+    budget_currency: Optional[str] = "USD"
+    budget_threshold_percentage: Optional[float] = 80.0
     created_at: datetime
     updated_at: datetime
