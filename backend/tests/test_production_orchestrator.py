@@ -6,6 +6,8 @@ from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.generation_job import GenerationJob
 from app.models.usage_ledger import UsageLedger
+from app.models.asset import Asset
+from app.models.asset_lock import AssetLock
 from app.services.pricing import CostStatus
 from app.services.creative_generation.fake_provider import FakeCreativeGenerationProvider
 from app.services.creative_generation.factory import get_creative_provider
@@ -466,14 +468,31 @@ def test_resolve_reconciliation_action(client, db_session):
     assert resp.status_code == 200
     assert resp.json()["recommended_action"]["action"] == "RESOLVE_RECONCILIATION"
 
-    # Execute RESOLVE_RECONCILIATION -> reconciles to FAILED
-    resp_res = client.post(
+    # 1. Attempting resolution without evidence fails closed and preserves RECONCILIATION_REQUIRED
+    resp_no_evidence = client.post(
         f"/api/v1/projects/{p_id}/orchestration/execute",
         json={"action": "RESOLVE_RECONCILIATION"},
+    )
+    assert resp_no_evidence.status_code == 400
+    db_session.refresh(job)
+    assert job.status == "RECONCILIATION_REQUIRED"
+
+    # 2. Providing explicit job_id, resolution, and evidence succeeds
+    resp_res = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={
+            "action": "RESOLVE_RECONCILIATION",
+            "parameters": {
+                "job_id": str(job.id),
+                "resolution": "CONFIRMED_FAILED",
+                "evidence": "Provider API query confirmed render failed with error code 500.",
+            },
+        },
     )
     assert resp_res.status_code == 200
     db_session.refresh(job)
     assert job.status == "FAILED"
+    assert "Reconciled to FAILED" in (job.error_message or "")
 
 
 def test_poll_status_and_view_summary_non_failing(client, db_session):
@@ -593,3 +612,364 @@ def test_budget_hard_limit_blocks_dispatch(client, db_session):
         json={"action": "START_VIDEO_GENERATION"},
     )
     assert resp_exec.status_code == 409
+
+
+# ==============================================================================
+# Comprehensive Corrective Tests for Review ID 5124927218 Blockers
+# ==============================================================================
+
+
+def test_reconciliation_safety_all_outcomes_require_explicit_evidence(client, db_session):
+    p = Project(title="Recon Safety", video_mode="STORY", status="VIDEO_IN_PROGRESS")
+    db_session.add(p)
+    db_session.commit()
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.commit()
+    sh1 = Shot(scene_id=sc.id, shot_number=1, shot_type="AI_GENERATED")
+    sh2 = Shot(scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED")
+    db_session.add_all([sh1, sh2])
+    db_session.commit()
+
+    j1 = GenerationJob(id=uuid.uuid4(), shot_id=sh1.id, provider_name="vidu", status="RECONCILIATION_REQUIRED")
+    j2 = GenerationJob(id=uuid.uuid4(), shot_id=sh2.id, provider_name="vidu", status="RECONCILIATION_REQUIRED")
+    db_session.add_all([j1, j2])
+    db_session.commit()
+    p_id = str(p.id)
+
+    # 1. Missing evidence fails with 400 and preserves status
+    res = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "RESOLVE_RECONCILIATION", "parameters": {"job_id": str(j1.id), "resolution": "CONFIRMED_FAILED"}},
+    )
+    assert res.status_code == 400
+    db_session.refresh(j1)
+    assert j1.status == "RECONCILIATION_REQUIRED"
+
+    # 2. Invalid resolution fails with 400
+    res = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "RESOLVE_RECONCILIATION", "parameters": {"job_id": str(j1.id), "resolution": "UNKNOWN", "evidence": "something"}},
+    )
+    assert res.status_code == 400
+
+    # 3. CONFIRMED_COMPLETED with evidence sets COMPLETED and output_url
+    res = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={
+            "action": "RESOLVE_RECONCILIATION",
+            "parameters": {
+                "job_id": str(j1.id),
+                "resolution": "CONFIRMED_COMPLETED",
+                "evidence": "Verified render succeeded on provider dashboard.",
+                "output_url": "https://storage.provider.com/output/j1.mp4",
+            },
+        },
+    )
+    assert res.status_code == 200
+    db_session.refresh(j1)
+    assert j1.status == "COMPLETED"
+    assert j1.output_url == "https://storage.provider.com/output/j1.mp4"
+
+    # 4. CONFIRMED_CANCELLED sets CANCELLED
+    res = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={
+            "action": "RESOLVE_RECONCILIATION",
+            "parameters": {
+                "job_id": str(j2.id),
+                "resolution": "CONFIRMED_CANCELLED",
+                "evidence": "Job was aborted by provider operator.",
+            },
+        },
+    )
+    assert res.status_code == 200
+    db_session.refresh(j2)
+    assert j2.status == "CANCELLED"
+
+
+def test_duplicate_completed_jobs_do_not_falsely_complete_other_shots(client, db_session):
+    p = Project(title="Duplicate Jobs Test", video_mode="STORY", status="VIDEO_IN_PROGRESS")
+    db_session.add(p)
+    db_session.commit()
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.commit()
+    sh1 = Shot(scene_id=sc.id, shot_number=1, shot_type="AI_GENERATED")
+    sh2 = Shot(scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED")
+    db_session.add_all([sh1, sh2])
+    db_session.commit()
+
+    # Shot 1 has 3 completed jobs across historical runs
+    for _ in range(3):
+        job = GenerationJob(id=uuid.uuid4(), shot_id=sh1.id, provider_name="vidu", status="COMPLETED")
+        db_session.add(job)
+    db_session.commit()
+
+    # Shot 2 has NO completed jobs
+    p_id = str(p.id)
+    resp = client.get(f"/api/v1/projects/{p_id}/orchestration")
+    assert resp.status_code == 200
+    data = resp.json()
+    summary = data["summary"]
+    assert summary["shot_count"] == 2
+    assert summary["completed_jobs"] == 3  # Raw historical jobs
+    assert summary["distinct_completed_shots"] == 1  # Only 1 distinct shot completed!
+    assert summary["production_ready_shots"] == 1
+
+    # Transition to final review MUST be rejected: only 1 of 2 shots is production ready!
+    res_trans = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "TRANSITION_TO_FINAL_REVIEW"},
+    )
+    assert res_trans.status_code == 400
+    assert "only 1/2 shots are production-ready" in res_trans.json()["detail"]
+
+
+def test_imported_source_backed_shots_satisfy_production_readiness(client, db_session):
+    p = Project(title="Imported Shots Test", video_mode="STORY", status="VIDEO_IN_PROGRESS")
+    db_session.add(p)
+    db_session.commit()
+
+    ast = Asset(
+        id=uuid.uuid4(),
+        project_id=p.id,
+        name="source.mp4",
+        original_filename="source.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1024,
+        checksum_sha256="abc123",
+        storage_bucket="bucket",
+        storage_key="key",
+    )
+    db_session.add(ast)
+    db_session.commit()
+
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.commit()
+
+    # Shot 1: IMPORTED_VIDEO with source_asset_id (no GenerationJob needed)
+    sh1 = Shot(scene_id=sc.id, shot_number=1, shot_type="IMPORTED_VIDEO", source_asset_id=ast.id, status="COMPLETED")
+    # Shot 2: AI_GENERATED with COMPLETED job
+    sh2 = Shot(scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED", status="PENDING")
+    db_session.add_all([sh1, sh2])
+    db_session.commit()
+
+    job2 = GenerationJob(id=uuid.uuid4(), shot_id=sh2.id, provider_name="vidu", status="COMPLETED")
+    db_session.add(job2)
+    db_session.commit()
+
+    p_id = str(p.id)
+    resp = client.get(f"/api/v1/projects/{p_id}/orchestration")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["summary"]["production_ready_shots"] == 2
+    assert data["summary"]["shot_count"] == 2
+    assert data["recommended_action"]["action"] == "TRANSITION_TO_FINAL_REVIEW"
+
+    # Transition succeeds because 2/2 are production ready
+    res_trans = client.post(
+        f"/api/v1/projects/{p_id}/orchestration/execute",
+        json={"action": "TRANSITION_TO_FINAL_REVIEW"},
+    )
+    assert res_trans.status_code == 200
+    assert res_trans.json()["to_stage"] == "FINAL_REVIEW"
+
+
+def test_soft_archived_scenes_and_shots_excluded_from_counts(client, db_session):
+    p = Project(title="Archived Excluded Test", video_mode="STORY", status="VIDEO_IN_PROGRESS")
+    db_session.add(p)
+    db_session.commit()
+
+    # Active Scene
+    sc_active = Scene(project_id=p.id, scene_number=1)
+    # Archived Scene
+    sc_archived = Scene(project_id=p.id, scene_number=2, scene_config={"archived": True})
+    db_session.add_all([sc_active, sc_archived])
+    db_session.commit()
+
+    # Shot in active scene (completed)
+    sh1 = Shot(scene_id=sc_active.id, shot_number=1, shot_type="AI_GENERATED")
+    # Shot in active scene (archived status)
+    sh_archived = Shot(scene_id=sc_active.id, shot_number=2, shot_type="AI_GENERATED", status="ARCHIVED")
+    # Shot in archived scene
+    sh3 = Shot(scene_id=sc_archived.id, shot_number=1, shot_type="AI_GENERATED")
+    db_session.add_all([sh1, sh_archived, sh3])
+    db_session.commit()
+
+    j1 = GenerationJob(id=uuid.uuid4(), shot_id=sh1.id, provider_name="vidu", status="COMPLETED")
+    db_session.add(j1)
+    db_session.commit()
+
+    p_id = str(p.id)
+    resp = client.get(f"/api/v1/projects/{p_id}/orchestration")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Only 1 active scene and 1 active shot!
+    assert data["summary"]["scene_count"] == 1
+    assert data["summary"]["shot_count"] == 1
+    assert data["summary"]["production_ready_shots"] == 1
+    assert data["recommended_action"]["action"] == "TRANSITION_TO_FINAL_REVIEW"
+
+
+def test_full_roundtrip_revision_lifecycle_no_dead_ends(client, db_session):
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    p = Project(title="Revision Roundtrip", video_mode="STORY", status="DRAFT", description="Brief description")
+    db_session.add(p)
+    db_session.commit()
+    p_id = str(p.id)
+
+    # 1. At DRAFT, recommended action is GENERATE_STORY (never APPROVE_STORY)
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "GENERATE_STORY"
+    assert st["recommended_action"]["is_chargeable"] is True
+
+    # 2. Execute GENERATE_STORY -> transitions to STORY_GENERATED
+    gen_st = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_STORY"}).json()
+    assert gen_st["to_stage"] == "STORY_GENERATED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "APPROVE_STORY"
+
+    # 3. Approve Story -> transitions to STORY_APPROVED
+    app_st = client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "STORY_GENERATED"}).json()
+    assert app_st["to_stage"] == "STORY_APPROVED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    # At STORY_APPROVED, recommended is GENERATE_STORYBOARD (never APPROVE_STORYBOARD)
+    assert st["recommended_action"]["action"] == "GENERATE_STORYBOARD"
+    assert st["recommended_action"]["is_chargeable"] is True
+
+    # 4. Revise Story -> reverts to DRAFT
+    rev_st = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "REVISE_STORY"}).json()
+    assert rev_st["to_stage"] == "DRAFT"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    # Must still recommend GENERATE_STORY, NOT APPROVE_STORY
+    assert st["recommended_action"]["action"] == "GENERATE_STORY"
+
+    # Re-generate and re-approve Story
+    client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_STORY"})
+    client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "STORY_GENERATED"})
+
+    # 5. Generate Storyboard -> STORYBOARD_GENERATED
+    gen_sb = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_STORYBOARD"}).json()
+    assert gen_sb["to_stage"] == "STORYBOARD_GENERATED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "APPROVE_STORYBOARD"
+
+    # 6. Approve Storyboard -> STORYBOARD_APPROVED
+    app_sb = client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "STORYBOARD_GENERATED"}).json()
+    assert app_sb["to_stage"] == "STORYBOARD_APPROVED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    # At STORYBOARD_APPROVED, recommended is GENERATE_SHOT_PLAN (never APPROVE_SHOT_PLAN)
+    assert st["recommended_action"]["action"] == "GENERATE_SHOT_PLAN"
+    assert st["recommended_action"]["is_chargeable"] is True
+
+    # 7. Revise Storyboard -> reverts to STORY_APPROVED
+    rev_sb = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "REVISE_STORYBOARD"}).json()
+    assert rev_sb["to_stage"] == "STORY_APPROVED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "GENERATE_STORYBOARD"
+
+    # Re-generate and re-approve Storyboard
+    client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_STORYBOARD"})
+    client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "STORYBOARD_GENERATED"})
+
+    # 8. Generate Shot Plan -> SHOT_PLAN_GENERATED
+    gen_sp = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_SHOT_PLAN"}).json()
+    assert gen_sp["to_stage"] == "SHOT_PLAN_GENERATED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "APPROVE_SHOT_PLAN"
+
+    # 9. Approve Shot Plan -> SHOT_PLAN_APPROVED
+    app_sp = client.post(f"/api/v1/projects/{p_id}/orchestration/approve", json={"stage": "SHOT_PLAN_GENERATED"}).json()
+    assert app_sp["to_stage"] == "SHOT_PLAN_APPROVED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "START_VIDEO_GENERATION"
+
+    # 10. Revise Shot Plan -> reverts to STORYBOARD_APPROVED
+    rev_sp = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "REVISE_SHOT_PLAN"}).json()
+    assert rev_sp["to_stage"] == "STORYBOARD_APPROVED"
+    st = client.get(f"/api/v1/projects/{p_id}/orchestration").json()
+    assert st["recommended_action"]["action"] == "GENERATE_SHOT_PLAN"
+
+
+def test_action_specific_generation_matrix_strict_guards(client, db_session):
+    p = Project(title="Matrix Strictness", video_mode="STORY", status="SHOT_PLAN_GENERATED")
+    db_session.add(p)
+    db_session.commit()
+    p_id = str(p.id)
+
+    # 1. START_VIDEO_GENERATION fails closed from SHOT_PLAN_GENERATED (must be SHOT_PLAN_APPROVED)
+    res1 = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "START_VIDEO_GENERATION"})
+    assert res1.status_code == 409
+    assert "requires 'SHOT_PLAN_APPROVED'" in res1.json()["detail"]
+
+    # 2. RETRY_FAILED fails closed from SHOT_PLAN_GENERATED (must be VIDEO_IN_PROGRESS or NEEDS_ATTENTION)
+    res2 = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "RETRY_FAILED"})
+    assert res2.status_code == 409
+    assert "requires 'VIDEO_IN_PROGRESS'" in res2.json()["detail"]
+
+    # 3. From COMPLETED, generation and continue actions fail closed
+    p.status = "COMPLETED"
+    db_session.commit()
+    res3 = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "START_VIDEO_GENERATION"})
+    assert res3.status_code == 409
+    res4 = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "CONTINUE_INCOMPLETE"})
+    assert res4.status_code == 409
+    res5 = client.post(f"/api/v1/projects/{p_id}/orchestration/execute", json={"action": "GENERATE_SELECTED_SHOTS", "parameters": {"shot_ids": [str(uuid.uuid4())]}})
+    assert res5.status_code == 409
+
+
+def test_hierarchical_lock_truth_surfaces_in_evaluate_state(client, db_session):
+    p = Project(title="Hierarchical Lock Project", video_mode="STORY", status="SHOT_PLAN_APPROVED")
+    db_session.add(p)
+    db_session.commit()
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.commit()
+    sh = Shot(scene_id=sc.id, shot_number=1, shot_type="AI_GENERATED")
+    db_session.add(sh)
+    db_session.commit()
+
+    # Lock the shot via AssetLock table
+    lock = AssetLock(
+        id=uuid.uuid4(),
+        project_id=p.id,
+        entity_type="SHOT",
+        entity_id=sh.id,
+        is_locked=True,
+        lock_reason="Shot locked by operator",
+    )
+    db_session.add(lock)
+    db_session.commit()
+
+    p_id = str(p.id)
+    resp = client.get(f"/api/v1/projects/{p_id}/orchestration")
+    assert resp.status_code == 200
+    state = resp.json()
+    assert state["is_blocked"] is True
+    assert "locked against generation" in state["blocked_reasons"][0]
+    assert state["recommended_action"]["is_blocked"] is True
+    assert "locked" in state["recommended_action"]["blocked_reason"]
+
+
+def test_legacy_generation_endpoints_fail_closed_on_completed_project(client, db_session):
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    p = Project(title="Terminal Project", video_mode="STORY", status="COMPLETED")
+    db_session.add(p)
+    db_session.commit()
+    p_id = str(p.id)
+
+    # Legacy story generation rejects
+    res = client.post(f"/api/v1/projects/{p_id}/story/generate", json={})
+    assert res.status_code == 409
+    assert "Cannot generate story when project is in 'COMPLETED'" in res.json()["detail"]
+
+    # Legacy storyboard generation rejects
+    res_sb = client.post(f"/api/v1/projects/{p_id}/storyboard/generate", json={})
+    assert res_sb.status_code == 409

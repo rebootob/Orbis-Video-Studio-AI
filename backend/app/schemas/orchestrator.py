@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
@@ -36,6 +36,7 @@ class OrchestrationActionModel(BaseModel):
     is_chargeable: bool = False
     is_blocked: bool = False
     blocked_reason: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
 
 
 class OrchestrationStateResponse(BaseModel):
