@@ -14,6 +14,7 @@ import {
 interface GenerationQueuePanelProps {
   jobs: GenerationJob[];
   loading: boolean;
+  projectStatus?: string;
   onRefreshJobs: () => Promise<void>;
   onCancelJob: (jobId: string) => Promise<void>;
   onPollJob: (jobId: string) => Promise<void>;
@@ -23,6 +24,7 @@ interface GenerationQueuePanelProps {
 export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
   jobs,
   loading,
+  projectStatus,
   onRefreshJobs,
   onCancelJob,
   onPollJob,
@@ -244,15 +246,32 @@ export const GenerationQueuePanel: React.FC<GenerationQueuePanelProps> = ({
                           </>
                         )}
 
-                        {isFailed && (
-                          <button
-                            className="btn btn-xs btn-primary"
-                            onClick={() => onRetryJob(job.shot_id)}
-                            title="Retry Generation"
-                          >
-                            <RefreshCw size={12} /> Retry
-                          </button>
-                        )}
+                        {isFailed && (() => {
+                          const allowedProductionStatuses = [
+                            'SHOT_PLAN_APPROVED',
+                            'IMAGES_GENERATED',
+                            'VIDEO_IN_PROGRESS',
+                            'FINAL_REVIEW',
+                            'READY_FOR_REVIEW',
+                            'COMPLETED',
+                            'APPROVED',
+                          ];
+                          const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
+                          return (
+                            <button
+                              className="btn btn-xs btn-primary"
+                              onClick={() => onRetryJob(job.shot_id)}
+                              disabled={isProductionGated}
+                              title={
+                                isProductionGated
+                                  ? 'Shot Plan must be approved before retrying production jobs.'
+                                  : 'Retry Generation'
+                              }
+                            >
+                              <RefreshCw size={12} /> Retry
+                            </button>
+                          );
+                        })()}
 
                         {isRecon && (
                           <button

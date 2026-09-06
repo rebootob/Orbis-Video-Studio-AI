@@ -119,8 +119,13 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
           <button
             className="btn btn-danger btn-sm"
             onClick={onRetryFailed}
-            disabled={isRunning}
+            disabled={isRunning || isProductionGated}
             data-testid="retry-failed-jobs-btn"
+            title={
+              isProductionGated
+                ? 'Shot Plan must be approved before retrying production jobs.'
+                : 'Retry failed jobs'
+            }
           >
             <RefreshCw size={14} /> Retry Failed
           </button>

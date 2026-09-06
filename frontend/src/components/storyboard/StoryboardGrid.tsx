@@ -269,6 +269,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
         <ShotDetailDrawer
           shot={selectedShot}
           latestJob={latestJobByShotId[selectedShot.id]}
+          projectStatus={projectStatus}
           onClose={() => setSelectedShotId(null)}
           onUpdateShot={onUpdateShot}
           onDeleteShot={onDeleteShot}

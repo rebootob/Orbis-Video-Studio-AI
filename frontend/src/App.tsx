@@ -401,8 +401,25 @@ export const App: React.FC = () => {
 
   const handleGenerateShot = async (shotId: string) => {
     if (!selectedProject) return;
-    await api.createJob(shotId);
-    await loadWorkspaceData(selectedProject);
+    const allowedStatuses = [
+      'SHOT_PLAN_APPROVED',
+      'IMAGES_GENERATED',
+      'VIDEO_IN_PROGRESS',
+      'FINAL_REVIEW',
+      'READY_FOR_REVIEW',
+      'COMPLETED',
+      'APPROVED',
+    ];
+    if (!allowedStatuses.includes(selectedProject.status)) {
+      alert("Shot Plan must be approved before production generation. Current stage is '" + selectedProject.status + "'.");
+      return;
+    }
+    try {
+      await api.createJob(shotId);
+      await loadWorkspaceData(selectedProject);
+    } catch (err: any) {
+      alert(`Shot generation dispatch failed: ${err.message}`);
+    }
   };
 
   // Lock Toggles
@@ -643,6 +660,7 @@ export const App: React.FC = () => {
               <GenerationQueuePanel
                 jobs={jobs}
                 loading={loadingQueue}
+                projectStatus={selectedProject.status}
                 onRefreshJobs={handleRefreshJobs}
                 onCancelJob={handleCancelJob}
                 onPollJob={handlePollJob}

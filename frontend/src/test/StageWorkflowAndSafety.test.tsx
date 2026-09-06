@@ -293,3 +293,119 @@ describe('Provider-Neutral Single-Shot Routing', () => {
     fetchSpy.mockRestore();
   });
 });
+
+describe('ShotDetailDrawer & Retry Controls Production Stage Gates', () => {
+  const mockShot: Shot = {
+    id: 'shot-100',
+    scene_id: 'scene-1',
+    shot_number: 1,
+    shot_type: 'AI_GENERATED',
+    duration_seconds: 4,
+    visual_prompt: 'A sleek spaceship landing on a neon platform',
+    is_locked: false,
+    status: 'PENDING',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  it('disables Generate Shot button before SHOT_PLAN_APPROVED and enables it after', () => {
+    const handleGenerate = vi.fn();
+
+    // 1. In unapproved stage (e.g. STORYBOARD_GENERATED or DRAFT)
+    const { rerender } = render(
+      <ShotDetailDrawer
+        shot={mockShot}
+        projectStatus="STORYBOARD_GENERATED"
+        onClose={vi.fn()}
+        onUpdateShot={vi.fn()}
+        onDeleteShot={vi.fn()}
+        onToggleLock={vi.fn()}
+        onGenerateShot={handleGenerate}
+      />
+    );
+
+    const generateBtn = screen.getByTestId('drawer-generate-shot-btn');
+    expect(generateBtn).toBeDisabled();
+    expect(generateBtn).toHaveAttribute(
+      'title',
+      'Shot Plan must be approved before production generation.'
+    );
+    expect(screen.getByTestId('drawer-production-gated-warning')).toBeInTheDocument();
+
+    // 2. In approved stage (SHOT_PLAN_APPROVED)
+    rerender(
+      <ShotDetailDrawer
+        shot={mockShot}
+        projectStatus="SHOT_PLAN_APPROVED"
+        onClose={vi.fn()}
+        onUpdateShot={vi.fn()}
+        onDeleteShot={vi.fn()}
+        onToggleLock={vi.fn()}
+        onGenerateShot={handleGenerate}
+      />
+    );
+
+    expect(generateBtn).not.toBeDisabled();
+    expect(screen.queryByTestId('drawer-production-gated-warning')).not.toBeInTheDocument();
+  });
+
+  it('disables retry controls when production stage is regressed / unapproved', async () => {
+    const { AutomationBar } = await import('../components/storyboard/AutomationBar');
+    const { GenerationQueuePanel } = await import('../components/queue/GenerationQueuePanel');
+
+    // AutomationBar Retry Failed button is disabled when project is regressed
+    render(
+      <AutomationBar
+        automationStep={null}
+        totalShots={2}
+        selectedShotCount={0}
+        hasFailedJobs={true}
+        projectStatus="STORYBOARD_GENERATED"
+        videoMode="STORY"
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onGenerateSelectedShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />
+    );
+
+    const retryFailedBtn = screen.getByTestId('retry-failed-jobs-btn');
+    expect(retryFailedBtn).toBeDisabled();
+    expect(retryFailedBtn).toHaveAttribute(
+      'title',
+      'Shot Plan must be approved before retrying production jobs.'
+    );
+
+    // GenerationQueuePanel Retry button is disabled when project is regressed
+    const mockJobs = [
+      {
+        id: 'job-f1',
+        shot_id: 'shot-100',
+        provider_name: 'vidu',
+        status: 'FAILED' as const,
+        retries: 1,
+        max_retries: 3,
+        created_at: new Date().toISOString(),
+      },
+    ];
+
+    render(
+      <GenerationQueuePanel
+        jobs={mockJobs}
+        loading={false}
+        projectStatus="STORYBOARD_GENERATED"
+        onRefreshJobs={vi.fn()}
+        onCancelJob={vi.fn()}
+        onPollJob={vi.fn()}
+        onRetryJob={vi.fn()}
+      />
+    );
+
+    const retryRowBtn = screen.getByText('Retry');
+    expect(retryRowBtn.closest('button')).toBeDisabled();
+    expect(retryRowBtn.closest('button')).toHaveAttribute(
+      'title',
+      'Shot Plan must be approved before retrying production jobs.'
+    );
+  });
+});

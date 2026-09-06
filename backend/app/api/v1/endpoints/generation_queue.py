@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.db.session import get_db
 from app.schemas.generation_job import JobCreateRequest, JobResponse, ClaimResponse, DispatchRequest
-from app.services.job_dispatch import JobDispatchService
+from app.services.job_dispatch import JobDispatchService, ALLOWED_PRODUCTION_STATUSES, resolve_shot_project
 from app.services.pricing import ProviderPricingService, CostStatus
 from app.providers.factory import ProviderFactory
 from app.models.generation_job import GenerationJob
@@ -16,14 +16,6 @@ from app.models.scene import Scene
 from app.models.shot import Shot
 
 router = APIRouter()
-
-ALLOWED_PRODUCTION_STATUSES = {
-    "SHOT_PLAN_APPROVED",
-    "IMAGES_GENERATED",
-    "VIDEO_IN_PROGRESS",
-    "READY_FOR_REVIEW",
-    "COMPLETED",
-}
 
 
 @router.post("/jobs", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
@@ -37,15 +29,7 @@ def create_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Shot '{request.shot_id}' not found",
         )
-    scene = db.get(Scene, shot.scene_id)
-    project = None
-    if scene:
-        if scene.project_id:
-            project = db.get(Project, scene.project_id)
-        elif scene.story_id:
-            story = db.get(Story, scene.story_id)
-            if story:
-                project = db.get(Project, story.project_id)
+    project = resolve_shot_project(db, shot)
 
     if project and project.status not in ALLOWED_PRODUCTION_STATUSES:
         raise HTTPException(

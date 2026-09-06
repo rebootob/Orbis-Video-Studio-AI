@@ -19,6 +19,7 @@ import {
 interface ShotDetailDrawerProps {
   shot: Shot | null;
   latestJob?: GenerationJob;
+  projectStatus?: string;
   onClose: () => void;
   onUpdateShot: (shotId: string, payload: Partial<Shot>) => Promise<void>;
   onDeleteShot: (shotId: string) => Promise<void>;
@@ -29,6 +30,7 @@ interface ShotDetailDrawerProps {
 export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
   shot,
   latestJob,
+  projectStatus,
   onClose,
   onUpdateShot,
   onDeleteShot,
@@ -192,28 +194,59 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         </div>
 
         {/* Lock / Generate Action Toolbar */}
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            className={`btn btn-sm ${shot.is_locked ? 'btn-danger' : 'btn-outline'}`}
-            style={{ flex: 1 }}
-            onClick={() => onToggleLock(shot)}
-            data-testid="drawer-lock-toggle-btn"
-          >
-            {shot.is_locked ? <Unlock size={14} /> : <Lock size={14} />}
-            {shot.is_locked ? 'Unlock Shot' : 'Lock Shot'}
-          </button>
+        {(() => {
+          const allowedProductionStatuses = [
+            'SHOT_PLAN_APPROVED',
+            'IMAGES_GENERATED',
+            'VIDEO_IN_PROGRESS',
+            'FINAL_REVIEW',
+            'READY_FOR_REVIEW',
+            'COMPLETED',
+            'APPROVED',
+          ];
+          const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
 
-          <button
-            className="btn btn-sm btn-primary"
-            style={{ flex: 1 }}
-            onClick={handleGenerate}
-            disabled={shot.is_locked || generating}
-            data-testid="drawer-generate-shot-btn"
-          >
-            <Play size={14} />
-            {generating ? 'Dispatching...' : 'Generate Shot'}
-          </button>
-        </div>
+          return (
+            <>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  className={`btn btn-sm ${shot.is_locked ? 'btn-danger' : 'btn-outline'}`}
+                  style={{ flex: 1 }}
+                  onClick={() => onToggleLock(shot)}
+                  data-testid="drawer-lock-toggle-btn"
+                >
+                  {shot.is_locked ? <Unlock size={14} /> : <Lock size={14} />}
+                  {shot.is_locked ? 'Unlock Shot' : 'Lock Shot'}
+                </button>
+
+                <button
+                  className="btn btn-sm btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={handleGenerate}
+                  disabled={shot.is_locked || generating || isProductionGated}
+                  data-testid="drawer-generate-shot-btn"
+                  title={
+                    isProductionGated
+                      ? 'Shot Plan must be approved before production generation.'
+                      : shot.is_locked
+                      ? 'Shot is locked'
+                      : 'Generate video for this shot'
+                  }
+                >
+                  <Play size={14} />
+                  {generating ? 'Dispatching...' : 'Generate Shot'}
+                </button>
+              </div>
+
+              {isProductionGated && (
+                <div className="alert alert-warning" style={{ fontSize: '0.75rem', padding: '8px 12px' }} data-testid="drawer-production-gated-warning">
+                  <AlertCircle size={14} />
+                  Shot Plan must be approved before production generation.
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {shot.is_locked && (
           <div className="alert alert-warning" style={{ fontSize: '0.75rem', padding: '8px 12px' }}>
