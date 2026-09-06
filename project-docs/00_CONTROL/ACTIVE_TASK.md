@@ -6,24 +6,27 @@
 
 ## Active Work Package Details
 
-- **Active Work Package:** `P2-WP006 — Reference Library & Character/Location Bibles`
+- **Active Work Package:** `P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue`
 - **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
 - **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
-- **Authorized Agent:** Antigravity (Low-Credit / Bounded Execution Plane)
+- **Authorized Agent:** Codex (Owner-authorized WP007 final corrective; stopped after delivery)
 - **Authority / Oversight:** ChatGPT (Control Plane / Architect), Project Owner (Final Human Authority)
 
 ---
 
 ## Task Objectives
 
-Implement the Reference Library and Character/Location Bibles:
-1. **Domain Models & Schemas:** Defined `ProjectReference`, `CharacterBible`, `LocationBible`, `StyleBible`, and `BrandBible` ORM models and Pydantic schemas.
-2. **Alembic Migration:** `005_add_reference_library_tables.py` creating all 5 reference tables.
-3. **Reference Service:** `ReferenceService` enforcing CRUD operations, cross-project asset link validation (raising `INVALID_ASSET_LINK` 400), and `is_locked` enforcement (raising `REFERENCE_LOCKED` 409).
-4. **Deterministic Reference Context Builder:** `ReferenceContextBuilder` assembling compact prioritized reference contexts (Factual Docs -> Locked Bibles -> Brand/Style -> Project References) bounded by `MAX_REFERENCE_CONTEXT_CHARACTERS = 50000`.
-5. **Prompt Composer Integration:** Integrated locked reference context into WP005 prompt composers (`StoryPromptComposer`, `ScenePromptComposer`, `ShotPromptComposer`) under `=== LOCKED PROJECT REFERENCES ===`.
-6. **API Endpoints:** REST endpoints for project references, characters, locations, styles, and brands under `/api/v1/projects/{project_id}/...` and `/api/v1/...`.
-7. **Automated Testing:** Pytest suite (45 total passing tests) covering CRUD, lock protection, asset link validation, context prioritization/bounding, and Unicode preservation.
+Implement Vidu Provider Adapter & Durable Job Dispatch Queue:
+1. **Provider Abstraction:** `IVideoGenerationProviderAdapter`, `VideoGenerationParams`, `ProviderJobResult`, `ProviderFactory`.
+2. **Vidu Provider Adapter:** `ViduProviderAdapter` aligned with official Vidu v2 API (`Token` auth, explicit `text2video` and `reference2video` mappings, creations status polling, cancel).
+3. **Durable DB Job Queue:** Real DB-backed atomic claim, restart recovery, retry classification (network/429/5xx retry vs 400/401/403/rejection no-retry), bounded retry and bounded polling, no Redis/Celery.
+4. **Idempotency & Concurrency:** DB-level uniqueness constraint on `(shot_id, idempotency_key)`, safe race handling, no duplicate provider submission after restart.
+5. **Secret & Error Safety:** Sanitization of keys/tokens/credentials in logs, errors, and DB results; no raw provider payloads persisted blindly.
+6. **Output Asset Safety:** Provider output URL kept in job/result; no fabricated Asset records with zero file size or dummy checksums.
+7. **Migrations & Tests:** New migration `007_queue_safety`; upgrade / downgrade -1 / upgrade passed on SQLite and PostgreSQL 16.11. Full backend: 101 passed; WP007 suite with PostgreSQL-backed concurrency/recovery fixtures: 53 passed. HTTP is mocked only.
+8. **Final Corrective Safety:** Persisted claim token/lease ownership, atomic submission attempt fencing, `RECONCILIATION_REQUIRED` for ambiguous submissions, durable retry/poll schedules, nested secret rejection and provider result allowlisting, provider-neutral cancel API.
+
+Evidence and operational limits: [`WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md).
 
 ---
 
@@ -32,16 +35,17 @@ Implement the Reference Library and Character/Location Bibles:
 > [!CAUTION]
 > **BOUNDED EXECUTION & SCOPE PROTECTION**
 > 
-> The following actions are STRICTLY PROHIBITED in P2-WP006:
-> - Starting P2-WP007 or any subsequent Work Package
-> - Implementing local AI or vector DB/embeddings
-> - Implementing media generation (Gemini, Vidu, Veo rendering)
+> The following actions are STRICTLY PROHIBITED in P2-WP007:
+> - Starting P2-WP008 or any subsequent Work Package
+> - Using live Vidu credits / making live unmocked HTTP requests
+> - Introducing Redis, Celery, or external queue brokers
 > - Implementing frontend or web UI components
-> - Merging PR automatically
+> - Merging PR automatically or force pushing
 
 ---
 
 ## Next Allowed Actions
 
-1. ChatGPT Independent Review of P2-WP006 PR.
+1. ChatGPT Independent Review of P2-WP007 PR #15.
 2. Project Owner review and sign-off.
+

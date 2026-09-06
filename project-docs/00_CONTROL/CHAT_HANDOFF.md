@@ -1,75 +1,29 @@
-# Chat Session Handoff & Protocol
+# WP007 final corrective handoff
 
-> **Canonical Document Location:** [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md)
+- Repository: `rebootob/Orbis-Video-Studio-AI`
+- Canonical branch: `main`; verified base `6469e2390fea96a8c2693f4eb838c5903d333c45`
+- Existing feature branch: `ai/p2-wp007-vidu-job-queue`
+- Existing PR: #15; no replacement PR, merge, force push or direct main write.
+- HANDOFF_BASE_SHA: `ed2cd596e3d794a56e2e2526fc3f94b76737f5de` (historical commit before this handoff update; always fetch live HEAD).
+- WP006: PASS / CLOSED / MERGED.
+- WP007: FINAL CORRECTIVE IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW.
+- WP008: PROPOSED / NOT AUTHORIZED. Multi-mode changes remain outside WP007.
+- Codex: Owner-authorized bounded final corrective complete; STOP after delivery.
+- Antigravity / Claude Code: no further execution authorized by this handoff.
 
----
+The final corrective adds durable claim ownership and fencing before provider
+submission, safe quarantine for ambiguous outcomes, deterministic retry and poll
+scheduling, strict secret/result persistence boundaries and provider-neutral
+cancellation. An explicit DB worker drives due jobs without Redis/Celery.
 
-## 1. Post-Implementation State & Repository Snapshot
+Validation: full backend 101 passed; WP007 suite with isolated PostgreSQL
+concurrency/recovery fixtures 53 passed; migration upgrade head / downgrade -1 /
+upgrade head passed on SQLite and PostgreSQL 16.11. No live provider HTTP or
+credits used. The temporary PostgreSQL validation server was stopped.
 
-- **Repository:** `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Branch:** `main`
-- **Active Feature Branch:** `ai/p2-wp006-reference-library`
-- **HANDOFF_BASE_SHA:** `a3cf384bc312eb257ef8b838922debdbc71bdc24` *(Repository commit SHA immediately preceding this WP commit)*
-- **P0-WP001 Status:** `PASS / CLOSED`
-- **P1-WP002 Status:** `PASS / MERGED`
-- **P1-WP003 Status:** `PASS / MERGED`
-- **P1-WP004 Status:** `PASS / MERGED`
-- **P1-WP005 Status:** `PASS / MERGED`
-- **P2-WP006 Status:** `IMPLEMENTED / WAITING CHATGPT REVIEW`
-- **Phase:** `P2 — Multi-Modal Reference, Continuity & Scene Engine`
-- **Active Work Package:** `P2-WP006`
-- **Implementation Status:** `REFERENCE LIBRARY & CONTINUITY BIBLES IMPLEMENTED & TESTED`
-- **Next Work Package:** `P2-WP007 — PROPOSED / NOT AUTHORIZED`
-- **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
-- **Next Allowed Action:** `ChatGPT review only`
+Read [the evidence and operational limits](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md)
+and `backend/README.md` for worker/API use and reconciliation behavior.
 
----
-
-## 2. Mandatory Handoff & Branch Rules
-
-> [!IMPORTANT]
-> **LIVE HEAD AUTHORITATIVE RULE & BRANCH SEMANTICS**
-> 
-> 1. **Live Branch HEAD is Authoritative:** Every new or resumed AI chat session MUST fresh-fetch the live branch HEAD from Git/GitHub (`git rev-parse HEAD`) before taking action.
-> 2. **Session Base Branch:** When an authorized Work Package is active (`P2-WP006`), work takes place on the feature branch `ai/p2-wp006-reference-library`.
-> 3. **Historical Baseline Context:** `HANDOFF_BASE_SHA` records the base repository SHA that was current immediately BEFORE the handoff/status document update commit was created. Mismatch between live branch HEAD and `HANDOFF_BASE_SHA` after handoff commits is expected and normal.
-> 4. **No Recursive Commits:** Execution agents MUST NEVER create an additional commit solely to make a handoff SHA field match its own commit SHA.
-
----
-
-## 3. Status of AI Engines
-
-| Engine | Authorized Status | Permitted Scope |
-| :--- | :--- | :--- |
-| **ChatGPT** | **ACTIVE (Control Plane)** | Architect, lead, review, design approval, WP review. |
-| **Antigravity** | **BOUNDED EXECUTION COMPLETE** | P2-WP006 implementation complete. Must STOP and await review. |
-| **Codex** | **STOP** | Inactive. No authorization. |
-| **Claude Code** | **STOP** | Inactive. No authorization. |
-
----
-
-## 4. Completed Milestones & Current State
-
-- **P0-WP001 Completed & Closed:** Governance and architecture foundation merged into `main`.
-- **P1-WP002 Completed & Closed:** Backend core framework, SQLAlchemy domain entities, and database foundation merged into `main`.
-- **P1-WP003 Completed & Closed:** Provider-neutral object storage abstraction, MinIO integration, and Asset API merged into `main`.
-- **P1-WP004 Completed & Closed:** Fast document ingestion and text extraction engine merged into `main`.
-- **P1-WP005 Completed & Closed:** Story & screenplay script generator service merged into `main` at commit `a3cf384bc312eb257ef8b838922debdbc71bdc24`.
-- **P2-WP006 Implemented & Tested:**
-  - ORM entities (`ProjectReference`, `CharacterBible`, `LocationBible`, `StyleBible`, `BrandBible`) and Alembic migration `005_add_reference_library_tables.py`.
-  - `ReferenceService` providing full CRUD, cross-project asset validation (`INVALID_ASSET_LINK` 400), and lock safety (`REFERENCE_LOCKED` 409).
-  - Zero-AI `ReferenceContextBuilder` assembling compact prioritized reference contexts bounded by 50,000 characters.
-  - Prompt composer integration inserting locked reference context into WP005 prompts under `=== LOCKED PROJECT REFERENCES ===`.
-  - Pytest suite (45 passing tests) covering reference library endpoints, lock behavior, context builder, prompt composer, and migration lifecycle.
-
----
-
-## 5. Strict Prohibitions & Next Allowed Step
-
-### Strictly Prohibited
-- Do NOT start P2-WP007 or any subsequent Work Package.
-- Do NOT implement local AI, vector DB/embeddings, Gemini LLM, image generation, video rendering (Vidu/Veo), or frontend code.
-- Do NOT merge PR automatically.
-
-### Next Allowed Step
-The next allowed action is **ChatGPT Independent Review** and **Project Owner approval** for P2-WP006. Execution agents MUST STOP until review is completed.
+Next allowed action: independent review of the current PR HEAD, followed by
+Owner approval. No automatic merge, deployment, WP008, multi-mode, frontend,
+media generation, cost ledger or selective-regeneration expansion is authorized.
