@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Any, TYPE_CHECKING
-from sqlalchemy import String, Text, Float, JSON, DateTime, ForeignKey, Index
+from sqlalchemy import String, Text, Float, JSON, DateTime, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -20,7 +20,30 @@ class UsageLedger(Base):
     __tablename__ = "usage_ledger"
     __table_args__ = (
         Index("ix_usage_ledger_project_status", "project_id", "cost_status"),
-        Index("ix_usage_ledger_job_operation", "job_id", "operation"),
+        Index(
+            "uq_usage_ledger_project_idempotency_key",
+            "project_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+            sqlite_where=text("idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_usage_ledger_job_operation",
+            "job_id",
+            "operation",
+            unique=True,
+            postgresql_where=text("job_id IS NOT NULL"),
+            sqlite_where=text("job_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_usage_ledger_provider_event",
+            "provider",
+            "provider_event_id",
+            unique=True,
+            postgresql_where=text("provider_event_id IS NOT NULL"),
+            sqlite_where=text("provider_event_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

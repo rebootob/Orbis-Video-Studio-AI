@@ -3,6 +3,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models.project import Project
 from app.models.shot import Shot
@@ -171,7 +172,55 @@ class CostLedgerService:
             idempotency_key=idempotency_key,
             description=description,
         )
-        db.add(entry)
+        try:
+            with db.begin_nested():
+                db.add(entry)
+                db.flush()
+        except IntegrityError:
+            # Handle unique-conflict races deterministically by reloading existing entry
+            existing = None
+            if idempotency_key:
+                existing = (
+                    db.query(UsageLedger)
+                    .filter(
+                        UsageLedger.project_id == project_id,
+                        UsageLedger.idempotency_key == idempotency_key,
+                    )
+                    .first()
+                )
+            if not existing and job_id:
+                existing = (
+                    db.query(UsageLedger)
+                    .filter(
+                        UsageLedger.job_id == job_id,
+                        UsageLedger.operation == operation,
+                    )
+                    .first()
+                )
+            if not existing and provider_event_id:
+                existing = (
+                    db.query(UsageLedger)
+                    .filter(
+                        UsageLedger.provider == provider,
+                        UsageLedger.provider_event_id == provider_event_id,
+                    )
+                    .first()
+                )
+            if existing:
+                if actual_cost is not None and existing.cost_status in (
+                    CostStatus.ESTIMATED,
+                    CostStatus.UNKNOWN,
+                ):
+                    existing.actual_cost = round(actual_cost, 4)
+                    existing.cost_status = CostStatus.CONFIRMED
+                    if commit:
+                        db.commit()
+                        db.refresh(existing)
+                    else:
+                        db.flush()
+                return existing
+            raise
+
         if commit:
             db.commit()
             db.refresh(entry)

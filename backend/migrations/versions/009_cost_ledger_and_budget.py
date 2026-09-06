@@ -69,6 +69,27 @@ def upgrade():
         batch_op.create_index("ix_usage_ledger_operation", ["operation"])
         batch_op.create_index("ix_usage_ledger_cost_status", ["cost_status"])
         batch_op.create_index("ix_usage_ledger_idempotency_key", ["idempotency_key"])
+        batch_op.create_index(
+            "uq_usage_ledger_project_idempotency_key",
+            ["project_id", "idempotency_key"],
+            unique=True,
+            postgresql_where=sa.text("idempotency_key IS NOT NULL"),
+            sqlite_where=sa.text("idempotency_key IS NOT NULL"),
+        )
+        batch_op.create_index(
+            "uq_usage_ledger_job_operation",
+            ["job_id", "operation"],
+            unique=True,
+            postgresql_where=sa.text("job_id IS NOT NULL"),
+            sqlite_where=sa.text("job_id IS NOT NULL"),
+        )
+        batch_op.create_index(
+            "uq_usage_ledger_provider_event",
+            ["provider", "provider_event_id"],
+            unique=True,
+            postgresql_where=sa.text("provider_event_id IS NOT NULL"),
+            sqlite_where=sa.text("provider_event_id IS NOT NULL"),
+        )
 
     # 3. Create ledger_adjustments table
     op.create_table(

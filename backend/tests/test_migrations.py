@@ -325,4 +325,46 @@ def test_009_cost_ledger_and_budget_lifecycle(tmp_path, monkeypatch):
     meta4.reflect(bind=engine)
     assert "usage_ledger" in meta4.tables
     assert "ledger_adjustments" in meta4.tables
+
+    # 5. Verify DB-enforced uniqueness constraints and nullable semantics on re-upgraded head
+    from sqlalchemy.exc import IntegrityError
+    ledger4 = Table("usage_ledger", meta4, autoload_with=engine)
+    ledger4.c.id.type = Uuid()
+    ledger4.c.project_id.type = Uuid()
+    if "job_id" in ledger4.c:
+        ledger4.c.job_id.type = Uuid()
+
+    p_id_2 = uuid.uuid4()
+    with engine.begin() as conn:
+        # Multiple NULL idempotency_keys allowed
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="OP1", idempotency_key=None, created_at=now, updated_at=now))
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="OP2", idempotency_key=None, created_at=now, updated_at=now))
+
+        # First insert with non-null idempotency_key succeeds
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="OP3", idempotency_key="canon-key-1", created_at=now, updated_at=now))
+
+        # Cross-project same idempotency_key succeeds
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id_2, provider="vidu", operation="OP3", idempotency_key="canon-key-1", created_at=now, updated_at=now))
+
+    # Duplicate non-null idempotency_key within same project fails closed at DB level
+    import pytest
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="OP4", idempotency_key="canon-key-1", created_at=now, updated_at=now))
+
+    # Duplicate (job_id, operation) fails closed at DB level
+    job_id_1 = uuid.uuid4()
+    with engine.begin() as conn:
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, job_id=job_id_1, provider="vidu", operation="GENERATE", created_at=now, updated_at=now))
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, job_id=job_id_1, provider="vidu", operation="GENERATE", created_at=now, updated_at=now))
+
+    # Duplicate (provider, provider_event_id) fails closed at DB level
+    with engine.begin() as conn:
+        conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="POLL", provider_event_id="evt-uniq-1", created_at=now, updated_at=now))
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(ledger4.insert().values(id=uuid.uuid4(), project_id=p_id, provider="vidu", operation="POLL", provider_event_id="evt-uniq-1", created_at=now, updated_at=now))
+
     engine.dispose()

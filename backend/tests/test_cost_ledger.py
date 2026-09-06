@@ -535,3 +535,165 @@ def test_concurrent_dispatch_budget_race_protection(tmp_path):
         assert committed <= 0.30
 
     engine.dispose()
+
+
+def test_concurrent_duplicate_recording_idempotency_race(tmp_path):
+    """Concurrency test proving parallel identical record_entry calls produce exactly one row and cost."""
+    import concurrent.futures
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = tmp_path / "concurrent_idempotency.db"
+    engine = create_engine(f"sqlite:///{db_file}", connect_args={"timeout": 30})
+
+    @event.listens_for(engine, "begin")
+    def do_begin(conn):
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    with SessionLocal() as db:
+        project = Project(
+            id=project_id,
+            title="Idempotency Race Project",
+            description="Testing duplicate record_entry races",
+            video_mode="SCENE",
+            budget_limit=10.0,
+            budget_currency="USD",
+        )
+        db.add(project)
+        db.commit()
+
+    shared_key = f"race-idem-key-{uuid.uuid4().hex}"
+
+    def record_worker(worker_id):
+        with SessionLocal() as db:
+            entry = CostLedgerService.record_entry(
+                db=db,
+                project_id=project_id,
+                provider="vidu",
+                operation="VIDEO_GENERATION",
+                idempotency_key=shared_key,
+                estimated_cost=1.50,
+                cost_status=CostStatus.ESTIMATED,
+                commit=True,
+            )
+            return str(entry.id)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(record_worker, i) for i in range(5)]
+        returned_ids = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    # All parallel calls must resolve to the identical entry id
+    assert len(returned_ids) == 5
+    assert len(set(returned_ids)) == 1
+
+    # Exactly 1 ledger row must exist in the database
+    with SessionLocal() as db:
+        rows = (
+            db.query(UsageLedger)
+            .filter(
+                UsageLedger.project_id == project_id,
+                UsageLedger.idempotency_key == shared_key,
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].estimated_cost == 1.50
+
+        # Committed cost must be exactly $1.50 (no double-counting / budget inflation)
+        committed = BudgetService.get_project_committed_cost(db, project_id)
+        assert committed == 1.50
+
+    engine.dispose()
+
+
+def test_db_enforced_canonical_dedupe_identities_and_nulls(db_session: Session, test_project: Project, test_shot: Shot):
+    """Verify DB uniqueness constraints and intentional nullable semantics."""
+    # 1. Multiple entries with NULL idempotency_key are allowed
+    e1 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="OP_NULL_1",
+        idempotency_key=None,
+    )
+    e2 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="OP_NULL_2",
+        idempotency_key=None,
+    )
+    assert e1.id != e2.id
+
+    # 2. Project + Idempotency key uniqueness
+    key1 = "unique-key-1"
+    k_entry1 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="OP_KEY",
+        idempotency_key=key1,
+        estimated_cost=0.50,
+    )
+    k_entry2 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="OP_KEY_REPEAT",
+        idempotency_key=key1,
+        actual_cost=0.50,
+    )
+    assert k_entry1.id == k_entry2.id
+    assert k_entry2.cost_status == CostStatus.CONFIRMED
+
+    # 3. Job + Operation uniqueness (job_id provided)
+    test_job = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=test_shot.id,
+        provider_name="vidu",
+        status="PENDING",
+    )
+    db_session.add(test_job)
+    db_session.commit()
+
+    j_entry1 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        job_id=test_job.id,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        estimated_cost=0.25,
+    )
+    j_entry2 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        job_id=test_job.id,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        actual_cost=0.25,
+    )
+    assert j_entry1.id == j_entry2.id
+    assert j_entry2.cost_status == CostStatus.CONFIRMED
+
+    # 4. Provider + Provider event ID uniqueness
+    evt_id = "prov-evt-abc"
+    p_entry1 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        provider_event_id=evt_id,
+    )
+    p_entry2 = CostLedgerService.record_entry(
+        db=db_session,
+        project_id=test_project.id,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        provider_event_id=evt_id,
+    )
+    assert p_entry1.id == p_entry2.id
