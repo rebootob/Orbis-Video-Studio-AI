@@ -495,6 +495,8 @@ class StoryGenerationService:
                 "READY_FOR_REVIEW",
                 "COMPLETED",
             }
+            if project.video_mode == "LOOP":
+                ALLOWED_SHOT_PLAN_STATUSES.add("DRAFT")
             if project.status not in ALLOWED_SHOT_PLAN_STATUSES:
                 raise CreativeGenerationError(
                     "STAGE_NOT_APPROVED",

@@ -10,6 +10,7 @@ from app.models.story import Story
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.generation_job import GenerationJob
+from app.models.batch_run import BatchRun, BatchRunItem
 from app.models.orchestration_audit import OrchestrationAudit
 from app.schemas.orchestrator import (
     AutomationMode,
@@ -22,6 +23,14 @@ from app.schemas.orchestrator import (
 )
 from app.services.job_dispatch import ALLOWED_PRODUCTION_STATUSES
 from app.services.budget import BudgetService
+from app.services.creative_generation.base import (
+    CreativeGenerationProvider,
+    CreativeGenerationError,
+    GenerationRequestOptions,
+)
+from app.services.creative_generation.factory import get_creative_provider
+from app.services.creative_generation.service import StoryGenerationService
+from app.services.batch_resume import BatchResumeService
 
 ACTIVE_JOB_STATUSES = {
     "PENDING",
@@ -70,6 +79,14 @@ STAGE_DESCRIPTIONS = {
     "NEEDS_ATTENTION": "One or more generation jobs failed or require reconciliation.",
     "ARCHIVED": "Project is archived and read-only.",
 }
+
+
+def _resolve_creative_provider(
+    provider: Optional[CreativeGenerationProvider] = None,
+) -> CreativeGenerationProvider:
+    if provider is not None:
+        return provider
+    return get_creative_provider()
 
 
 class ProductionOrchestrator:
@@ -124,7 +141,7 @@ class ProductionOrchestrator:
 
         # 1. Bounded set-based aggregation queries (Zero per-shot N+1)
         story = db.query(Story).filter(Story.project_id == project_id).first()
-        has_story = story is not None and bool(story.logline or story.synopsis)
+        has_story = story is not None and bool(story.logline or story.synopsis or story.title)
 
         scene_count = (
             db.query(func.count(Scene.id))
@@ -132,11 +149,35 @@ class ProductionOrchestrator:
             .scalar()
             or 0
         )
+        if scene_count == 0 and story:
+            scene_count = (
+                db.query(func.count(Scene.id))
+                .filter(Scene.story_id == story.id)
+                .scalar()
+                or 0
+            )
 
         shot_count = (
             db.query(func.count(Shot.id))
             .join(Scene, Shot.scene_id == Scene.id)
-            .filter(Scene.project_id == project_id)
+            .filter(
+                (Scene.project_id == project_id)
+                | (Scene.story_id == (story.id if story else uuid.uuid4()))
+            )
+            .scalar()
+            or 0
+        )
+
+        locked_shot_count = (
+            db.query(func.count(Shot.id))
+            .join(Scene, Shot.scene_id == Scene.id)
+            .filter(
+                (
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4()))
+                ),
+                Shot.is_locked == True,
+            )
             .scalar()
             or 0
         )
@@ -145,7 +186,10 @@ class ProductionOrchestrator:
             db.query(GenerationJob.status, func.count(GenerationJob.id))
             .join(Shot, GenerationJob.shot_id == Shot.id)
             .join(Scene, Shot.scene_id == Scene.id)
-            .filter(Scene.project_id == project_id)
+            .filter(
+                (Scene.project_id == project_id)
+                | (Scene.story_id == (story.id if story else uuid.uuid4()))
+            )
             .group_by(GenerationJob.status)
             .all()
         )
@@ -176,13 +220,20 @@ class ProductionOrchestrator:
             is_blocked = True
             blocked_reasons.append(f"{active_jobs} active job(s) currently processing in queue.")
 
-        # Evaluate effective stage if active work exists
+        if (
+            current_stage == "SHOT_PLAN_APPROVED"
+            and shot_count > 0
+            and locked_shot_count == shot_count
+            and completed_jobs < shot_count
+        ):
+            is_blocked = True
+            blocked_reasons.append(f"All {shot_count} candidate shots are locked against generation.")
+
+        # Stage truth: Never spoof effective_stage as FINAL_REVIEW when persisted status is still VIDEO_IN_PROGRESS!
         effective_stage = current_stage
         if current_stage not in ("COMPLETED", "APPROVED", "ARCHIVED"):
             if active_jobs > 0 and current_stage != "VIDEO_IN_PROGRESS":
                 effective_stage = "VIDEO_IN_PROGRESS"
-            elif active_jobs == 0 and shot_count > 0 and completed_jobs == shot_count and current_stage == "VIDEO_IN_PROGRESS":
-                effective_stage = "FINAL_REVIEW"
             elif recon_jobs > 0 and current_stage not in ALLOWED_PRODUCTION_STATUSES:
                 effective_stage = "NEEDS_ATTENTION"
 
@@ -201,6 +252,7 @@ class ProductionOrchestrator:
             has_story=has_story,
             scene_count=scene_count,
             shot_count=shot_count,
+            locked_shot_count=locked_shot_count,
             active_jobs=active_jobs,
             completed_jobs=completed_jobs,
             failed_jobs=failed_jobs,
@@ -215,6 +267,7 @@ class ProductionOrchestrator:
             "has_story": has_story,
             "scene_count": scene_count,
             "shot_count": shot_count,
+            "locked_shots": locked_shot_count,
             "active_jobs": active_jobs,
             "completed_jobs": completed_jobs,
             "failed_jobs": failed_jobs,
@@ -248,6 +301,7 @@ class ProductionOrchestrator:
         has_story: bool,
         scene_count: int,
         shot_count: int,
+        locked_shot_count: int,
         active_jobs: int,
         completed_jobs: int,
         failed_jobs: int,
@@ -292,12 +346,14 @@ class ProductionOrchestrator:
                         is_chargeable=False,
                     )
                 else:
+                    # Story already exists; transition was not finalized or needs re-approval
                     recommended = OrchestrationActionModel(
                         action="APPROVE_STORY",
                         display_name="Approve Story Outline & Proceed",
                         description="Lock story narrative outline and proceed to storyboard generation.",
                         action_type=OrchestrationActionType.APPROVAL,
                         is_chargeable=False,
+                        parameters={"stage": "STORY_GENERATED"},
                     )
                     available.append(OrchestrationActionModel(
                         action="REVISE_STORY",
@@ -313,6 +369,7 @@ class ProductionOrchestrator:
                     description="Lock story narrative outline and proceed to storyboard generation.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "STORY_GENERATED"},
                 )
                 available.append(OrchestrationActionModel(
                     action="REVISE_STORY",
@@ -337,6 +394,7 @@ class ProductionOrchestrator:
                         description="Lock storyboard scenes and proceed to detailed shot planning.",
                         action_type=OrchestrationActionType.APPROVAL,
                         is_chargeable=False,
+                        parameters={"stage": "STORYBOARD_GENERATED"},
                     )
                     available.append(OrchestrationActionModel(
                         action="REVISE_STORYBOARD",
@@ -352,6 +410,7 @@ class ProductionOrchestrator:
                     description="Lock storyboard scenes and proceed to detailed shot planning.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "STORYBOARD_GENERATED"},
                 )
                 available.append(OrchestrationActionModel(
                     action="REVISE_STORYBOARD",
@@ -376,6 +435,7 @@ class ProductionOrchestrator:
                         description="Lock visual shot plans and AI prompts for production video generation.",
                         action_type=OrchestrationActionType.APPROVAL,
                         is_chargeable=False,
+                        parameters={"stage": "SHOT_PLAN_GENERATED"},
                     )
                     available.append(OrchestrationActionModel(
                         action="REVISE_SHOT_PLAN",
@@ -391,6 +451,7 @@ class ProductionOrchestrator:
                     description="Lock visual shot plans and AI prompts for production video generation.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "SHOT_PLAN_GENERATED"},
                 )
                 available.append(OrchestrationActionModel(
                     action="REVISE_SHOT_PLAN",
@@ -417,6 +478,7 @@ class ProductionOrchestrator:
                         description="Approve scenes and proceed to shot planning.",
                         action_type=OrchestrationActionType.APPROVAL,
                         is_chargeable=False,
+                        parameters={"stage": "STORYBOARD_GENERATED"},
                     )
             elif current_stage == "STORYBOARD_GENERATED":
                 recommended = OrchestrationActionModel(
@@ -425,6 +487,7 @@ class ProductionOrchestrator:
                     description="Approve scenes and proceed to shot planning.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "STORYBOARD_GENERATED"},
                 )
             elif current_stage == "STORYBOARD_APPROVED":
                 if shot_count == 0:
@@ -442,6 +505,7 @@ class ProductionOrchestrator:
                         description="Approve shot plan and proceed to video generation.",
                         action_type=OrchestrationActionType.APPROVAL,
                         is_chargeable=False,
+                        parameters={"stage": "SHOT_PLAN_GENERATED"},
                     )
             elif current_stage == "SHOT_PLAN_GENERATED":
                 recommended = OrchestrationActionModel(
@@ -450,6 +514,7 @@ class ProductionOrchestrator:
                     description="Approve shot plan and proceed to video generation.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "SHOT_PLAN_GENERATED"},
                 )
 
         # ----------------- Mode: LOOP (No Story or Scene outline) -----------------
@@ -469,18 +534,25 @@ class ProductionOrchestrator:
                     description="Approve loop parameters and proceed to generation.",
                     action_type=OrchestrationActionType.APPROVAL,
                     is_chargeable=False,
+                    parameters={"stage": "SHOT_PLAN_GENERATED"},
                 )
 
         # ----------------- Downstream Stages (All modes) -----------------
         if current_stage == "SHOT_PLAN_APPROVED":
+            all_locked = shot_count > 0 and locked_shot_count == shot_count
+            is_gen_blocked = hard_limit_exceeded or all_locked
+            blocked_msg = "Hard budget limit exceeded" if hard_limit_exceeded else (
+                "All candidate shots are locked" if all_locked else None
+            )
+
             recommended = OrchestrationActionModel(
                 action="START_VIDEO_GENERATION",
                 display_name="Start Video Generation",
                 description="Dispatch eligible AI video generation jobs to the provider queue.",
                 action_type=OrchestrationActionType.GENERATION,
                 is_chargeable=True,
-                is_blocked=hard_limit_exceeded,
-                blocked_reason="Hard budget limit exceeded" if hard_limit_exceeded else None,
+                is_blocked=is_gen_blocked,
+                blocked_reason=blocked_msg,
             )
             available.append(OrchestrationActionModel(
                 action="GENERATE_SELECTED_SHOTS",
@@ -488,7 +560,7 @@ class ProductionOrchestrator:
                 description="Dispatch selected shots only.",
                 action_type=OrchestrationActionType.GENERATION,
                 is_chargeable=True,
-                is_blocked=hard_limit_exceeded,
+                is_blocked=is_gen_blocked,
             ))
             available.append(OrchestrationActionModel(
                 action="REVISE_SHOT_PLAN",
@@ -506,7 +578,7 @@ class ProductionOrchestrator:
                     action_type=OrchestrationActionType.NAVIGATION,
                     is_chargeable=False,
                 )
-            elif shot_count > 0 and completed_jobs == shot_count:
+            elif shot_count > 0 and completed_jobs >= shot_count:
                 recommended = OrchestrationActionModel(
                     action="TRANSITION_TO_FINAL_REVIEW",
                     display_name="Proceed to Final Review",
@@ -540,6 +612,7 @@ class ProductionOrchestrator:
                 description="Approve assembly and mark project completed.",
                 action_type=OrchestrationActionType.APPROVAL,
                 is_chargeable=False,
+                parameters={"stage": "FINAL_REVIEW"},
             )
             if failed_jobs > 0:
                 available.append(OrchestrationActionModel(
@@ -568,6 +641,7 @@ class ProductionOrchestrator:
         stage: Optional[str] = None,
         notes: Optional[str] = None,
         actor: str = "USER",
+        provider: Optional[CreativeGenerationProvider] = None,
     ) -> ApproveStageResponse:
         project = db.get(Project, project_id)
         if not project:
@@ -579,7 +653,7 @@ class ProductionOrchestrator:
         video_mode = (project.video_mode or "STORY").upper()
         current = project.status or "DRAFT"
 
-        # Map current stage to target approved stage
+        # Canonical mapping of current gate awaiting human approval -> target approved stage
         approval_map = {
             "STORY_GENERATED": "STORY_APPROVED",
             "STORYBOARD_GENERATED": "STORYBOARD_APPROVED",
@@ -588,9 +662,10 @@ class ProductionOrchestrator:
             "READY_FOR_REVIEW": "COMPLETED",
         }
 
+        # Strict fail-closed check: No approving from DRAFT or non-approval stages!
         target_stage = approval_map.get(current)
 
-        # Idempotency check: if already in requested approved target stage
+        # Idempotency check: if current stage is already the approved target stage
         if stage:
             resolved_target = approval_map.get(stage, stage)
             if current == resolved_target:
@@ -617,27 +692,24 @@ class ProductionOrchestrator:
                 )
 
         if not target_stage:
-            # If explicit stage passed matching next target
-            if stage and current == "DRAFT" and stage == "STORY_APPROVED":
-                target_stage = "STORY_APPROVED"
-            else:
-                cls.record_audit(
-                    db=db,
-                    project_id=project_id,
-                    from_state=current,
-                    to_state=current,
-                    action="APPROVE_STAGE",
-                    actor=actor,
-                    result=OrchestrationActionResult.BLOCKED,
-                    reason_code="INVALID_STAGE_APPROVAL",
-                    detail=f"Stage '{current}' cannot be approved directly.",
-                )
-                db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Current stage '{current}' is not awaiting human approval. Expected approval states: {list(approval_map.keys())}",
-                )
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state=current,
+                action="APPROVE_STAGE",
+                actor=actor,
+                result=OrchestrationActionResult.BLOCKED,
+                reason_code="INVALID_STAGE_APPROVAL",
+                detail=f"Stage '{current}' cannot be approved directly.",
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Current stage '{current}' is not awaiting human approval. Expected approval states: {list(approval_map.keys())}",
+            )
 
+        # Ensure requested stage strictly matches current waiting gate
         if stage and stage != target_stage and stage != current:
             cls.record_audit(
                 db=db,
@@ -671,6 +743,33 @@ class ProductionOrchestrator:
         )
         db.commit()
 
+        # Real AUTO mode behavior:
+        # Automatically cascade safe, non-chargeable creative planning steps,
+        # but ALWAYS STOP at mandatory human review gates, budget limits, or chargeable video generation gates.
+        auto_mode = getattr(project, "automation_mode", "MANUAL")
+        if auto_mode == "AUTO":
+            if target_stage == "STORY_APPROVED":
+                # Safe auto-cascade to GENERATE_STORYBOARD
+                cls.execute_action(
+                    db=db,
+                    project_id=project_id,
+                    action="GENERATE_STORYBOARD",
+                    actor="AUTO",
+                    provider=provider,
+                )
+            elif target_stage == "STORYBOARD_APPROVED":
+                # Safe auto-cascade to GENERATE_SHOT_PLAN
+                cls.execute_action(
+                    db=db,
+                    project_id=project_id,
+                    action="GENERATE_SHOT_PLAN",
+                    actor="AUTO",
+                    provider=provider,
+                )
+            elif target_stage == "SHOT_PLAN_APPROVED":
+                # Mandatory STOP: Chargeable video generation gate requires human confirmation!
+                pass
+
         updated_state = cls.evaluate_state(db, project_id)
         return ApproveStageResponse(
             success=True,
@@ -689,6 +788,7 @@ class ProductionOrchestrator:
         action: str,
         parameters: Optional[Dict[str, Any]] = None,
         actor: str = "USER",
+        provider: Optional[CreativeGenerationProvider] = None,
     ) -> ExecuteActionResponse:
         project = db.get(Project, project_id)
         if not project:
@@ -700,16 +800,53 @@ class ProductionOrchestrator:
         current = project.status or "DRAFT"
         video_mode = (project.video_mode or "STORY").upper()
         params = parameters or {}
-
         action_upper = action.upper()
 
+        creative_prov = _resolve_creative_provider(provider)
+
+        # ----------------- Canonical Approval Actions -----------------
         if action_upper in ("APPROVE_STORY", "APPROVE_STORYBOARD", "APPROVE_SHOT_PLAN", "APPROVE_FINAL"):
+            # Enforce gate matching for approval actions
+            expected_current = {
+                "APPROVE_STORY": ("STORY_GENERATED", "STORY_APPROVED"),
+                "APPROVE_STORYBOARD": ("STORYBOARD_GENERATED", "STORYBOARD_APPROVED"),
+                "APPROVE_SHOT_PLAN": ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"),
+                "APPROVE_FINAL": ("FINAL_REVIEW", "READY_FOR_REVIEW", "COMPLETED"),
+            }
+            allowed_stages = expected_current[action_upper]
+            if current not in allowed_stages:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="INVALID_STAGE_APPROVAL",
+                    detail=f"Action '{action_upper}' is not valid at stage '{current}'.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Action '{action_upper}' is not valid at stage '{current}'. Expected stage: {allowed_stages[0]}.",
+                )
+
             # Route to approve_stage
+            target_stage_for_action = {
+                "APPROVE_STORY": "STORY_APPROVED",
+                "APPROVE_STORYBOARD": "STORYBOARD_APPROVED",
+                "APPROVE_SHOT_PLAN": "SHOT_PLAN_APPROVED",
+                "APPROVE_FINAL": "COMPLETED",
+            }[action_upper]
+
             approval_res = cls.approve_stage(
                 db=db,
                 project_id=project_id,
+                stage=target_stage_for_action,
                 notes=params.get("notes"),
                 actor=actor,
+                provider=creative_prov,
             )
             return ExecuteActionResponse(
                 success=approval_res.success,
@@ -721,7 +858,7 @@ class ProductionOrchestrator:
                 orchestration_state=approval_res.orchestration_state,
             )
 
-        # 1. Action: GENERATE_STORY
+        # ----------------- 1. Action: GENERATE_STORY -----------------
         if action_upper == "GENERATE_STORY":
             if video_mode != "STORY":
                 raise HTTPException(
@@ -733,6 +870,45 @@ class ProductionOrchestrator:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Cannot generate story at stage '{current}'.",
                 )
+
+            # Real generation service dispatch
+            story_svc = StoryGenerationService(db=db, provider=creative_prov)
+            try:
+                story = story_svc.generate_project_story(
+                    project_id=project_id,
+                    target_duration_seconds=params.get("target_duration_seconds", project.target_duration_seconds or 60.0),
+                    tone=params.get("tone", "cinematic"),
+                    language=params.get("language", "th"),
+                    custom_instructions=params.get("custom_instructions"),
+                    generate_scenes=False,
+                )
+            except CreativeGenerationError as e:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code=e.code,
+                    detail=e.message,
+                )
+                db.commit()
+                status_code = (
+                    status.HTTP_400_BAD_REQUEST
+                    if e.code in ("NO_SOURCE_CONTEXT", "SOURCE_EXTRACTION_NOT_READY")
+                    else status.HTTP_409_CONFLICT
+                )
+                raise HTTPException(status_code=status_code, detail=e.message)
+
+            # Verify artifact was created successfully
+            if not story or not story.id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Story generation service did not create a valid Story entity.",
+                )
+
             project.status = "STORY_GENERATED"
             cls.record_audit(
                 db=db,
@@ -742,16 +918,88 @@ class ProductionOrchestrator:
                 action="GENERATE_STORY",
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Story {story.id} generated successfully.",
             )
             db.commit()
 
-        # 2. Action: GENERATE_STORYBOARD
+        # ----------------- 2. Action: GENERATE_STORYBOARD -----------------
         elif action_upper == "GENERATE_STORYBOARD":
-            if video_mode == "STORY" and current not in ("STORY_APPROVED", "STORYBOARD_GENERATED"):
+            story_svc = StoryGenerationService(db=db, provider=creative_prov)
+            created_scenes: List[Scene] = []
+
+            if video_mode == "STORY":
+                if current not in ("STORY_APPROVED", "STORYBOARD_GENERATED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Story outline must be approved before generating storyboard. Current stage is '{current}'.",
+                    )
+                story = db.query(Story).filter(Story.project_id == project_id).first()
+                if not story:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No Story entity found for project in STORY mode. Generate and approve Story first.",
+                    )
+                try:
+                    created_scenes = story_svc.generate_story_scenes(
+                        story_id=story.id,
+                        custom_instructions=params.get("custom_instructions"),
+                        generate_shots=False,
+                    )
+                except CreativeGenerationError as e:
+                    cls.record_audit(
+                        db=db,
+                        project_id=project_id,
+                        from_state=current,
+                        to_state=current,
+                        action=action_upper,
+                        actor=actor,
+                        result=OrchestrationActionResult.BLOCKED,
+                        reason_code=e.code,
+                        detail=e.message,
+                    )
+                    db.commit()
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+            elif video_mode in ("SHORT", "SCENE"):
+                if current not in ("DRAFT", "STORYBOARD_GENERATED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot generate storyboard at stage '{current}'.",
+                    )
+                try:
+                    created_scenes = story_svc.generate_project_storyboard(
+                        project_id=project_id,
+                        custom_instructions=params.get("custom_instructions"),
+                        generate_shots=False,
+                    )
+                except CreativeGenerationError as e:
+                    cls.record_audit(
+                        db=db,
+                        project_id=project_id,
+                        from_state=current,
+                        to_state=current,
+                        action=action_upper,
+                        actor=actor,
+                        result=OrchestrationActionResult.BLOCKED,
+                        reason_code=e.code,
+                        detail=e.message,
+                    )
+                    db.commit()
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+            elif video_mode == "LOOP":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Story outline must be approved before generating storyboard. Current stage is '{current}'.",
+                    detail="Storyboard generation is not applicable in LOOP mode. Use GENERATE_SHOT_PLAN.",
                 )
+
+            # Verify artifact was created successfully
+            if not created_scenes:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Storyboard generation did not create any Scene entities.",
+                )
+
             project.status = "STORYBOARD_GENERATED"
             cls.record_audit(
                 db=db,
@@ -761,16 +1009,112 @@ class ProductionOrchestrator:
                 action="GENERATE_STORYBOARD",
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Generated {len(created_scenes)} storyboard scene(s).",
             )
             db.commit()
 
-        # 3. Action: GENERATE_SHOT_PLAN
+        # ----------------- 3. Action: GENERATE_SHOT_PLAN -----------------
         elif action_upper == "GENERATE_SHOT_PLAN":
-            if video_mode in ("STORY", "SHORT", "SCENE") and current not in ("STORYBOARD_APPROVED", "SHOT_PLAN_GENERATED"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Storyboard must be approved before generating shot plans. Current stage is '{current}'.",
+            story_svc = StoryGenerationService(db=db, provider=creative_prov)
+            created_shots: List[Shot] = []
+
+            if video_mode in ("STORY", "SHORT", "SCENE"):
+                if current not in ("STORYBOARD_APPROVED", "SHOT_PLAN_GENERATED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Storyboard must be approved before generating shot plans. Current stage is '{current}'.",
+                    )
+                # Find active scenes for project
+                story = db.query(Story).filter(Story.project_id == project_id).first()
+                active_scenes = (
+                    db.query(Scene)
+                    .filter(
+                        (Scene.project_id == project_id)
+                        | (Scene.story_id == (story.id if story else uuid.uuid4()))
+                    )
+                    .all()
                 )
+                active_scenes = [
+                    s for s in active_scenes if not (s.scene_config or {}).get("archived")
+                ]
+                if not active_scenes:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No active storyboard scenes found to generate shot plans from.",
+                    )
+                try:
+                    for scene in active_scenes:
+                        s_shots = story_svc.generate_scene_shots(
+                            scene_id=scene.id,
+                            custom_instructions=params.get("custom_instructions"),
+                        )
+                        created_shots.extend(s_shots)
+                except CreativeGenerationError as e:
+                    cls.record_audit(
+                        db=db,
+                        project_id=project_id,
+                        from_state=current,
+                        to_state=current,
+                        action=action_upper,
+                        actor=actor,
+                        result=OrchestrationActionResult.BLOCKED,
+                        reason_code=e.code,
+                        detail=e.message,
+                    )
+                    db.commit()
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+            elif video_mode == "LOOP":
+                if current not in ("DRAFT", "SHOT_PLAN_GENERATED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot generate loop shot plan from stage '{current}'.",
+                    )
+                # In LOOP mode, create default loop scene if none exists
+                loop_scene = (
+                    db.query(Scene)
+                    .filter(Scene.project_id == project_id)
+                    .first()
+                )
+                if not loop_scene:
+                    loop_scene = Scene(
+                        id=uuid.uuid4(),
+                        project_id=project_id,
+                        scene_number=1,
+                        heading="Seamless Loop",
+                        purpose="LOOP",
+                        setting=project.description or "Seamless loop setting",
+                        duration_seconds=project.target_duration_seconds or 4.0,
+                    )
+                    db.add(loop_scene)
+                    db.flush()
+                try:
+                    created_shots = story_svc.generate_scene_shots(
+                        scene_id=loop_scene.id,
+                        custom_instructions=params.get("custom_instructions"),
+                    )
+                except CreativeGenerationError as e:
+                    cls.record_audit(
+                        db=db,
+                        project_id=project_id,
+                        from_state=current,
+                        to_state=current,
+                        action=action_upper,
+                        actor=actor,
+                        result=OrchestrationActionResult.BLOCKED,
+                        reason_code=e.code,
+                        detail=e.message,
+                    )
+                    db.commit()
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
+
+            # Verify artifact was created successfully
+            if not created_shots:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Shot plan generation did not create any Shot entities.",
+                )
+
             project.status = "SHOT_PLAN_GENERATED"
             cls.record_audit(
                 db=db,
@@ -780,10 +1124,11 @@ class ProductionOrchestrator:
                 action="GENERATE_SHOT_PLAN",
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Generated {len(created_shots)} shot plan(s).",
             )
             db.commit()
 
-        # 4. Action: START_VIDEO_GENERATION / CONTINUE_INCOMPLETE
+        # ----------------- 4. Action: START_VIDEO_GENERATION / CONTINUE_INCOMPLETE -----------------
         elif action_upper in ("START_VIDEO_GENERATION", "CONTINUE_INCOMPLETE"):
             if current not in ALLOWED_PRODUCTION_STATUSES:
                 cls.record_audit(
@@ -822,7 +1167,6 @@ class ProductionOrchestrator:
                     detail="Project hard budget limit exceeded. Generation dispatch is blocked.",
                 )
 
-            from app.services.batch_resume import BatchResumeService
             batch_run, _ = BatchResumeService.execute_batch(
                 db=db,
                 project_id=project_id,
@@ -831,16 +1175,50 @@ class ProductionOrchestrator:
                 accumulate_jobs=False,
             )
 
-            new_stage = current
-            if batch_run.queued_count > 0:
-                new_stage = "VIDEO_IN_PROGRESS"
-                project.status = new_stage
+            if batch_run.queued_count == 0:
+                # Truthful locked / blocked / no-op handling
+                skipped_items = (
+                    db.query(BatchRunItem.skip_reason, func.count(BatchRunItem.id))
+                    .filter(BatchRunItem.batch_run_id == batch_run.id)
+                    .group_by(BatchRunItem.skip_reason)
+                    .all()
+                )
+                skip_summary = {reason: count for reason, count in skipped_items}
+                has_locked = skip_summary.get("LOCKED", 0) > 0
+                reason_code = "ALL_CANDIDATES_LOCKED" if has_locked else "ALL_CANDIDATES_SKIPPED"
+                result_status = (
+                    OrchestrationActionResult.BLOCKED if has_locked else OrchestrationActionResult.NO_OP
+                )
 
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=result_status,
+                    reason_code=reason_code,
+                    detail=f"BatchRun {batch_run.id} queued 0 jobs; skipped={batch_run.skipped_count} (skip details: {skip_summary})",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ExecuteActionResponse(
+                    success=True,
+                    action=action_upper,
+                    from_stage=current,
+                    to_stage=current,
+                    result=result_status,
+                    message=f"No jobs dispatched: {batch_run.skipped_count} shot(s) skipped (details: {skip_summary}).",
+                    orchestration_state=updated_state,
+                )
+
+            project.status = "VIDEO_IN_PROGRESS"
             cls.record_audit(
                 db=db,
                 project_id=project_id,
                 from_state=current,
-                to_state=new_stage,
+                to_state="VIDEO_IN_PROGRESS",
                 action=action_upper,
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
@@ -848,7 +1226,7 @@ class ProductionOrchestrator:
             )
             db.commit()
 
-        # 5. Action: GENERATE_SELECTED_SHOTS
+        # ----------------- 5. Action: GENERATE_SELECTED_SHOTS -----------------
         elif action_upper == "GENERATE_SELECTED_SHOTS":
             if current not in ALLOWED_PRODUCTION_STATUSES:
                 raise HTTPException(
@@ -862,7 +1240,6 @@ class ProductionOrchestrator:
                     detail="Parameter 'shot_ids' is required for GENERATE_SELECTED_SHOTS.",
                 )
             parsed_ids = [uuid.UUID(str(s)) for s in shot_ids]
-            from app.services.batch_resume import BatchResumeService
             batch_run, _ = BatchResumeService.execute_batch(
                 db=db,
                 project_id=project_id,
@@ -872,25 +1249,58 @@ class ProductionOrchestrator:
                 accumulate_jobs=False,
             )
 
-            new_stage = current
-            if batch_run.queued_count > 0:
-                new_stage = "VIDEO_IN_PROGRESS"
-                project.status = new_stage
+            if batch_run.queued_count == 0:
+                skipped_items = (
+                    db.query(BatchRunItem.skip_reason, func.count(BatchRunItem.id))
+                    .filter(BatchRunItem.batch_run_id == batch_run.id)
+                    .group_by(BatchRunItem.skip_reason)
+                    .all()
+                )
+                skip_summary = {reason: count for reason, count in skipped_items}
+                has_locked = skip_summary.get("LOCKED", 0) > 0
+                reason_code = "ALL_CANDIDATES_LOCKED" if has_locked else "ALL_CANDIDATES_SKIPPED"
+                result_status = (
+                    OrchestrationActionResult.BLOCKED if has_locked else OrchestrationActionResult.NO_OP
+                )
 
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=result_status,
+                    reason_code=reason_code,
+                    detail=f"BatchRun {batch_run.id} queued 0 jobs; skipped={batch_run.skipped_count} (skip details: {skip_summary})",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ExecuteActionResponse(
+                    success=True,
+                    action=action_upper,
+                    from_stage=current,
+                    to_stage=current,
+                    result=result_status,
+                    message=f"No jobs dispatched: {batch_run.skipped_count} selected shot(s) skipped (details: {skip_summary}).",
+                    orchestration_state=updated_state,
+                )
+
+            project.status = "VIDEO_IN_PROGRESS"
             cls.record_audit(
                 db=db,
                 project_id=project_id,
                 from_state=current,
-                to_state=new_stage,
+                to_state="VIDEO_IN_PROGRESS",
                 action=action_upper,
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Dispatched BatchRun {batch_run.id} for selected shots with queued_count={batch_run.queued_count}",
             )
             db.commit()
 
-        # 6. Action: RETRY_FAILED
+        # ----------------- 6. Action: RETRY_FAILED -----------------
         elif action_upper == "RETRY_FAILED":
-            from app.services.batch_resume import BatchResumeService
             batch_run, _ = BatchResumeService.execute_batch(
                 db=db,
                 project_id=project_id,
@@ -898,24 +1308,97 @@ class ProductionOrchestrator:
                 max_queued_jobs=None,
                 accumulate_jobs=False,
             )
-            new_stage = current
-            if batch_run.queued_count > 0:
-                new_stage = "VIDEO_IN_PROGRESS"
-                project.status = new_stage
 
+            if batch_run.queued_count == 0:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.NO_OP,
+                    reason_code="NO_FAILED_JOBS_TO_RETRY",
+                    detail=f"BatchRun {batch_run.id} queued 0 retry jobs.",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ExecuteActionResponse(
+                    success=True,
+                    action=action_upper,
+                    from_stage=current,
+                    to_stage=current,
+                    result=OrchestrationActionResult.NO_OP,
+                    message="No failed jobs found eligible for retry.",
+                    orchestration_state=updated_state,
+                )
+
+            project.status = "VIDEO_IN_PROGRESS"
             cls.record_audit(
                 db=db,
                 project_id=project_id,
                 from_state=current,
-                to_state=new_stage,
+                to_state="VIDEO_IN_PROGRESS",
                 action=action_upper,
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Dispatched BatchRun {batch_run.id} retrying failed jobs with queued_count={batch_run.queued_count}",
             )
             db.commit()
 
-        # 7. Action: TRANSITION_TO_FINAL_REVIEW
+        # ----------------- 7. Action: TRANSITION_TO_FINAL_REVIEW -----------------
         elif action_upper == "TRANSITION_TO_FINAL_REVIEW":
+            if current not in ("VIDEO_IN_PROGRESS", "READY_FOR_REVIEW"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot transition to final review from stage '{current}'.",
+                )
+
+            # Verify active jobs and shot counts
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            shot_count = (
+                db.query(func.count(Shot.id))
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4()))
+                )
+                .scalar()
+                or 0
+            )
+
+            job_counts_query = (
+                db.query(GenerationJob.status, func.count(GenerationJob.id))
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4()))
+                )
+                .group_by(GenerationJob.status)
+                .all()
+            )
+            job_counts = {s: cnt for s, cnt in job_counts_query}
+            active_jobs = sum(job_counts.get(s, 0) for s in ACTIVE_JOB_STATUSES)
+            completed_jobs = job_counts.get("COMPLETED", 0)
+            recon_jobs = job_counts.get("RECONCILIATION_REQUIRED", 0)
+
+            if active_jobs > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot proceed to final review: {active_jobs} active generation job(s) are still processing.",
+                )
+            if recon_jobs > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot proceed to final review: {recon_jobs} job(s) require reconciliation.",
+                )
+            if shot_count == 0 or completed_jobs < shot_count:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot proceed to final review: only {completed_jobs}/{shot_count} shots are completed.",
+                )
+
             project.status = "FINAL_REVIEW"
             cls.record_audit(
                 db=db,
@@ -925,17 +1408,114 @@ class ProductionOrchestrator:
                 action=action_upper,
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail="All shots verified completed. Transitioned to FINAL_REVIEW.",
             )
             db.commit()
 
-        # 8. Action: REVISE_STORY / REVISE_STORYBOARD / REVISE_SHOT_PLAN
+        # ----------------- 8. Action: RESOLVE_RECONCILIATION -----------------
+        elif action_upper == "RESOLVE_RECONCILIATION":
+            story = db.query(Story).filter(Story.project_id == project_id).first()
+            recon_jobs_list = (
+                db.query(GenerationJob)
+                .join(Shot, GenerationJob.shot_id == Shot.id)
+                .join(Scene, Shot.scene_id == Scene.id)
+                .filter(
+                    (Scene.project_id == project_id)
+                    | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.status == "RECONCILIATION_REQUIRED",
+                )
+                .all()
+            )
+            resolved_count = len(recon_jobs_list)
+            for r_job in recon_jobs_list:
+                r_job.status = "FAILED"
+                r_job.error_message = (
+                    (r_job.error_message or "")
+                    + " [Reconciled to FAILED via Orchestration for safe retry]"
+                ).strip()
+
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state=current,
+                action=action_upper,
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail=f"Reconciled {resolved_count} job(s) from RECONCILIATION_REQUIRED to FAILED for safe retry.",
+            )
+            db.commit()
+
+        # ----------------- 9. Navigation / Non-charging Actions: POLL_STATUS & VIEW_SUMMARY -----------------
+        elif action_upper == "POLL_STATUS":
+            updated_state = cls.evaluate_state(db, project_id)
+            return ExecuteActionResponse(
+                success=True,
+                action=action_upper,
+                from_stage=current,
+                to_stage=current,
+                result=OrchestrationActionResult.NO_OP,
+                message="Polling status completed.",
+                orchestration_state=updated_state,
+            )
+
+        elif action_upper == "VIEW_SUMMARY":
+            updated_state = cls.evaluate_state(db, project_id)
+            return ExecuteActionResponse(
+                success=True,
+                action=action_upper,
+                from_stage=current,
+                to_stage=current,
+                result=OrchestrationActionResult.NO_OP,
+                message="Production completed. Summary ready.",
+                orchestration_state=updated_state,
+            )
+
+        # ----------------- 10. Action: REVISE_STORY / REVISE_STORYBOARD / REVISE_SHOT_PLAN -----------------
         elif action_upper in ("REVISE_STORY", "REVISE_STORYBOARD", "REVISE_SHOT_PLAN"):
-            revert_map = {
-                "REVISE_STORY": "DRAFT",
-                "REVISE_STORYBOARD": "STORY_APPROVED" if video_mode == "STORY" else "DRAFT",
-                "REVISE_SHOT_PLAN": "STORYBOARD_APPROVED" if video_mode != "LOOP" else "DRAFT",
-            }
-            new_stage = revert_map.get(action_upper, "DRAFT")
+            # Fail closed: reject from terminal / in-progress states
+            if current in ("COMPLETED", "APPROVED", "ARCHIVED", "VIDEO_IN_PROGRESS", "FINAL_REVIEW"):
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="INVALID_REVISION_STAGE",
+                    detail=f"Cannot revise at stage '{current}'.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot revise production plan at stage '{current}'.",
+                )
+
+            if action_upper == "REVISE_STORY":
+                if video_mode != "STORY" or current not in ("STORY_GENERATED", "STORY_APPROVED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot revise story from stage '{current}' in {video_mode} mode.",
+                    )
+                new_stage = "DRAFT"
+
+            elif action_upper == "REVISE_STORYBOARD":
+                if current not in ("STORYBOARD_GENERATED", "STORYBOARD_APPROVED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot revise storyboard from stage '{current}'.",
+                    )
+                new_stage = "STORY_APPROVED" if video_mode == "STORY" else "DRAFT"
+
+            elif action_upper == "REVISE_SHOT_PLAN":
+                if current not in ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot revise shot plan from stage '{current}'.",
+                    )
+                new_stage = "STORYBOARD_APPROVED" if video_mode != "LOOP" else "DRAFT"
+
             project.status = new_stage
             cls.record_audit(
                 db=db,
@@ -945,6 +1525,7 @@ class ProductionOrchestrator:
                 action=action_upper,
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
+                detail=f"Reverted to '{new_stage}' for revision.",
             )
             db.commit()
 

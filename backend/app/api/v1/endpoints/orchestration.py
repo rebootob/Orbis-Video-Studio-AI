@@ -16,6 +16,9 @@ from app.schemas.orchestrator import (
     OrchestrationAuditResponse,
 )
 
+from app.services.creative_generation.base import CreativeGenerationProvider
+from app.services.creative_generation.factory import get_creative_provider
+
 router = APIRouter()
 
 
@@ -41,6 +44,7 @@ def execute_orchestration_action(
     project_id: uuid.UUID,
     request: ExecuteActionRequest,
     db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
 ):
     """Execute an allowed production orchestration action with precondition validation."""
     return ProductionOrchestrator.execute_action(
@@ -49,6 +53,7 @@ def execute_orchestration_action(
         action=request.action,
         parameters=request.parameters,
         actor="USER",
+        provider=provider,
     )
 
 
@@ -61,6 +66,7 @@ def approve_production_stage(
     project_id: uuid.UUID,
     request: Optional[ApproveStageRequest] = None,
     db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
 ):
     """Approve current production stage gate and advance to next stage."""
     req = request or ApproveStageRequest()
@@ -70,6 +76,7 @@ def approve_production_stage(
         stage=req.stage,
         notes=req.notes,
         actor="USER",
+        provider=provider,
     )
 
 

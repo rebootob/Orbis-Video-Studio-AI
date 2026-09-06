@@ -508,8 +508,8 @@ export const api = {
   async updateOrchestrationSettings(
     projectId: string,
     payload: OrchestrationSettingsPayload
-  ): Promise<Project> {
-    return request<Project>(`/projects/${projectId}/orchestration/settings`, {
+  ): Promise<OrchestrationStateResponse> {
+    return request<OrchestrationStateResponse>(`/projects/${projectId}/orchestration/settings`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });

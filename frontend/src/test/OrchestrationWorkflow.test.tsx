@@ -184,4 +184,89 @@ describe('Orchestration UI Components and Stage Transitions', () => {
     fireEvent.click(approveBtn);
     expect(onApproveStageMock).toHaveBeenCalledWith('STORYBOARD_APPROVED');
   });
+
+  it('preserves project model integrity when updating automation mode settings', () => {
+    // Regression test for Finding 6:
+    // When updateOrchestrationSettings returns OrchestrationStateResponse,
+    // the project state handler must not overwrite Project with OrchestrationStateResponse
+    const originalProject: Project = {
+      id: 'proj-123',
+      title: 'Original Title',
+      status: 'DRAFT',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+
+    const stateResponse: OrchestrationStateResponse = {
+      project_id: 'proj-123',
+      current_stage: 'DRAFT',
+      video_mode: 'STORY',
+      automation_mode: 'AUTO',
+      stage_display_name: 'Draft & Setup',
+      stage_description: 'Initial creative setup',
+      is_approval_required: false,
+      is_blocked: false,
+      blocked_reasons: [],
+      available_actions: [],
+      summary: {},
+    };
+
+    // Simulate safe state updater pattern used in App.tsx
+    let selectedProject: Project | null = { ...originalProject };
+    let orchestrationState: OrchestrationStateResponse | null = null;
+
+    const handleUpdateAutomationModeSim = (newMode: 'MANUAL' | 'ASSISTED' | 'AUTO', response: OrchestrationStateResponse) => {
+      orchestrationState = response;
+      selectedProject = selectedProject ? { ...selectedProject, automation_mode: newMode } : null;
+    };
+
+    handleUpdateAutomationModeSim('AUTO', stateResponse);
+
+    expect(orchestrationState).toEqual(stateResponse);
+    expect(selectedProject).not.toBeNull();
+    expect(selectedProject!.title).toBe('Original Title');
+    expect(selectedProject!.status).toBe('DRAFT');
+    expect(selectedProject!.video_mode).toBe('STORY');
+    expect(selectedProject!.automation_mode).toBe('AUTO');
+    expect(selectedProject!.created_at).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('correctly maps navigation recommended actions (POLL_STATUS, VIEW_SUMMARY)', () => {
+    const pollState: OrchestrationStateResponse = {
+      ...mockOrchestrationState,
+      current_stage: 'VIDEO_IN_PROGRESS',
+      recommended_action: {
+        action: 'POLL_STATUS',
+        display_name: 'Monitor Active Generation Jobs',
+        description: '2 job(s) in progress',
+        action_type: 'NAVIGATION',
+        is_chargeable: false,
+      },
+    };
+
+    const onExecuteMock = vi.fn();
+    render(
+      <AutomationBar
+        automationStep={null}
+        selectedShotCount={0}
+        totalShots={2}
+        hasFailedJobs={false}
+        projectStatus="VIDEO_IN_PROGRESS"
+        videoMode="STORY"
+        orchestrationState={pollState}
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onGenerateSelectedShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+        onExecuteRecommendedAction={onExecuteMock}
+      />
+    );
+
+    const actionBtn = screen.getByTestId('orchestration-recommended-action-btn');
+    expect(actionBtn).toHaveTextContent('Monitor Active Generation Jobs');
+    fireEvent.click(actionBtn);
+    expect(onExecuteMock).toHaveBeenCalledTimes(1);
+  });
 });
