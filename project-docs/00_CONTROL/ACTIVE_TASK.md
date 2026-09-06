@@ -7,62 +7,70 @@
 ## Active Work Package
 
 ```text
-P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
 Status:
 
 ```text
-AUTHORIZED / IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
+WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
 ```
 
 Current Work Tracking:
 
 ```text
+Active Package: NONE
+Last Completed: P2-WP011 (Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails)
 Issue: #28
-PR: #29
-Branch: ai/p2-wp011-batch-resume
-Gate: WAITING CHATGPT INDEPENDENT RE-REVIEW (Review ID 5124507165 corrected)
+PR: #29 (MERGED / CLOSED)
+Branch: ai/p2-wp011-batch-resume (MERGED)
+Reviewed HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
+Merge Commit: 643614b089a295ea96be179e470707609cbe4b53
+Final Review: PASS / READY TO MERGE (Review ID 5124729394)
+Canonical main HEAD: 643614b089a295ea96be179e470707609cbe4b53
+Gate: WAITING OWNER NEXT-WORK-PACKAGE AUTHORIZATION
 ```
 
 Execution Roles:
 
 ```text
-Owner = final human authority / UAT / merge approval
+Owner = final human authority / authorization of next WP
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / WAITING REVIEW (bounded low-credit Execution Plane)
+Antigravity = STOP / NONE (bounded low-credit Execution Plane when explicitly authorized)
 Codex = STOP
 Claude Code = STOP
 ```
 
 ---
 
-## Scope Implemented in P2-WP011 (Including Review ID 5124507165 Corrective)
+## P2-WP011 Closure Evidence
 
-1. **Transactional Job + Batch Audit**:
-   - Atomic savepoint (`begin_nested()`) wrapping `JobDispatchService.create_and_dispatch_job(..., commit=False)` and `BatchRunItem(decision="QUEUED")`.
-   - Failure injection test proving failures between Job construction and audit persistence roll back atomically without unaudited queued work.
+1. **Transactional Job + Batch Audit Persistence**:
+   - Savepoint-level isolation (`begin_nested()`) wrapping `JobDispatchService.create_and_dispatch_job(commit=False)` and `BatchRunItem(decision="QUEUED")`.
+   - Durable consistency: GenerationJob, CostLedger reservation, and BatchRunItem persist atomically or roll back cleanly together without unaudited queued work.
 2. **Reconciliation / Cancellation Safety**:
-   - `CANCELLING` treated as active/in-flight (`CandidateSkipReason.CANCELLATION_IN_PROGRESS`), blocking automatic regeneration.
+   - `CANCELLING` treated as active/in-flight (`CandidateSkipReason.CANCELLATION_IN_PROGRESS`), preventing duplicate generation.
    - `RECONCILIATION_REQUIRED` blocks automatic generation/resume/retry (`CandidateSkipReason.RECONCILIATION_REQUIRED`).
    - Single-shot create path fails closed with 409 for both states.
-   - Status sets consistent across `BatchResumeService`, `JobDispatchService`, `GenerationJob` partial index, and migration `011_batch_resume_runs_and_indexes`.
-3. **Real Bounded Processing**:
-   - Evaluates -> persists `BatchRunItems` -> dispatches per bounded chunk (`EXECUTE_CHUNK_SIZE = 50`) without accumulating full-project candidate lists in memory.
-   - Deterministic chunk ordering with stable tie-breaker: `(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())`.
-   - Zero N+1 queries in `list_project_batch_runs`: exactly 2 set-based queries execute regardless of run count.
-   - Bounded items retrieval with pagination in `get_batch_run_details` (`item_limit`, `item_offset`).
-4. **Truthful Run / UI Outcomes**:
-   - BatchRun `failed_count` truthfully reflects dispatch failures and linked worker job failures.
-   - Transactional active-job conflicts during dispatch are truthfully reported as `SKIPPED / ACTIVE_JOB_EXISTS` (not generic FAILED).
-   - Frontend `handleBatchGenerateShots` strictly guards stage transition: does NOT switch project status to `VIDEO_IN_PROGRESS` when `queued_count == 0`.
+3. **Bounded Keyset Processing**:
+   - Keyset pagination based on `(created_at, id)` snapshot boundary; eliminated unbounded in-memory candidate materialization.
+   - Streaming execution in chunks of $\le 50$ (`EXECUTE_CHUNK_SIZE = 50`).
+   - Set-based DB queries in `list_project_batch_runs` (0 N+1 queries).
+   - Paginated item details in `get_batch_run_details` (`item_limit`, `item_offset`).
+4. **Bounded Memory Retention & Truthful TOCTOU Boundary Enforcement**:
+   - Legacy `/jobs/batch` enforces strict execution boundary $\le 100$ with atomic rollback and 400 Bad Request if $> 100$ jobs would be queued, preventing untracked active jobs.
+   - `BatchResumeService.execute_batch` bounds compatibility `created_jobs` list via `MAX_COMPATIBILITY_RETURNED_JOBS = 100` and `accumulate_jobs=False` on canonical `/jobs/resume`, preventing unbounded ORM memory retention.
+   - Canonical `/jobs/resume` relies truthfully on durable `BatchRun` and `BatchRunItem` records.
+5. **Truthful Run / UI Outcomes & Stage Safety**:
+   - BatchRun counters reconciled dynamically on read.
+   - `handleBatchGenerateShots` strictly guards stage transition: does NOT switch project status to `VIDEO_IN_PROGRESS` when `queued_count == 0`.
 
 ---
 
 ## Next Allowed Action
 
-1. Antigravity: STOP.
-2. Push corrective commits to existing PR #29.
-3. Wait for ChatGPT independent PASS re-review and explicit Owner approval.
-4. Do not merge without approval.
-5. Do not start WP012.
+1. Antigravity: STOP / NONE.
+2. Codex: STOP.
+3. Claude Code: STOP.
+4. Wait for explicit Owner authorization of the next work package.
+5. P2-WP012 remains: PROPOSED / NOT AUTHORIZED. Do NOT start or pre-authorize WP012.
