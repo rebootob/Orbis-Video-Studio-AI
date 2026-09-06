@@ -119,8 +119,9 @@ The roadmap should prioritize end-to-end production automation rather than build
   - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior. Guard stage gates against arbitrary PATCH bypass, integrate append-only orchestration audit trail, and wire frontend state machine controls.
 
 - **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
-  - **Status:** ACTIVE / AUTHORIZED
+  - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #33
+  - **PR:** #34
   - **Branch:** `ai/p2-wp013-image-keyframe-pipeline`
   - Dedicated ImageProvider abstraction, batch storyboard/keyframe generation, continuity/reference mapping and retry/resume.
 
@@ -152,7 +153,9 @@ Important product locks:
 ### Phase 3 — Audio, Assembly, QC & Cloud Rendering
 
 - **P3-WP014 — Core V1 Audio Production Automation**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - **Status:** ACTIVE / AUTHORIZED
+  - **Issue:** #35
+  - **Branch:** `ai/p3-wp014-audio-production`
   - VO, BGM, SFX, ambience, batch audio planning/generation/assignment and basic mixing/ducking.
 
 - **P3-WP015 — Simplified Assembly / Timeline Preview**

@@ -25,7 +25,7 @@ import { StoryboardGrid } from './components/storyboard/StoryboardGrid';
 import { ReferencesPanel } from './components/references/ReferencesPanel';
 import { GenerationQueuePanel } from './components/queue/GenerationQueuePanel';
 import { BudgetLedgerPanel } from './components/budget/BudgetLedgerPanel';
-import { AudioReadinessPanel } from './components/audio/AudioReadinessPanel';
+import { AudioProductionPanel } from './components/audio/AudioProductionPanel';
 import { QCHistoryPanel } from './components/qc/QCHistoryPanel';
 import {
   Film,
@@ -815,7 +815,11 @@ export const App: React.FC = () => {
             )}
 
             {activeTab === 'audio' && (
-              <AudioReadinessPanel projectId={selectedProject.id} />
+              <AudioProductionPanel
+                projectId={selectedProject.id}
+                projectStatus={selectedProject.status}
+                onRefreshProject={() => loadWorkspaceData(selectedProject)}
+              />
             )}
 
             {activeTab === 'qc' && (

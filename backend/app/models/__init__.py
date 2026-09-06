@@ -19,6 +19,16 @@ from app.models.asset_lock import AssetLock
 from app.models.usage_ledger import UsageLedger, LedgerAdjustment
 from app.models.batch_run import BatchRun, BatchRunItem
 from app.models.orchestration_audit import OrchestrationAudit
+from app.models.audio_clip import (
+    AudioClip,
+    AudioSourceType,
+    AudioType,
+    AudioGenerationMode,
+    AudioScope,
+    DuckingRole,
+)
+from app.models.audio_plan import AudioPlan
+from app.models.audio_history import AudioPlanVersion, AudioClipHistory
 
 __all__ = [
     "Base",
@@ -42,5 +52,14 @@ __all__ = [
     "BatchRun",
     "BatchRunItem",
     "OrchestrationAudit",
+    "AudioClip",
+    "AudioSourceType",
+    "AudioType",
+    "AudioGenerationMode",
+    "AudioScope",
+    "DuckingRole",
+    "AudioPlan",
+    "AudioPlanVersion",
+    "AudioClipHistory",
 ]
 

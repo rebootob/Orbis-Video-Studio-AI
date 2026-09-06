@@ -60,6 +60,12 @@ STAGE_DISPLAY_NAMES = {
     "VIDEO_IN_PROGRESS": "Video Generation In Progress",
     "FINAL_REVIEW": "Final Cut Review",
     "READY_FOR_REVIEW": "Final Cut Review",
+    "AUDIO_PLAN_GENERATED": "Audio Plan Generated",
+    "AUDIO_PLAN_APPROVED": "Audio Plan Approved",
+    "AUDIO_IN_PROGRESS": "Audio Generation In Progress",
+    "AUDIO_MIX_READY": "Audio Mix Ready",
+    "AUDIO_APPROVED": "Audio Production Approved",
+    "READY_FOR_ASSEMBLY": "Ready for Timeline Assembly",
     "APPROVED": "Production Approved",
     "COMPLETED": "Production Completed",
     "NEEDS_ATTENTION": "Needs Attention",
@@ -80,6 +86,12 @@ STAGE_DESCRIPTIONS = {
     "VIDEO_IN_PROGRESS": "AI video generation jobs are actively processing in the provider queue.",
     "FINAL_REVIEW": "All video shots have completed generation. Inspect assembly for final approval.",
     "READY_FOR_REVIEW": "Ready for final production quality review.",
+    "AUDIO_PLAN_GENERATED": "Audio production plan generated. Review VO, dialogue, BGM, SFX, and Ambience tracks.",
+    "AUDIO_PLAN_APPROVED": "Audio production plan approved. Ready to generate audio clips.",
+    "AUDIO_IN_PROGRESS": "Audio generation jobs are actively processing.",
+    "AUDIO_MIX_READY": "Audio tracks generated and mixed with auto-ducking metadata. Inspect audio mix.",
+    "AUDIO_APPROVED": "Audio production cut has been approved.",
+    "READY_FOR_ASSEMBLY": "Video and audio assets approved. Ready for timeline assembly.",
     "APPROVED": "Final video production cut has been approved.",
     "COMPLETED": "Project production is complete and ready for export.",
     "NEEDS_ATTENTION": "One or more generation jobs failed or require reconciliation.",
@@ -320,6 +332,8 @@ class ProductionOrchestrator:
             "STORYBOARD_GENERATED",
             "SHOT_PLAN_GENERATED",
             "IMAGES_GENERATED",
+            "AUDIO_PLAN_GENERATED",
+            "AUDIO_MIX_READY",
             "FINAL_REVIEW",
             "READY_FOR_REVIEW",
         )
@@ -909,6 +923,113 @@ class ProductionOrchestrator:
                     action_type=OrchestrationActionType.RECOVERY,
                     is_chargeable=True,
                 ))
+            available.append(OrchestrationActionModel(
+                action="GENERATE_AUDIO_PLAN",
+                display_name="Proceed to Audio Production",
+                description="Initialize audio plan for narrator, voiceover, BGM, and effects.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=False,
+            ))
+
+        elif current_stage == "AUDIO_PLAN_GENERATED":
+            recommended = OrchestrationActionModel(
+                action="APPROVE_AUDIO_PLAN",
+                display_name="Approve Audio Plan & Proceed",
+                description="Approve audio tracks and proceed to clip generation.",
+                action_type=OrchestrationActionType.APPROVAL,
+                is_chargeable=False,
+                parameters={"stage": "AUDIO_PLAN_GENERATED"},
+            )
+            available.append(OrchestrationActionModel(
+                action="GENERATE_AUDIO_PLAN",
+                display_name="Regenerate Audio Plan",
+                description="Re-analyze scenes and regenerate audio plan.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=False,
+            ))
+
+        elif current_stage == "AUDIO_PLAN_APPROVED":
+            recommended = OrchestrationActionModel(
+                action="START_AUDIO_GENERATION",
+                display_name="Generate Audio Clips",
+                description="Dispatch voiceover, dialogue, BGM, SFX, and ambience generation.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+                is_blocked=hard_limit_exceeded,
+                blocked_reason="Hard budget limit exceeded" if hard_limit_exceeded else None,
+            )
+            available.append(OrchestrationActionModel(
+                action="GENERATE_ALL_VO",
+                display_name="Generate All Voiceover",
+                description="Generate voiceover and dialogue audio clips.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+            available.append(OrchestrationActionModel(
+                action="ASSIGN_BGM",
+                display_name="Generate Background Music",
+                description="Generate project background music track.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+
+        elif current_stage == "AUDIO_IN_PROGRESS":
+            recommended = OrchestrationActionModel(
+                action="AUTO_MIX_AUDIO",
+                display_name="Compute Auto-Mix & Ducking",
+                description="Mix generated audio tracks with speech-over-music auto-ducking.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=False,
+            )
+            available.append(OrchestrationActionModel(
+                action="CONTINUE_INCOMPLETE_AUDIO",
+                display_name="Continue Incomplete Audio",
+                description="Generate remaining pending audio clips.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=True,
+            ))
+            available.append(OrchestrationActionModel(
+                action="RETRY_FAILED_AUDIO",
+                display_name="Retry Failed Audio",
+                description="Retry failed audio clip generation.",
+                action_type=OrchestrationActionType.RECOVERY,
+                is_chargeable=True,
+            ))
+
+        elif current_stage == "AUDIO_MIX_READY":
+            recommended = OrchestrationActionModel(
+                action="APPROVE_AUDIO_MIX",
+                display_name="Approve Audio Mix & Proceed",
+                description="Approve audio mix and proceed to final assembly.",
+                action_type=OrchestrationActionType.APPROVAL,
+                is_chargeable=False,
+                parameters={"stage": "AUDIO_MIX_READY"},
+            )
+            available.append(OrchestrationActionModel(
+                action="AUTO_MIX_AUDIO",
+                display_name="Recompute Auto-Mix",
+                description="Re-calculate ducking and volume balance.",
+                action_type=OrchestrationActionType.GENERATION,
+                is_chargeable=False,
+            ))
+
+        elif current_stage == "AUDIO_APPROVED":
+            recommended = OrchestrationActionModel(
+                action="PROCEED_TO_ASSEMBLY",
+                display_name="Proceed to Assembly",
+                description="Advance project to timeline assembly.",
+                action_type=OrchestrationActionType.APPROVAL,
+                is_chargeable=False,
+            )
+
+        elif current_stage == "READY_FOR_ASSEMBLY":
+            recommended = OrchestrationActionModel(
+                action="APPROVE_FINAL",
+                display_name="Approve Final Assembly",
+                description="Mark production completed.",
+                action_type=OrchestrationActionType.APPROVAL,
+                is_chargeable=False,
+            )
 
         return recommended, available
 
@@ -939,6 +1060,8 @@ class ProductionOrchestrator:
             "STORYBOARD_GENERATED": "STORYBOARD_APPROVED",
             "SHOT_PLAN_GENERATED": "SHOT_PLAN_APPROVED",
             "IMAGES_GENERATED": "IMAGES_APPROVED",
+            "AUDIO_PLAN_GENERATED": "AUDIO_PLAN_APPROVED",
+            "AUDIO_MIX_READY": "AUDIO_APPROVED",
             "FINAL_REVIEW": "COMPLETED",
             "READY_FOR_REVIEW": "COMPLETED",
         }
@@ -1152,14 +1275,16 @@ class ProductionOrchestrator:
         creative_prov = _resolve_creative_provider(provider)
 
         # ----------------- Canonical Approval Actions -----------------
-        if action_upper in ("APPROVE_STORY", "APPROVE_STORYBOARD", "APPROVE_SHOT_PLAN", "APPROVE_IMAGES", "APPROVE_FINAL"):
+        if action_upper in ("APPROVE_STORY", "APPROVE_STORYBOARD", "APPROVE_SHOT_PLAN", "APPROVE_IMAGES", "APPROVE_AUDIO_PLAN", "APPROVE_AUDIO_MIX", "APPROVE_FINAL"):
             # Enforce gate matching for approval actions
             expected_current = {
                 "APPROVE_STORY": ("STORY_GENERATED", "STORY_APPROVED"),
                 "APPROVE_STORYBOARD": ("STORYBOARD_GENERATED", "STORYBOARD_APPROVED"),
                 "APPROVE_SHOT_PLAN": ("SHOT_PLAN_GENERATED", "SHOT_PLAN_APPROVED"),
                 "APPROVE_IMAGES": ("IMAGES_GENERATED", "IMAGES_APPROVED"),
-                "APPROVE_FINAL": ("FINAL_REVIEW", "READY_FOR_REVIEW", "COMPLETED"),
+                "APPROVE_AUDIO_PLAN": ("AUDIO_PLAN_GENERATED", "AUDIO_PLAN_APPROVED"),
+                "APPROVE_AUDIO_MIX": ("AUDIO_MIX_READY", "AUDIO_APPROVED"),
+                "APPROVE_FINAL": ("FINAL_REVIEW", "READY_FOR_REVIEW", "COMPLETED", "READY_FOR_ASSEMBLY"),
             }
             allowed_stages = expected_current[action_upper]
             if current not in allowed_stages:
@@ -1186,6 +1311,8 @@ class ProductionOrchestrator:
                 "APPROVE_STORYBOARD": "STORYBOARD_APPROVED",
                 "APPROVE_SHOT_PLAN": "SHOT_PLAN_APPROVED",
                 "APPROVE_IMAGES": "IMAGES_APPROVED",
+                "APPROVE_AUDIO_PLAN": "AUDIO_PLAN_APPROVED",
+                "APPROVE_AUDIO_MIX": "AUDIO_APPROVED",
                 "APPROVE_FINAL": "COMPLETED",
             }[action_upper]
 
@@ -2454,6 +2581,87 @@ class ProductionOrchestrator:
                 actor=actor,
                 result=OrchestrationActionResult.APPLIED,
                 detail=f"Reverted to '{new_stage}' for revision.",
+            )
+            db.commit()
+
+        # ----------------- 11. Audio Actions -----------------
+        elif action_upper == "GENERATE_AUDIO_PLAN":
+            from app.services.audio_production import AudioProductionService
+            plan = AudioProductionService.generate_audio_plan(db=db, project_id=project_id)
+            project.status = "AUDIO_PLAN_GENERATED"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state="AUDIO_PLAN_GENERATED",
+                action="GENERATE_AUDIO_PLAN",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail=f"Audio plan generated (version {plan.version}).",
+            )
+            db.commit()
+
+        elif action_upper in (
+            "START_AUDIO_GENERATION",
+            "GENERATE_ALL_VO",
+            "ASSIGN_BGM",
+            "ASSIGN_SFX",
+            "ASSIGN_AMBIENCE",
+            "CONTINUE_INCOMPLETE_AUDIO",
+            "RETRY_FAILED_AUDIO",
+        ):
+            from app.services.audio_production import AudioProductionService
+            cost_auth = bool(params.get("cost_authorized", False))
+            provider_name = params.get("provider_name")
+            batch_action = "CONTINUE_INCOMPLETE_AUDIO" if action_upper == "START_AUDIO_GENERATION" else action_upper
+            res = AudioProductionService.execute_audio_batch(
+                db=db,
+                project_id=project_id,
+                action=batch_action,
+                cost_authorized=cost_auth,
+                actor=actor,
+                provider_name=provider_name,
+            )
+            project.status = "AUDIO_IN_PROGRESS"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state="AUDIO_IN_PROGRESS",
+                action=action_upper,
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail=f"Processed: {res['processed']}, succeeded: {res['succeeded']}, failed: {res['failed']}.",
+            )
+            db.commit()
+
+        elif action_upper == "AUTO_MIX_AUDIO":
+            from app.services.audio_production import AudioProductionService
+            mix_res = AudioProductionService.compute_auto_mix(db=db, project_id=project_id)
+            project.status = "AUDIO_MIX_READY"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state="AUDIO_MIX_READY",
+                action="AUTO_MIX_AUDIO",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail=f"Auto-mix computed for {mix_res['total_tracks']} tracks.",
+            )
+            db.commit()
+
+        elif action_upper == "PROCEED_TO_ASSEMBLY":
+            project.status = "READY_FOR_ASSEMBLY"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state="READY_FOR_ASSEMBLY",
+                action="PROCEED_TO_ASSEMBLY",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                detail="Advanced to timeline assembly stage.",
             )
             db.commit()
 

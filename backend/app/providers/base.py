@@ -68,3 +68,18 @@ class IVideoGenerationProviderAdapter(ABC):
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Validate adapter settings / API keys."""
         pass
+
+    @property
+    def supports_native_audio(self) -> bool:
+        """Whether provider natively generates audio with video."""
+        return False
+
+    @property
+    def supports_dialogue(self) -> bool:
+        """Whether provider natively supports character dialogue."""
+        return False
+
+    @property
+    def supports_lip_sync(self) -> bool:
+        """Whether provider supports native lip-sync."""
+        return False
