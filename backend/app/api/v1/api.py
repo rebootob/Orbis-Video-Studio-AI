@@ -6,14 +6,20 @@ from app.api.v1.endpoints import (
     story_generation,
     reference_library,
     generation_queue,
+    projects,
+    shots,
+    locks,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(assets.router, tags=["assets"])
 api_router.include_router(document_extraction.router, tags=["document-extraction"])
 api_router.include_router(story_generation.router, tags=["story-generation"])
 api_router.include_router(reference_library.router, tags=["reference-library"])
 api_router.include_router(generation_queue.router, tags=["generation-queue"])
+api_router.include_router(shots.router, tags=["shots"])
+api_router.include_router(locks.router, tags=["locks"])
 
 

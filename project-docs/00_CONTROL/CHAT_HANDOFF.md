@@ -39,12 +39,12 @@ WP007 delivered the provider-neutral Vidu adapter and durable DB-backed generati
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = NONE
-NEXT CANDIDATE = P2-WP008
-P2-WP008 = PROPOSED / NOT AUTHORIZED
+ACTIVE WORK PACKAGE = P2-WP008
+P2-WP008 = IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
+NEXT ALLOWED ACTION = ChatGPT Independent Review
 ```
 
-Do not start WP008 until explicit Owner authorization.
+P2-WP008 implementation is complete. All 119 backend tests pass (including 17 focused hybrid shot and lock tests and 3 migration lifecycle tests). Antigravity execution is complete and stops here awaiting independent review. Do not merge. Do not start WP009.
 
 ---
 

@@ -14,6 +14,7 @@ from app.models.reference_library import (
     StyleBible,
     BrandBible,
 )
+from app.models.asset_lock import AssetLock
 
 __all__ = [
     "Base",
@@ -30,5 +31,6 @@ __all__ = [
     "LocationBible",
     "StyleBible",
     "BrandBible",
+    "AssetLock",
 ]
 
