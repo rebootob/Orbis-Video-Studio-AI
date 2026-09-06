@@ -1473,3 +1473,110 @@ def test_legacy_batch_endpoint_toctou_boundary_enforcement(tmp_path, monkeypatch
             assert len(verify_db.query(GenerationJob).all()) == 101
     finally:
         app.dependency_overrides.clear()
+
+
+def test_canonical_resume_does_not_accumulate_created_jobs_in_memory(tmp_path, monkeypatch):
+    """Test 21: Verify that for canonical /jobs/resume (max_queued_jobs is None):
+    1. Queues >100 shots truthfully into BatchRun and DB (queued_count > 100).
+    2. Persisted GenerationJobs and BatchRunItems counts match queued_count.
+    3. Returned compatibility created_jobs list is bounded (<=100) or empty (when accumulate_jobs=False).
+    4. Canonical API response remains truthful via BatchRun summary.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from fastapi.testclient import TestClient
+    from app.db.base_class import Base
+    from app.main import app
+    from app.db.session import get_db
+
+    db_file = tmp_path / "bounded_resume.db"
+    file_engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(file_engine)
+    FileSessionLocal = sessionmaker(bind=file_engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+
+    with FileSessionLocal() as init_db:
+        p = Project(id=project_id, title="Large Batch Project", status="SHOT_PLAN_APPROVED", video_mode="STORY")
+        sc = Scene(id=scene_id, project_id=project_id, scene_number=1, heading="EXT")
+        init_db.add_all([p, sc])
+        shots = [
+            Shot(id=uuid.uuid4(), scene_id=scene_id, shot_number=i, shot_type="AI_GENERATED", duration_seconds=4.0)
+            for i in range(1, 105)
+        ]
+        init_db.add_all(shots)
+        init_db.commit()
+
+    # Step 1: Verify direct execute_batch with default accumulation bounds returned jobs to <= 100
+    with FileSessionLocal() as test_db:
+        run, jobs = BatchResumeService.execute_batch(
+            db=test_db,
+            project_id=project_id,
+            operation_type="CONTINUE_INCOMPLETE",
+            max_queued_jobs=None,  # Canonical resume mode
+        )
+
+        # 1. BatchRun queued_count reflects all 104 queued shots (> 100)
+        assert run.queued_count > 100
+        assert run.queued_count == 104
+        assert run.requested_count == 104
+        assert run.status == "DISPATCHED"
+
+        # 2. Persisted GenerationJobs count matches queued_count
+        persisted_jobs_count = test_db.query(GenerationJob).count()
+        assert persisted_jobs_count == run.queued_count
+
+        # 3. BatchRunItems count matches queued_count
+        persisted_items_count = test_db.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).count()
+        assert persisted_items_count == run.queued_count
+
+        # 4. Returned compatibility created_jobs list is bounded (<=100), not accumulating all 104 jobs
+        assert len(jobs) <= 100
+        assert len(jobs) < run.queued_count
+
+    # Step 2: Verify execute_batch with accumulate_jobs=False leaves created_jobs empty
+    # Reset jobs for fresh run
+    with FileSessionLocal() as reset_db:
+        reset_db.query(GenerationJob).delete()
+        reset_db.query(BatchRunItem).delete()
+        reset_db.query(BatchRun).delete()
+        reset_db.commit()
+
+        run2, jobs2 = BatchResumeService.execute_batch(
+            db=reset_db,
+            project_id=project_id,
+            operation_type="CONTINUE_INCOMPLETE",
+            max_queued_jobs=None,
+            accumulate_jobs=False,
+        )
+        assert run2.queued_count == 104
+        assert len(jobs2) == 0
+
+    # Step 3: Verify canonical API endpoint returns truthful BatchRun response
+    with FileSessionLocal() as reset_db:
+        reset_db.query(GenerationJob).delete()
+        reset_db.query(BatchRunItem).delete()
+        reset_db.query(BatchRun).delete()
+        reset_db.commit()
+
+    def override_get_db():
+        with FileSessionLocal() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    try:
+        resp = client.post(f"/api/v1/projects/{project_id}/jobs/resume", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["queued_count"] > 100
+        assert data["queued_count"] == 104
+        assert data["status"] == "DISPATCHED"
+    finally:
+        app.dependency_overrides.clear()

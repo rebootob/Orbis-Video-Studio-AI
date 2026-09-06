@@ -59,6 +59,7 @@ ACTIVE_JOB_STATUSES = {
 }
 CHUNK_SIZE = 100
 EXECUTE_CHUNK_SIZE = 50
+MAX_COMPATIBILITY_RETURNED_JOBS = 100
 
 
 @dataclass
@@ -607,6 +608,7 @@ class BatchResumeService:
         provider_name: Optional[str] = None,
         only_incomplete: bool = True,
         max_queued_jobs: Optional[int] = None,
+        accumulate_jobs: Optional[bool] = None,
     ) -> Tuple[BatchRun, List[GenerationJob]]:
         """Genuinely bounded, streaming batch execution with atomic savepoints and truthful audits.
 
@@ -789,7 +791,10 @@ class BatchResumeService:
                             )
                             db.add(item)
                             db.flush()
-                        created_jobs.append(job)
+                        should_accumulate = accumulate_jobs if accumulate_jobs is not None else True
+                        cap = max_queued_jobs if max_queued_jobs is not None else MAX_COMPATIBILITY_RETURNED_JOBS
+                        if should_accumulate and len(created_jobs) < cap:
+                            created_jobs.append(job)
                         queued_count += 1
                     except HTTPException as http_exc:
                         if http_exc.status_code == 409 and "Active generation job" in str(http_exc.detail):

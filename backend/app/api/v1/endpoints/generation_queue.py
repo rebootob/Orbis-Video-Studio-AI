@@ -237,6 +237,7 @@ def resume_project_jobs(
         shot_ids=req.shot_ids,
         provider_name=req.provider_name,
         only_incomplete=req.only_incomplete,
+        accumulate_jobs=False,
     )
     return batch_run
 
