@@ -6,17 +6,64 @@
 
 ## 1. Product Mission
 
-**Orbis Video Studio AI** is a cloud-first AI video production system engineered to turn raw ideas, briefs, scripts, corporate documents, and reference materials into complete, high-quality, story-driven videos.
+**Orbis Video Studio AI** is a cloud-first, provider-independent, multi-mode AI video production system that turns ideas, briefs, scripts, corporate documents, prompts, reference materials and imported media into complete high-quality videos.
 
-Unlike clip-centric AI generators that produce disconnected 4-second video snippets, Orbis Video Studio AI takes a **story-first** approach. It orchestrates the entire lifecycle of a video project — from document ingestion and screenplay breakdown to reference Bible management, hybrid shot assembly, audio dubbing/ducking, timeline auto-editing, and cloud rendering.
+The platform is structured-production-first rather than clip-centric. STORY mode retains the original narrative Story -> Script -> Scene -> Shot workflow, while SHORT, LOOP and SCENE modes intentionally allow lighter paths when a full Story/Script layer would be unnecessary.
 
 ---
 
 ## 2. Core Value Pillars
 
-1. **Story-First Video Production:** Video generation is anchored in structured narrative scenes and screenplay scripts, maintaining visual continuity and emotional pacing.
-2. **Reference-Driven Consistency:** Built-in Reference Bibles ensure characters, locations, props, and visual styles remain consistent across every AI-generated shot.
-3. **Hybrid Shot Flexibility:** Creators can seamlessly mix Vidu AI generated shots with imported video clips, stock footage, recorded footage, and static images.
-4. **Cloud-First & Accessible Anywhere:** Operates entirely in web browsers with no local GPU requirements, local machine lock-in, or rendering hardware dependencies.
-5. **Asset Lock Protection:** Approved scripts, shots, character voices, and timing tracks can be locked to prevent accidental overwrite during selective regenerations.
-6. **Multi-Output Distribution:** Generate one master project and export to YouTube (16:9), TikTok/Reels (9:16), Instagram (1:1), or internal training portals without rebuilding the story.
+1. **Mode-Aware Structured Production** — STORY, SHORT, LOOP and SCENE share one production platform while using only the creative stages each mode needs.
+2. **Reference-Driven Consistency** — Character, Location, Style, Brand and factual references remain consistent across generation.
+3. **Hybrid Shot Flexibility** — AI generated shots can mix with imported video, images, recorded footage and stock assets.
+4. **Cloud-First Accessibility** — Browser-based operation with no local GPU or local AI runtime dependency.
+5. **Provider Independence** — Core Story/Scene/Shot/Timeline logic is isolated from Vidu and future providers by adapter boundaries.
+6. **Asset Lock Protection** — Approved scripts, scenes, shots, characters, voices and timing can be protected against accidental overwrite.
+7. **Selective Regeneration Safety** — Improve only selected unlocked or failed shots instead of recreating an entire project.
+8. **Human Approval** — Final render remains gated by explicit human approval.
+9. **Multi-Output Distribution** — One master project can produce 16:9, 9:16, 1:1 and other approved variants without rebuilding the project.
+10. **Performance & Cost Discipline** — Prefer bounded deterministic processing, no duplicate chargeable jobs and no unnecessary heavy infrastructure.
+
+---
+
+## 3. Core V1 Video Modes
+
+```text
+STORY
+SHORT
+LOOP
+SCENE
+```
+
+Architecture-ready later modes:
+
+```text
+PRODUCT
+EXPLAINER
+PRESENTER
+MONTAGE
+```
+
+Architecture readiness does not authorize implementation.
+
+See [`VIDEO_PRODUCTION_MODES.md`](VIDEO_PRODUCTION_MODES.md) for canonical mode definitions.
+
+---
+
+## 4. Shared Production Mental Model
+
+```text
+Project
+-> Video Mode
+-> Purpose / Target Platform
+-> Required creative structure only
+-> Scenes / Shots
+-> Reference Library
+-> AI Generate and/or Import
+-> Lock / QC / Selective Regeneration
+-> Audio / Timeline as applicable
+-> Human Approval
+-> Cloud Render
+-> Multi-Output Export
+```
