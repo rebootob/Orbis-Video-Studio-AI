@@ -13,7 +13,7 @@ P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
 Status:
 
 ```text
-AUTHORIZED / IMPLEMENTED FIRST PASS / CHANGES REQUIRED
+CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW / DO NOT MERGE YET
 ```
 
 Current Pull Request:
@@ -21,8 +21,8 @@ Current Pull Request:
 ```text
 PR #25
 Branch: ai/p2-wp010-mode-aware-web-workspace
-Reviewed HEAD: 291ea773681831a0a68e585eb7e0664902102be3
-Gate: WAITING FOR ANTIGRAVITY CORRECTIVE COMMIT
+Reviewed HEAD: 9fb1d6fdeee8ec14ffcf2063133fca5263754640
+Gate: WAITING CHATGPT INDEPENDENT RE-REVIEW
 ```
 
 Owner authorization is recorded in GitHub Issue #24 and its Product Lock / UX addendum comments.
@@ -73,7 +73,8 @@ The local GitHub watcher/dispatcher remains PAUSED and must not be treated as a 
 
 ## Next Allowed Action
 
-Antigravity may implement the requested WP010 corrective changes on the SAME branch and SAME PR #25, run required tests/CI, push a new exact HEAD, then STOP for ChatGPT independent review.
+Antigravity corrective commit pushed on PR #25. Antigravity MUST STOP.
+ChatGPT performs independent review of the exact current PR #25 HEAD.
 
 Do not merge PR #25 without explicit Owner approval.
 Do not start WP011 or any later WP automatically.

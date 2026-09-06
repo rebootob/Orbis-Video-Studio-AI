@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class JobCreateRequest(BaseModel):
     shot_id: uuid.UUID
-    provider_name: str = "vidu"
+    provider_name: Optional[str] = None
     idempotency_key: Optional[str] = None
     custom_params: Optional[Dict[str, Any]] = None
     max_retries: int = Field(default=3, ge=1, le=10)

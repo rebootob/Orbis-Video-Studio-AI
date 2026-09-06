@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List, Any, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StoryGenerateRequest(BaseModel):
@@ -11,11 +11,13 @@ class StoryGenerateRequest(BaseModel):
     target_audience: Optional[str] = None
     custom_instructions: Optional[str] = None
     profile: Literal["FAST", "BALANCED", "QUALITY"] = "BALANCED"
+    generate_scenes: bool = False
 
 
 class SceneGenerateRequest(BaseModel):
     custom_instructions: Optional[str] = None
     profile: Literal["FAST", "BALANCED", "QUALITY"] = "BALANCED"
+    generate_shots: bool = False
 
 
 class ShotGenerateRequest(BaseModel):
@@ -45,7 +47,7 @@ class SceneResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    story_id: uuid.UUID
+    story_id: Optional[uuid.UUID] = None
     scene_number: int
     heading: Optional[str] = None
     purpose: Optional[str] = None
@@ -55,6 +57,30 @@ class SceneResponse(BaseModel):
     dialogue: Optional[Any] = None
     is_locked: bool
     shots: List[ShotResponse] = Field(default_factory=list)
+
+    @field_validator("shots", mode="before")
+    @classmethod
+    def filter_archived_shots(cls, v):
+        if isinstance(v, list):
+            return [sh for sh in v if getattr(sh, "status", None) != "ARCHIVED"]
+        return v
+
+
+class StoryVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    story_id: uuid.UUID
+    project_id: uuid.UUID
+    version_number: int
+    title: Optional[str] = None
+    logline: Optional[str] = None
+    synopsis: Optional[str] = None
+    tone: Optional[str] = None
+    target_duration_seconds: Optional[float] = None
+    language: Optional[str] = None
+    status: str
+    created_at: datetime
 
 
 class StoryResponse(BaseModel):
@@ -70,6 +96,15 @@ class StoryResponse(BaseModel):
     language: Optional[str] = None
     is_locked: bool
     status: str
+    version_number: int = 1
     created_at: datetime
     updated_at: datetime
     scenes: List[SceneResponse] = Field(default_factory=list)
+    versions: List[StoryVersionResponse] = Field(default_factory=list)
+
+    @field_validator("scenes", mode="before")
+    @classmethod
+    def filter_archived_scenes(cls, v):
+        if isinstance(v, list):
+            return [s for s in v if not (getattr(s, "scene_config", None) or {}).get("archived")]
+        return v

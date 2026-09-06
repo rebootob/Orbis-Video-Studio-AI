@@ -46,14 +46,14 @@ ACTIVE WORK PACKAGE = P2-WP010
 ISSUE = #24
 PR = #25
 BRANCH = ai/p2-wp010-mode-aware-web-workspace
-LAST REVIEWED HEAD = 291ea773681831a0a68e585eb7e0664902102be3
-STATUS = CHANGES REQUIRED / WAITING ANTIGRAVITY CORRECTIVE
-NEXT ALLOWED ACTION = corrective on SAME branch/PR, then ChatGPT independent review
+LAST REVIEWED HEAD = 9fb1d6fdeee8ec14ffcf2063133fca5263754640
+STATUS = CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
+NEXT ALLOWED ACTION = ChatGPT independent re-review of PR #25
 ```
 
 Do not merge PR #25 yet. Do not start WP011.
 
-The first WP010 pass delivered a substantial workspace/UI baseline, but review found blockers around hard deletion/history safety, staged approval workflow, Guided Flexibility / next-action guidance, truthful QC/approval readiness, real reference upload, batch/cost safety, reorder/autosave readiness and CORS safety. Antigravity has been instructed to correct only those WP010 blockers, run all required tests/CI, push a new HEAD and stop.
+Antigravity corrective commit has been pushed addressing the 8 review blockers (soft-archive retention, staged mode-aware workflow, truthful readiness copy, provider-neutral routing, multi-project metrics, unsaved edit protection, and upload error surfacing). Antigravity is STOPPED waiting for ChatGPT independent re-review.
 
 ---
 

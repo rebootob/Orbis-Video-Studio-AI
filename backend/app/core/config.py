@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     API_V1_STR: str = "/api/v1"
 
+    BACKEND_CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "orbis_user"
@@ -47,6 +55,9 @@ class Settings(BaseSettings):
     VIDU_DEFAULT_MODEL: str = "viduq2"
     VIDU_TIMEOUT_SECONDS: float = 30.0
     VIDU_MAX_RETRIES: int = 3
+
+    # Provider Routing Configuration
+    DEFAULT_VIDEO_PROVIDER: str = "vidu"
 
     # Provider Pricing Configuration (Replaceable / Configurable via settings)
     PROVIDER_PRICING_CONFIG: Optional[dict] = None

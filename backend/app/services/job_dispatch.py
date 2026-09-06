@@ -6,6 +6,7 @@ No provider identity after an ambiguous submit requires manual reconciliation.
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import httpx
 from fastapi import HTTPException
@@ -14,6 +15,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.shot import Shot
+from app.models.scene import Scene
+from app.models.story import Story
+from app.models.project import Project
 from app.models.generation_job import GenerationJob as Job
 from app.providers.base import VideoGenerationParams, ProviderJobResult
 from app.providers.factory import ProviderFactory
@@ -21,6 +25,33 @@ from app.providers.safety import (
     contains_secret,
     safe_result,
 )
+
+ALLOWED_PRODUCTION_STATUSES = {
+    "SHOT_PLAN_APPROVED",
+    "IMAGES_GENERATED",
+    "VIDEO_IN_PROGRESS",
+    "FINAL_REVIEW",
+    "READY_FOR_REVIEW",
+    "COMPLETED",
+    "APPROVED",
+}
+
+
+def resolve_shot_project(db: Session, shot: Shot) -> Optional[Project]:
+    """Resolve the Project associated with a Shot via Scene -> Story / Project."""
+    if not shot or not shot.scene_id:
+        return None
+    scene = db.get(Scene, shot.scene_id)
+    if not scene:
+        return None
+    if scene.project_id:
+        return db.get(Project, scene.project_id)
+    if scene.story_id:
+        story = db.get(Story, scene.story_id)
+        if story and story.project_id:
+            return db.get(Project, story.project_id)
+    return None
+
 
 LEASE_SECONDS = 120
 POLL_SECONDS = 10
@@ -94,18 +125,22 @@ class JobDispatchService:
     def create_and_dispatch_job(
         db: Session,
         shot_id,
-        provider_name="vidu",
+        provider_name=None,
         idempotency_key=None,
         custom_params=None,
         max_retries=3,
         reference_images=None,
     ):
+        from app.providers.factory import ProviderFactory
+        resolved_provider = provider_name or ProviderFactory.get_default_provider_name()
+
         if not 1 <= max_retries <= 10:
             raise HTTPException(400, "max_retries must be between 1 and 10")
         if contains_secret(custom_params or {}) or contains_secret(reference_images or []):
             raise HTTPException(400, "Secret-like generation parameters are not allowed")
-        if not isinstance(provider_name, str) or len(provider_name) > 50 or contains_secret(provider_name):
+        if not isinstance(resolved_provider, str) or len(resolved_provider) > 50 or contains_secret(resolved_provider):
             raise HTTPException(400, "Invalid provider name")
+        provider_name = resolved_provider
         if idempotency_key is not None and (not idempotency_key or len(idempotency_key) > 255 or contains_secret(idempotency_key)):
             raise HTTPException(400, "Invalid idempotency key")
         shot = db.get(Shot, shot_id)
@@ -284,6 +319,31 @@ class JobDispatchService:
             raise HTTPException(409, "Queue claim is invalid or expired")
 
         job = load(db, job_id)
+
+        # Re-check production approval gate immediately before provider submission
+        shot = db.get(Shot, job.shot_id)
+        project = resolve_shot_project(db, shot) if shot else None
+        if project and project.status not in ALLOWED_PRODUCTION_STATUSES:
+            # Production approval is no longer valid; fail safely without calling provider
+            now = now if supplied_now is not None else utc_now()
+            values = released()
+            values.update(
+                status="FAILED",
+                error_message=(
+                    f"Production approval is no longer valid. Current project status is '{project.status}', "
+                    "requires 'SHOT_PLAN_APPROVED' or later. Re-dispatch after approving the shot plan."
+                ),
+                next_retry_at=None,
+                result={"error_code": "PRODUCTION_STAGE_INVALID", "detail": f"Project status is {project.status}"},
+            )
+            change(db, [
+                Job.id == job_id,
+                Job.status == "SUBMITTING",
+                Job.claim_token == claim_token,
+                Job.submission_attempt_id == attempt,
+            ], values)
+            return load(db, job_id)
+
         try:
             adapter = ProviderFactory.get_provider(job.provider_name)
             params = VideoGenerationParams(**(job.payload or {}))

@@ -43,7 +43,7 @@ def deny_live_http(monkeypatch):
 
 
 def make_shot(db):
-    project = Project(id=uuid.uuid4(), title="Queue test")
+    project = Project(id=uuid.uuid4(), title="Queue test", status="SHOT_PLAN_APPROVED")
     story = Story(id=uuid.uuid4(), project_id=project.id, logline="Test")
     scene = Scene(id=uuid.uuid4(), story_id=story.id, scene_number=1, heading="EXT. PARK")
     shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="AI_GENERATED",
@@ -549,3 +549,49 @@ async def test_transient_result_with_provider_identity_never_resubmits(db_sessio
     assert Queue.claim_next_job(db_session, now=NOW+timedelta(days=1)) is None
     await Queue.process_job(db_session, job.id, claim_token=token, now=NOW+timedelta(days=1))
     assert provider.submit_generation_job.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_process_job_blocks_submission_if_project_regressed(db_session, sample_shot, provider):
+    """Verify that a job created when approved is NOT submitted to provider if project regresses."""
+    # 1. Job was created while Project = SHOT_PLAN_APPROVED
+    job = create(db_session, sample_shot)
+    claimed = claim(db_session, job)
+    token = claimed.claim_token
+
+    # 2. Regress project to STORY_GENERATED (e.g., due to upstream story regeneration)
+    project = db_session.query(Project).filter_by(title="Queue test").first()
+    assert project is not None
+    project.status = "STORY_GENERATED"
+    db_session.commit()
+
+    # 3. Worker attempts process_job
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+
+    # Provider MUST NOT be called
+    assert provider.submit_generation_job.await_count == 0
+
+    # Job must not remain in SUBMITTING or claimed state
+    assert result.status == "FAILED"
+    assert "Production approval is no longer valid" in result.error_message
+    assert "STORY_GENERATED" in result.error_message
+    assert result.claimed_by is None
+    assert result.claim_token is None
+    assert result.next_retry_at is None
+    assert result.result.get("error_code") == "PRODUCTION_STAGE_INVALID"
+
+
+@pytest.mark.anyio
+async def test_process_job_succeeds_when_project_is_approved(db_session, sample_shot, provider):
+    """Verify that an approved project dispatches successfully to the provider."""
+    project = db_session.query(Project).filter_by(title="Queue test").first()
+    project.status = "SHOT_PLAN_APPROVED"
+    db_session.commit()
+
+    job = create(db_session, sample_shot)
+    token = claim(db_session, job).claim_token
+
+    result = await Queue.process_job(db_session, job.id, claim_token=token, now=NOW)
+    assert provider.submit_generation_job.await_count == 1
+    assert result.status in ("QUEUED", "PROCESSING", "COMPLETED")
+    assert result.provider_job_id == "task-1"

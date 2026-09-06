@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.story import Story
+from app.models.story_version import StoryVersion
 from app.schemas.story_generation import (
     StoryGenerateRequest,
     SceneGenerateRequest,
     ShotGenerateRequest,
     StoryResponse,
+    StoryVersionResponse,
     SceneResponse,
     ShotResponse,
 )
@@ -26,7 +28,7 @@ router = APIRouter()
 def _map_error(e: CreativeGenerationError) -> HTTPException:
     if e.code in ("PROJECT_NOT_FOUND", "STORY_NOT_FOUND", "SCENE_NOT_FOUND"):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message)
-    elif e.code in ("STORY_LOCKED", "SCENE_LOCKED", "SHOT_LOCKED"):
+    elif e.code in ("STORY_LOCKED", "SCENE_LOCKED", "SHOT_LOCKED", "STAGE_NOT_APPROVED"):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
     elif e.code in ("NO_SOURCE_CONTEXT", "SOURCE_EXTRACTION_NOT_READY"):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message)
@@ -64,6 +66,7 @@ def generate_project_story(
             target_audience=request.target_audience,
             custom_instructions=request.custom_instructions,
             options=options,
+            generate_scenes=request.generate_scenes,
         )
         return story
     except CreativeGenerationError as e:
@@ -90,6 +93,34 @@ def generate_story_scenes(
             story_id=story_id,
             custom_instructions=request.custom_instructions,
             options=options,
+            generate_shots=request.generate_shots,
+        )
+        return scenes
+    except CreativeGenerationError as e:
+        raise _map_error(e)
+
+
+@router.post(
+    "/projects/{project_id}/storyboard/generate",
+    response_model=List[SceneResponse],
+    status_code=status.HTTP_200_OK,
+)
+def generate_project_storyboard(
+    project_id: uuid.UUID,
+    request: SceneGenerateRequest = SceneGenerateRequest(),
+    db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
+):
+    """Generate or regenerate storyboard scenes directly for a project (bypassing Story)."""
+    service = StoryGenerationService(db=db, provider=provider)
+    options = GenerationRequestOptions(profile=request.profile)
+
+    try:
+        scenes = service.generate_project_storyboard(
+            project_id=project_id,
+            custom_instructions=request.custom_instructions,
+            options=options,
+            generate_shots=request.generate_shots,
         )
         return scenes
     except CreativeGenerationError as e:
@@ -139,3 +170,22 @@ def get_project_story(
             detail=f"Story record not found for Project '{project_id}'.",
         )
     return story
+
+
+@router.get(
+    "/projects/{project_id}/story/versions",
+    response_model=List[StoryVersionResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_project_story_versions(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Retrieve full revision history / snapshots for Project Story."""
+    versions = (
+        db.query(StoryVersion)
+        .filter(StoryVersion.project_id == project_id)
+        .order_by(StoryVersion.version_number.desc())
+        .all()
+    )
+    return versions

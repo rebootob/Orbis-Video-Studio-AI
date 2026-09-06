@@ -3,6 +3,7 @@ import uuid
 import pytest
 from app.models.project import Project
 from app.models.story import Story
+from app.models.story_version import StoryVersion
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.asset import Asset
@@ -84,6 +85,8 @@ def test_full_story_generation_flow_with_fake_provider(client, db_session):
             "tone": "cinematic",
             "language": "th",
             "profile": "BALANCED",
+            "generate_scenes": True,
+            "generate_shots": True,
         },
     )
     assert gen_resp.status_code == 200
@@ -153,7 +156,7 @@ def test_granular_scene_and_shot_generation_endpoints(client, db_session):
     fake_provider = FakeCreativeGenerationProvider()
     client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
 
-    project = Project(title="Granular Project", status="DRAFT")
+    project = Project(title="Granular Project", status="STORY_APPROVED")
     db_session.add(project)
     db_session.commit()
 
@@ -174,6 +177,10 @@ def test_granular_scene_and_shot_generation_endpoints(client, db_session):
     scenes = scenes_resp.json()
     assert len(scenes) >= 1
     scene_id = scenes[0]["id"]
+
+    # Approve storyboard before generating shots
+    project.status = "STORYBOARD_APPROVED"
+    db_session.commit()
 
     # Generate Shots for Scene
     shots_resp = client.post(f"/api/v1/scenes/{scene_id}/shots/generate", json={"custom_instructions": "Focus on crystal optics"})
@@ -306,3 +313,322 @@ def test_sanitized_provider_error_response_no_raw_body_leak(monkeypatch):
     assert "sk-test-key-12345" not in exc_info.value.message
     assert exc_info.value.message == "OpenAI provider returned HTTP error 400."
 
+
+def test_regeneration_preserves_history_and_lineage(client, db_session):
+    """Verify that regenerating a story or scenes soft-archives previous records instead of destructively deleting them."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Lineage Retention Project", description="Historical lineage brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # First generation pass
+    resp1 = client.post(f"/api/v1/projects/{project.id}/story/generate", json={"generate_scenes": True})
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    old_scene_ids = [uuid.UUID(s["id"]) for s in data1["scenes"]]
+    old_shot_ids = [uuid.UUID(sh["id"]) for s in data1["scenes"] for sh in s["shots"]]
+    assert len(old_scene_ids) > 0
+    assert len(old_shot_ids) > 0
+
+    # Second generation pass (regeneration)
+    resp2 = client.post(f"/api/v1/projects/{project.id}/story/generate", json={"generate_scenes": True})
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    new_scene_ids = [uuid.UUID(s["id"]) for s in data2["scenes"]]
+    new_shot_ids = [uuid.UUID(sh["id"]) for s in data2["scenes"] for sh in s["shots"]]
+
+    # Verify new records were created
+    assert set(old_scene_ids).isdisjoint(set(new_scene_ids))
+    assert set(old_shot_ids).isdisjoint(set(new_shot_ids))
+
+    # CRITICAL: Verify previous records REMAIN in the database
+    for old_scene_id in old_scene_ids:
+        sc = db_session.get(Scene, old_scene_id)
+        assert sc is not None, f"Scene {old_scene_id} was unexpectedly deleted from DB!"
+        assert (sc.scene_config or {}).get("archived") is True
+
+    for old_shot_id in old_shot_ids:
+        sh = db_session.get(Shot, old_shot_id)
+        assert sh is not None, f"Shot {old_shot_id} was unexpectedly deleted from DB!"
+        assert sh.status == "ARCHIVED"
+
+    # Verify normal list endpoint excludes archived by default, but includes them when requested
+    list_resp = client.get(f"/api/v1/projects/{project.id}/scenes")
+    assert list_resp.status_code == 200
+    active_ids = [s["id"] for s in list_resp.json()]
+    assert all(str(oid) not in active_ids for oid in old_scene_ids)
+
+    list_all_resp = client.get(f"/api/v1/projects/{project.id}/scenes?include_archived=true")
+    assert list_all_resp.status_code == 200
+    all_ids = [s["id"] for s in list_all_resp.json()]
+    assert all(str(oid) in all_ids for oid in old_scene_ids)
+
+
+def test_staged_story_generation_without_scenes(client, db_session):
+    """Verify that STORY mode can generate an inspectable Story artifact without creating scenes/shots before approval."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Staged Story Only Project", description="Story stage brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/projects/{project.id}/story/generate",
+        json={"generate_scenes": False},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "GENERATED"
+    assert "title" in data and data["title"]
+    assert "logline" in data and data["logline"]
+    assert "synopsis" in data and data["synopsis"]
+
+    # Verify NO scenes or shots were created downstream
+    assert len(data["scenes"]) == 0
+    scenes_in_db = db_session.query(Scene).filter(Scene.story_id == uuid.UUID(data["id"])).all()
+    assert len(scenes_in_db) == 0
+
+
+def test_non_story_mode_storyboard_bypass(client, db_session):
+    """Verify that SHORT / LOOP / SCENE modes can generate a storyboard directly without creating a Story entity."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(
+        title="Short Mode Project",
+        description="Viral TikTok hook brief",
+        video_mode="SHORT",
+        status="DRAFT",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    # Call project storyboard generation directly
+    resp = client.post(
+        f"/api/v1/projects/{project.id}/storyboard/generate",
+        json={"generate_shots": False},
+    )
+    assert resp.status_code == 200
+    scenes = resp.json()
+    assert len(scenes) >= 1
+
+    # Verify scenes belong to project directly and story_id is None
+    for sc in scenes:
+        scene_row = db_session.get(Scene, uuid.UUID(sc["id"]))
+        assert scene_row.project_id == project.id
+        assert scene_row.story_id is None
+        # Verify shots not yet generated
+        assert len(scene_row.shots) == 0
+
+    # Verify NO Story record was created
+    story = db_session.query(Story).filter(Story.project_id == project.id).first()
+    assert story is None
+
+
+def test_real_shot_plan_generation_service(client, db_session):
+    """Verify that generating a shot plan uses the real backend service to create detailed prompts."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Shot Planning Project", description="Detailed planning brief", status="STORYBOARD_APPROVED")
+    db_session.add(project)
+    db_session.commit()
+
+    scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=1, heading="INT. CONTROL ROOM")
+    db_session.add(scene)
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/scenes/{scene.id}/shots/generate", json={})
+    assert resp.status_code == 200
+    shots = resp.json()
+    assert len(shots) >= 1
+    shot1 = shots[0]
+    assert shot1["scene_id"] == str(scene.id)
+    assert shot1["shot_type"] == "AI_GENERATED"
+    assert shot1["image_prompt"] is not None and len(shot1["image_prompt"]) > 0
+    assert shot1["video_prompt"] is not None and len(shot1["video_prompt"]) > 0
+    assert shot1["camera"] is not None
+
+
+def test_story_regeneration_preserves_previous_story_version_history(client, db_session):
+    """Verify regenerating a Story preserves previous Story versions in story_versions table."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Preserve History Project", description="Initial brief", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Pass 1: Generate initial story (v1)
+    resp1 = client.post(f"/api/v1/projects/{project.id}/story/generate", json={"generate_scenes": False})
+    assert resp1.status_code == 200
+    v1_data = resp1.json()
+    assert v1_data["version_number"] == 1
+    v1_title = v1_data["title"]
+    v1_logline = v1_data["logline"]
+    v1_synopsis = v1_data["synopsis"]
+
+    # Pass 2: Regenerate story (v2) with custom instructions
+    resp2 = client.post(
+        f"/api/v1/projects/{project.id}/story/generate",
+        json={"generate_scenes": False, "custom_instructions": "Make it dark cyberpunk"},
+    )
+    assert resp2.status_code == 200
+    v2_data = resp2.json()
+    assert v2_data["version_number"] == 2
+
+    # Query historical versions endpoint
+    vers_resp = client.get(f"/api/v1/projects/{project.id}/story/versions")
+    assert vers_resp.status_code == 200
+    versions = vers_resp.json()
+    assert len(versions) == 1
+    v1_snapshot = versions[0]
+    assert v1_snapshot["version_number"] == 1
+    assert v1_snapshot["title"] == v1_title
+    assert v1_snapshot["logline"] == v1_logline
+    assert v1_snapshot["synopsis"] == v1_synopsis
+    assert v1_snapshot["status"] == "SUPERSEDED"
+
+    # Verify directly in DB
+    db_versions = db_session.query(StoryVersion).filter(StoryVersion.project_id == project.id).all()
+    assert len(db_versions) == 1
+    assert db_versions[0].version_number == 1
+    assert db_versions[0].title == v1_title
+
+
+def test_safe_request_defaults_do_not_combine_stages(client, db_session):
+    """Verify that default Story and Storyboard generation calls do not automatically generate downstream artifacts."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Safe Defaults Project", description="Testing safe defaults", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Story generation with empty payload must NOT generate scenes
+    story_resp = client.post(f"/api/v1/projects/{project.id}/story/generate", json={})
+    assert story_resp.status_code == 200
+    story_data = story_resp.json()
+    assert len(story_data["scenes"]) == 0
+
+    # Approve story
+    project.status = "STORY_APPROVED"
+    db_session.commit()
+
+    # Storyboard generation with empty payload must NOT generate shots
+    sb_resp = client.post(f"/api/v1/projects/{project.id}/storyboard/generate", json={})
+    assert sb_resp.status_code == 200
+    scenes = sb_resp.json()
+    assert len(scenes) >= 1
+    assert len(scenes[0]["shots"]) == 0
+
+
+def test_story_mode_approval_gates_enforcement(client, db_session):
+    """Verify backend enforces STORY_APPROVED before Storyboard, and STORYBOARD_APPROVED before Shot Plan."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Gated Flow Project", description="Gate enforcement", video_mode="STORY", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # Step 1: Generate Story
+    story_resp = client.post(f"/api/v1/projects/{project.id}/story/generate", json={})
+    assert story_resp.status_code == 200
+    story_data = story_resp.json()
+    story_id = story_data["id"]
+
+    # Attempt to generate Storyboard while project is still DRAFT / not approved -> 409 Conflict
+    sb_reject = client.post(f"/api/v1/stories/{story_id}/scenes/generate", json={})
+    assert sb_reject.status_code == 409
+    assert "requires 'STORY_APPROVED' stage" in sb_reject.json()["detail"]
+
+    # Approve Story
+    project.status = "STORY_APPROVED"
+    db_session.commit()
+
+    # Now Storyboard generation succeeds
+    sb_success = client.post(f"/api/v1/stories/{story_id}/scenes/generate", json={})
+    assert sb_success.status_code == 200
+    scenes = sb_success.json()
+    scene_id = scenes[0]["id"]
+
+    # While project is STORYBOARD_GENERATED, generating Shot Plan must be rejected -> 409 Conflict
+    project.status = "STORYBOARD_GENERATED"
+    db_session.commit()
+
+    shot_reject = client.post(f"/api/v1/scenes/{scene_id}/shots/generate", json={})
+    assert shot_reject.status_code == 409
+    assert "requires 'STORYBOARD_APPROVED' stage" in shot_reject.json()["detail"]
+
+    # Approve Storyboard
+    project.status = "STORYBOARD_APPROVED"
+    db_session.commit()
+
+    # Now Shot Plan generation succeeds
+    shot_success = client.post(f"/api/v1/scenes/{scene_id}/shots/generate", json={})
+    assert shot_success.status_code == 200
+    assert len(shot_success.json()) >= 1
+
+
+def test_short_mode_bypass_and_shot_plan_gate(client, db_session):
+    """Verify SHORT mode can bypass Story without approval, but requires STORYBOARD_APPROVED before Shot Plan."""
+    fake_provider = FakeCreativeGenerationProvider()
+    client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
+
+    project = Project(title="Short Flow Project", description="Short bypass", video_mode="SHORT", status="DRAFT")
+    db_session.add(project)
+    db_session.commit()
+
+    # SHORT mode can generate Storyboard directly from DRAFT
+    sb_resp = client.post(f"/api/v1/projects/{project.id}/storyboard/generate", json={})
+    assert sb_resp.status_code == 200
+    scenes = sb_resp.json()
+    scene_id = scenes[0]["id"]
+
+    # Project is at STORYBOARD_GENERATED, Shot Plan generation must be rejected -> 409
+    project.status = "STORYBOARD_GENERATED"
+    db_session.commit()
+
+    shot_reject = client.post(f"/api/v1/scenes/{scene_id}/shots/generate", json={})
+    assert shot_reject.status_code == 409
+    assert "requires 'STORYBOARD_APPROVED' stage" in shot_reject.json()["detail"]
+
+    # Approve Storyboard
+    project.status = "STORYBOARD_APPROVED"
+    db_session.commit()
+
+    # Now Shot Plan generation succeeds
+    shot_success = client.post(f"/api/v1/scenes/{scene_id}/shots/generate", json={})
+    assert shot_success.status_code == 200
+
+
+def test_batch_production_generation_rejected_before_shot_plan_approved(client, db_session):
+    """Verify batch video generation is rejected if project has not reached SHOT_PLAN_APPROVED stage."""
+    project = Project(title="Batch Gate Project", description="Production gate check", status="STORYBOARD_APPROVED")
+    db_session.add(project)
+    db_session.commit()
+
+    scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=1)
+    db_session.add(scene)
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add(shot)
+    db_session.commit()
+
+    # Attempt batch generation before SHOT_PLAN_APPROVED -> 409 Conflict
+    reject_resp = client.post(f"/api/v1/projects/{project.id}/jobs/batch", json={})
+    assert reject_resp.status_code == 409
+    assert "requires 'SHOT_PLAN_APPROVED' stage" in reject_resp.json()["detail"]
+
+    # Approve Shot Plan
+    project.status = "SHOT_PLAN_APPROVED"
+    db_session.commit()
+
+    # Now batch generation is allowed
+    allow_resp = client.post(f"/api/v1/projects/{project.id}/jobs/batch", json={})
+    assert allow_resp.status_code == 200
+    jobs = allow_resp.json()
+    assert len(jobs) == 1

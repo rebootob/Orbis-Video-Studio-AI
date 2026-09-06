@@ -1,6 +1,7 @@
 from app.db.base_class import Base
 from app.models.project import Project
 from app.models.story import Story
+from app.models.story_version import StoryVersion
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.asset import Asset
@@ -21,6 +22,7 @@ __all__ = [
     "Base",
     "Project",
     "Story",
+    "StoryVersion",
     "Scene",
     "Shot",
     "Asset",
