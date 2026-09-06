@@ -59,6 +59,7 @@ RETRY_SECONDS = 5
 MAX_BACKOFF_SECONDS = 300
 TERMINAL = ("COMPLETED", "FAILED", "CANCELLED", "RECONCILIATION_REQUIRED")
 ACTIVE = ("QUEUED", "PROCESSING")
+ACTIVE_JOB_STATUSES = ("PENDING", "CLAIMED", "SUBMITTING", "SUBMITTED", "POLLING", "QUEUED", "PROCESSING")
 
 def utc_now():
     return datetime.now(timezone.utc)
@@ -130,6 +131,8 @@ class JobDispatchService:
         custom_params=None,
         max_retries=3,
         reference_images=None,
+        lock_shot: bool = True,
+        commit: bool = True,
     ):
         from app.providers.factory import ProviderFactory
         resolved_provider = provider_name or ProviderFactory.get_default_provider_name()
@@ -143,9 +146,15 @@ class JobDispatchService:
         provider_name = resolved_provider
         if idempotency_key is not None and (not idempotency_key or len(idempotency_key) > 255 or contains_secret(idempotency_key)):
             raise HTTPException(400, "Invalid idempotency key")
-        shot = db.get(Shot, shot_id)
+
+        # Transactional Shot acquisition with row lock if requested
+        shot_query = db.query(Shot).filter(Shot.id == shot_id)
+        if lock_shot:
+            shot_query = shot_query.with_for_update()
+        shot = shot_query.first()
         if not shot:
             raise HTTPException(404, "Shot not found")
+
         from app.services.lock_machine import LockMachineService
         LockMachineService.check_regeneration_allowed(db, shot_id)
         if shot.shot_type not in ("AI_GENERATED", "MIXED"):
@@ -184,6 +193,30 @@ class JobDispatchService:
             model=None,
             params={"duration_seconds": duration_secs},
         )
+
+        if project_id:
+            # Concurrency-safe budget check with row lock
+            BudgetService.check_budget_before_dispatch(
+                db, project_id, estimated_cost, lock_row=True
+            )
+
+        # Concurrency Deduplication Check: re-verify no active generation job exists for this shot
+        active_job = (
+            db.query(Job)
+            .filter(
+                Job.shot_id == shot_id,
+                Job.status.in_(ACTIVE_JOB_STATUSES),
+            )
+            .first()
+        )
+        if active_job:
+            if idempotency_key and active_job.idempotency_key == idempotency_key:
+                return active_job
+            raise HTTPException(
+                status_code=409,
+                detail=f"Active generation job '{active_job.id}' already exists for Shot '{shot_id}'.",
+            )
+
         job = Job(
             id=uuid.uuid4(),
             shot_id=shot_id,
@@ -197,12 +230,6 @@ class JobDispatchService:
         )
 
         try:
-            if project_id:
-                # Concurrency-safe budget check with row lock
-                BudgetService.check_budget_before_dispatch(
-                    db, project_id, estimated_cost, lock_row=True
-                )
-
             db.add(job)
             db.flush()
             if project_id:
@@ -220,14 +247,27 @@ class JobDispatchService:
                     idempotency_key=idempotency_key,
                     commit=False,
                 )
-            db.commit()
-            return load(db, job.id)
+            if commit:
+                db.commit()
+                return load(db, job.id)
+            else:
+                return job
         except IntegrityError:
             db.rollback()
             if idempotency_key:
                 existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
                 if existing:
                     return existing
+            existing_active = (
+                db.query(Job)
+                .filter(Job.shot_id == shot_id, Job.status.in_(ACTIVE_JOB_STATUSES))
+                .first()
+            )
+            if existing_active:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Active generation job '{existing_active.id}' already exists for Shot '{shot_id}'.",
+                )
             raise
         except Exception:
             db.rollback()

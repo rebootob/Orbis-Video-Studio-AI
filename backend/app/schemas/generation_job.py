@@ -80,8 +80,10 @@ class BatchRunResponse(BaseModel):
     items: Optional[List[BatchRunItemResponse]] = None
 
 
+from typing import Optional, List, Literal
+
 class BatchResumeRequest(BaseModel):
-    operation_type: str = "CONTINUE_INCOMPLETE"  # CONTINUE_INCOMPLETE, RETRY_FAILED, GENERATE_SELECTED
+    operation_type: Literal["CONTINUE_INCOMPLETE", "RETRY_FAILED", "GENERATE_SELECTED"] = "CONTINUE_INCOMPLETE"
     shot_ids: Optional[List[uuid.UUID]] = None
     provider_name: Optional[str] = None
     only_incomplete: bool = True

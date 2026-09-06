@@ -26,7 +26,7 @@ def upgrade():
             nullable=False,
         ),
         sa.Column("operation_type", sa.String(length=50), nullable=False),
-        sa.Column("status", sa.String(length=50), nullable=False, server_default="COMPLETED"),
+        sa.Column("status", sa.String(length=50), nullable=False, server_default="DISPATCHED"),
         sa.Column("requested_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("eligible_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("queued_count", sa.Integer(), nullable=False, server_default="0"),
@@ -53,7 +53,6 @@ def upgrade():
         sa.Column(
             "shot_id",
             sa.Uuid(),
-            sa.ForeignKey("shots.id", ondelete="CASCADE", name="fk_batch_run_items_shot_id"),
             nullable=False,
         ),
         sa.Column(
@@ -63,7 +62,7 @@ def upgrade():
             nullable=True,
         ),
         sa.Column("decision", sa.String(length=50), nullable=False),
-        sa.Column("skip_reason", sa.String(length=50), nullable=True),
+        sa.Column("skip_reason", sa.String(length=100), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("batch_run_id", "shot_id", name="uq_batch_run_items_run_shot"),
     )
@@ -72,16 +71,24 @@ def upgrade():
         batch_op.create_index("ix_batch_run_items_shot_id", ["shot_id"])
         batch_op.create_index("ix_batch_run_items_job_id", ["job_id"])
 
-    # 3. Targeted Performance & Scalability Indexes for candidate selection
+    # 3. Targeted Performance & Scalability Indexes for candidate selection and active job deduplication
     with op.batch_alter_table("shots") as batch_op:
         batch_op.create_index("ix_shots_scene_id", ["scene_id"])
 
     with op.batch_alter_table("generation_jobs") as batch_op:
         batch_op.create_index("ix_generation_jobs_shot_status", ["shot_id", "status"])
+        batch_op.create_index(
+            "uq_generation_jobs_active_shot",
+            ["shot_id"],
+            unique=True,
+            sqlite_where=sa.text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING')"),
+            postgresql_where=sa.text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING')"),
+        )
 
 
 def downgrade():
     with op.batch_alter_table("generation_jobs") as batch_op:
+        batch_op.drop_index("uq_generation_jobs_active_shot")
         batch_op.drop_index("ix_generation_jobs_shot_status")
 
     with op.batch_alter_table("shots") as batch_op:

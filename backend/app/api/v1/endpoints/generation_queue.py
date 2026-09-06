@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
@@ -156,6 +156,7 @@ def list_project_jobs(
 
 
 class BatchJobCreateRequest(BaseModel):
+    operation_type: Literal["CONTINUE_INCOMPLETE", "RETRY_FAILED", "GENERATE_SELECTED"] = "CONTINUE_INCOMPLETE"
     shot_ids: Optional[List[uuid.UUID]] = None
     provider_name: Optional[str] = None
     only_incomplete: bool = True
@@ -172,7 +173,7 @@ def estimate_project_batch_jobs(
     return BatchResumeService.estimate_batch(
         db=db,
         project_id=project_id,
-        operation_type="CONTINUE_INCOMPLETE",
+        operation_type=req.operation_type,
         shot_ids=req.shot_ids,
         provider_name=req.provider_name,
         only_incomplete=req.only_incomplete,
@@ -192,7 +193,7 @@ def batch_generate_project_shots(
     batch_run, jobs = BatchResumeService.execute_batch(
         db=db,
         project_id=project_id,
-        operation_type="CONTINUE_INCOMPLETE",
+        operation_type=req.operation_type,
         shot_ids=req.shot_ids,
         provider_name=eff_provider,
         only_incomplete=req.only_incomplete,
@@ -222,16 +223,17 @@ def resume_project_jobs(
 @router.get("/projects/{project_id}/batch-runs", response_model=List[BatchRunResponse])
 def list_project_batch_runs(
     project_id: uuid.UUID,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    from app.models.batch_run import BatchRun
-    runs = (
-        db.query(BatchRun)
-        .filter(BatchRun.project_id == project_id)
-        .order_by(BatchRun.created_at.desc())
-        .all()
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.list_project_batch_runs(
+        db=db,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
     )
-    return runs
 
 
 @router.get("/projects/{project_id}/batch-runs/{run_id}", response_model=BatchRunResponse)
@@ -240,15 +242,9 @@ def get_batch_run_details(
     run_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    from app.models.batch_run import BatchRun
-    run = (
-        db.query(BatchRun)
-        .filter(BatchRun.id == run_id, BatchRun.project_id == project_id)
-        .first()
+    from app.services.batch_resume import BatchResumeService
+    return BatchResumeService.get_batch_run_details(
+        db=db,
+        project_id=project_id,
+        run_id=run_id,
     )
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"BatchRun '{run_id}' not found for project '{project_id}'",
-        )
-    return run

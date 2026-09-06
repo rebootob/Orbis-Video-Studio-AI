@@ -212,6 +212,7 @@ export interface BatchJobEstimateResponse {
 }
 
 export interface BatchJobCreatePayload {
+  operation_type?: 'CONTINUE_INCOMPLETE' | 'RETRY_FAILED' | 'GENERATE_SELECTED';
   shot_ids?: string[] | null;
   provider_name?: string | null;
   only_incomplete?: boolean;
@@ -229,7 +230,7 @@ export interface BatchRunItem {
   batch_run_id: string;
   shot_id: string;
   job_id?: string | null;
-  decision: 'QUEUED' | 'SKIPPED';
+  decision: 'QUEUED' | 'SKIPPED' | 'FAILED';
   skip_reason?: string | null;
   created_at: string;
 }

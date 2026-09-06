@@ -356,6 +356,318 @@ def test_performance_candidate_evaluation_has_no_n_plus_one_queries(db_session, 
 
     # 120 shots evaluated
     assert eval_result.total_evaluated == 120
-    # Query count must be bounded constant (should be <= 6 queries: project, scenes, shots, locks, jobs)
+    # Query count must be bounded constant (should be <= 8 queries: project, scenes, locks, shots, jobs)
     # If N+1 existed, query count would be > 120!
     assert query_count <= 8, f"Expected bounded query count <= 8, but saw {query_count} queries (N+1 regression!)"
+
+
+def test_concurrent_resume_deduplication_barrier(tmp_path):
+    """Concurrency test: Two threads racing with a barrier on the same Shot
+
+    must result in exactly ONE active generation job in the database.
+    """
+    import threading
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = tmp_path / "concurrent_resume.db"
+    file_engine = create_engine(f"sqlite:///{db_file}", connect_args={"timeout": 30})
+    Base.metadata.create_all(file_engine)
+    FileSessionLocal = sessionmaker(bind=file_engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    shot_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+
+    with FileSessionLocal() as init_db:
+        p = Project(id=project_id, title="Conc Project", status="SHOT_PLAN_APPROVED", video_mode="STORY")
+        sc = Scene(id=scene_id, project_id=project_id, scene_number=1, heading="EXT")
+        sh = Shot(id=shot_id, scene_id=scene_id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+        init_db.add_all([p, sc, sh])
+        init_db.commit()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def worker():
+        with FileSessionLocal() as session:
+            try:
+                barrier.wait()
+                run, jobs = BatchResumeService.execute_batch(
+                    db=session,
+                    project_id=project_id,
+                    operation_type="CONTINUE_INCOMPLETE",
+                    shot_ids=[shot_id],
+                )
+                results.append((run, jobs))
+            except Exception as e:
+                results.append((None, []))
+
+    t1 = threading.Thread(target=worker)
+    t2 = threading.Thread(target=worker)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    with FileSessionLocal() as verify_db:
+        active_jobs = (
+            verify_db.query(GenerationJob)
+            .filter(GenerationJob.shot_id == shot_id)
+            .all()
+        )
+        # Exactly one active job must survive
+        assert len(active_jobs) == 1
+        assert active_jobs[0].status == "PENDING"
+
+
+def test_batch_run_lifecycle_and_partial_failure_audit(db_session, test_project):
+    """Verify truthful BatchRun status: DISPATCHED on normal queueing,
+
+    PARTIAL_FAILED when one shot dispatch fails, with truthful item decision.
+    """
+    project, sc1, _ = test_project
+    s1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([s1, s2])
+    db_session.commit()
+
+    # Dispatch normal run: status must be DISPATCHED
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=[s1.id],
+    )
+    assert run.status == "DISPATCHED"
+    assert run.queued_count == 1
+
+    # Simulate dispatch exception on s2 (e.g. mock create_and_dispatch_job throwing an error)
+    with patch.object(
+        JobDispatchService,
+        "create_and_dispatch_job",
+        side_effect=HTTPException(status_code=400, detail="Mock provider failure"),
+    ):
+        run2, jobs2 = BatchResumeService.execute_batch(
+            db=db_session,
+            project_id=project.id,
+            operation_type="CONTINUE_INCOMPLETE",
+            shot_ids=[s2.id],
+        )
+        assert run2.status == "FAILED"
+        assert run2.queued_count == 0
+        failed_item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run2.id).first()
+        assert failed_item.decision == "FAILED"
+        assert "Mock provider failure" in failed_item.skip_reason
+
+
+def test_dynamic_count_reconciliation_on_read(db_session, test_project):
+    """Verify that completed_count and failed_count are derived truthfully on GET endpoints."""
+    project, sc1, _ = test_project
+    s1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([s1, s2])
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        shot_ids=[s1.id, s2.id],
+    )
+    assert len(jobs) == 2
+    # Initially queued (pending)
+    assert run.completed_count == 0
+    assert run.failed_count == 0
+
+    # Jobs transition: job 1 completes, job 2 fails
+    jobs[0].status = "COMPLETED"
+    jobs[1].status = "FAILED"
+    db_session.commit()
+
+    # On read, counts must be truthfully reconciled
+    details = BatchResumeService.get_batch_run_details(db_session, project.id, run.id)
+    assert details.completed_count == 1
+    assert details.failed_count == 1
+
+    listed = BatchResumeService.list_project_batch_runs(db_session, project.id)
+    assert len(listed) >= 1
+    matching = next(r for r in listed if r.id == run.id)
+    assert matching.completed_count == 1
+    assert matching.failed_count == 1
+
+
+def test_candidate_audit_for_archived_scenes_and_missing_requested_ids(db_session, test_project):
+    """Verify that shots under archived scenes are reported as ARCHIVED,
+
+    and missing/out-of-project shot IDs are reported as NOT_FOUND without FK failure.
+    Counts must reconcile: requested_count == eligible_count + skipped_count.
+    """
+    project, sc1, _ = test_project
+    # Create an archived scene
+    archived_scene = Scene(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        scene_number=99,
+        heading="EXT. ARCHIVED SCENE",
+        scene_config={"archived": True},
+    )
+    db_session.add(archived_scene)
+    db_session.commit()
+
+    s1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s_archived = Shot(id=uuid.uuid4(), scene_id=archived_scene.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([s1, s_archived])
+    db_session.commit()
+
+    # Whole project evaluation: s_archived must be evaluated as ARCHIVED
+    eval_res = BatchResumeService.evaluate_project_candidates(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    reasons = {item[0].id: item[1] for item in eval_res.skipped_items}
+    assert reasons[s_archived.id] == CandidateSkipReason.ARCHIVED
+
+    # Explicit requested IDs including a non-existent ID
+    missing_id = uuid.uuid4()
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="GENERATE_SELECTED",
+        shot_ids=[s1.id, missing_id, s_archived.id],
+    )
+
+    # Requested count must be 3, exactly reconciling eligible + skipped
+    assert run.requested_count == 3
+    assert run.eligible_count == 1
+    assert run.skipped_count == 2
+    assert run.requested_count == run.eligible_count + run.skipped_count
+
+    # Check items in database
+    run_items = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id).all()
+    item_reasons = {i.shot_id: i.skip_reason for i in run_items if i.decision == "SKIPPED"}
+    assert item_reasons[missing_id] == CandidateSkipReason.NOT_FOUND.value
+    assert item_reasons[s_archived.id] == CandidateSkipReason.ARCHIVED.value
+
+
+def test_retry_failed_truthful_skip_reasons(db_session, test_project):
+    """Verify that RETRY_FAILED reports NO_FAILED_HISTORY when a shot has no failed jobs,
+
+    and ALREADY_COMPLETED when a shot is already completed.
+    """
+    project, sc1, _ = test_project
+    s1_completed = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s2_no_history = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s3_failed = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=3, shot_type="AI_GENERATED", duration_seconds=4.0)
+
+    db_session.add_all([s1_completed, s2_no_history, s3_failed])
+    db_session.commit()
+
+    j1 = GenerationJob(id=uuid.uuid4(), shot_id=s1_completed.id, provider_name="vidu", status="COMPLETED")
+    j3 = GenerationJob(id=uuid.uuid4(), shot_id=s3_failed.id, provider_name="vidu", status="FAILED")
+    db_session.add_all([j1, j3])
+    db_session.commit()
+
+    eval_res = BatchResumeService.evaluate_project_candidates(
+        db=db_session,
+        project_id=project.id,
+        operation_type="RETRY_FAILED",
+    )
+
+    reasons = {item[0].id: item[1] for item in eval_res.skipped_items}
+    assert reasons[s1_completed.id] == CandidateSkipReason.ALREADY_COMPLETED
+    assert reasons[s2_no_history.id] == CandidateSkipReason.NO_FAILED_HISTORY
+    assert len(eval_res.eligible_shots) == 1
+    assert eval_res.eligible_shots[0].id == s3_failed.id
+
+
+def test_operation_type_validation_fails_closed(db_session, test_project):
+    """Verify that unknown/typo operation types fail closed with 400 Bad Request."""
+    project, _, _ = test_project
+
+    with pytest.raises(HTTPException) as exc:
+        BatchResumeService.evaluate_project_candidates(
+            db=db_session,
+            project_id=project.id,
+            operation_type="RETRY_FAILEDD",
+        )
+    assert exc.value.status_code == 400
+    assert "Invalid batch operation_type" in exc.value.detail
+
+    with pytest.raises(HTTPException) as exc2:
+        BatchResumeService.execute_batch(
+            db=db_session,
+            project_id=project.id,
+            operation_type="UNKNOWN_OP",
+        )
+    assert exc2.value.status_code == 400
+
+
+def test_preview_and_execute_equivalence_all_operations(db_session, test_project):
+    """Verify that preview/estimate and execute yield equivalent counts for all 3 operations."""
+    project, sc1, _ = test_project
+    s1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s3 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=3, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([s1, s2, s3])
+    db_session.commit()
+
+    j1 = GenerationJob(id=uuid.uuid4(), shot_id=s1.id, provider_name="vidu", status="FAILED")
+    db_session.add(j1)
+    db_session.commit()
+
+    operations = ["CONTINUE_INCOMPLETE", "RETRY_FAILED", "GENERATE_SELECTED"]
+    for op in operations:
+        estimate = BatchResumeService.estimate_batch(
+            db=db_session,
+            project_id=project.id,
+            operation_type=op,
+            shot_ids=[s1.id, s2.id] if op == "GENERATE_SELECTED" else None,
+        )
+        eval_res = BatchResumeService.evaluate_project_candidates(
+            db=db_session,
+            project_id=project.id,
+            operation_type=op,
+            shot_ids=[s1.id, s2.id] if op == "GENERATE_SELECTED" else None,
+        )
+        assert estimate["shot_count"] == len(eval_res.eligible_shots)
+        assert estimate["skipped_count"] == len(eval_res.skipped_items)
+        assert estimate["total_evaluated"] == eval_res.total_evaluated
+
+
+def test_bounded_pagination_and_query_scalability_large_project(db_session, test_project):
+    """Scalability test: Verify that evaluating 250 shots across 3 scenes
+
+    processes candidates in bounded chunks without memory/parameter explosion,
+    and query counts remain bounded.
+    """
+    project, sc1, sc2 = test_project
+    sc3 = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=3, heading="INT. CONTROL ROOM")
+    db_session.add(sc3)
+    db_session.commit()
+
+    shots = []
+    for i in range(250):
+        target_scene = sc1 if i < 100 else (sc2 if i < 200 else sc3)
+        shots.append(
+            Shot(
+                id=uuid.uuid4(),
+                scene_id=target_scene.id,
+                shot_number=i + 1,
+                shot_type="AI_GENERATED",
+                duration_seconds=4.0,
+            )
+        )
+    db_session.add_all(shots)
+    db_session.commit()
+
+    eval_res = BatchResumeService.evaluate_project_candidates(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    # Exactly all 250 shots evaluated across paginated chunks
+    assert eval_res.total_evaluated == 250
+    assert len(eval_res.eligible_shots) == 250

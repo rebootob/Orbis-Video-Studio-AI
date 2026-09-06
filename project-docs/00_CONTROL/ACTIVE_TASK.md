@@ -42,24 +42,29 @@ Claude Code = STOP
    - Centralized candidate evaluation supporting `GENERATE_SELECTED`, `CONTINUE_INCOMPLETE`, `RETRY_FAILED`.
    - Set-based DB queries (no N+1 loops per shot).
    - Candidate rules enforce:
-     - Archived shots/scenes -> `ARCHIVED`
+     - Archived shots/scenes -> `ARCHIVED` (including parent scenes marked archived)
      - Locked shots/scenes/scripts -> `LOCKED`
      - Non-generatable shots -> `NOT_GENERATABLE`
      - Completed jobs -> `ALREADY_COMPLETED`
      - Active jobs -> `ACTIVE_JOB_EXISTS`
-     - Failed jobs without completed/active work -> `ELIGIBLE` for retry.
-2. **Shot-Level Deduplication**:
-   - Multiple failed jobs for one shot create at most ONE new retry job.
-   - Repeated resume calls do not duplicate active work.
-3. **Lightweight BatchRun Audit**:
-   - `BatchRun` and `BatchRunItem` models and migration `011_batch_resume_runs_and_indexes.py`.
-   - Records requested, eligible, queued, skipped counts with truthful skip reasons.
-4. **Performance & Scalability Guardrails**:
-   - Elimination of per-shot DB loops in candidate evaluation.
-   - Added `ix_shots_scene_id` and `ix_generation_jobs_shot_status`.
-5. **API & Frontend Integration**:
-   - Endpoints `/projects/{project_id}/jobs/estimate`, `/batch`, `/resume`, `/batch-runs`.
-   - Frontend `handleConfirmBatchGenerate` and `handleRetryFailed` wired to canonical endpoints.
+     - Failed jobs without completed/active work -> `ELIGIBLE` for retry
+     - Retry with no failure history -> `NO_FAILED_HISTORY`
+     - Missing or cross-project requested shot IDs -> `NOT_FOUND`
+   - Strict `BatchOperationType` enum validation; unknown operations fail closed with 400 Bad Request.
+   - Bounded chunk pagination (`CHUNK_SIZE = 100`) for shot lookups and job status queries.
+2. **Shot-Level Deduplication & Real Concurrency Fencing**:
+   - Row-level lock on `Shot` during dispatch (`with_for_update()`).
+   - Transactional re-check of active generation jobs in the same transaction.
+   - Database-level partial unique index `uq_generation_jobs_active_shot` preventing duplicate concurrent active jobs.
+   - Concurrency barrier test proving exactly one active job survives races across separate threads/sessions.
+3. **Truthful BatchRun Lifecycle & Dynamic Count Reconciliation**:
+   - `BatchRun` status lifecycle starts at `DISPATCHED` (or `PARTIAL_FAILED` / `FAILED` if dispatch errors occur).
+   - Chunked dispatch execution (`EXECUTE_CHUNK_SIZE = 50`) with per-shot failure capture (`decision="FAILED"` with truthful reason).
+   - Dynamic reconciliation of `completed_count` and `failed_count` on read from linked generation job statuses.
+4. **API & Frontend Preview / Execute Equivalence**:
+   - `/projects/{project_id}/jobs/estimate` accepts `operation_type` and enforces identical candidate selection rules as execution.
+   - Bounded listing query for `/projects/{project_id}/batch-runs` with `limit` and `offset`.
+   - Frontend `CostConfirmationModal` supports `operationType`, wiring both batch generation and `Retry Failed` through preview and confirmation.
 
 ---
 

@@ -6,6 +6,7 @@ import { DollarSign, AlertTriangle, Play, X, ShieldAlert } from 'lucide-react';
 interface CostConfirmationModalProps {
   isOpen: boolean;
   projectId: string;
+  operationType?: 'CONTINUE_INCOMPLETE' | 'RETRY_FAILED' | 'GENERATE_SELECTED';
   shotIds?: string[] | null;
   onlyIncomplete?: boolean;
   onClose: () => void;
@@ -15,6 +16,7 @@ interface CostConfirmationModalProps {
 export const CostConfirmationModal: React.FC<CostConfirmationModalProps> = ({
   isOpen,
   projectId,
+  operationType = 'CONTINUE_INCOMPLETE',
   shotIds,
   onlyIncomplete = true,
   onClose,
@@ -31,6 +33,7 @@ export const CostConfirmationModal: React.FC<CostConfirmationModalProps> = ({
       setError(null);
       api
         .estimateBatchJobs(projectId, {
+          operation_type: operationType,
           shot_ids: shotIds || undefined,
           only_incomplete: onlyIncomplete,
         })
@@ -44,7 +47,7 @@ export const CostConfirmationModal: React.FC<CostConfirmationModalProps> = ({
           setLoading(false);
         });
     }
-  }, [isOpen, projectId, shotIds, onlyIncomplete]);
+  }, [isOpen, projectId, operationType, shotIds, onlyIncomplete]);
 
   if (!isOpen) return null;
 

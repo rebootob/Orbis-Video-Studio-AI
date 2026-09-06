@@ -29,7 +29,7 @@ class BatchRun(Base):
         index=True,
     )
     operation_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(50), default="COMPLETED", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="DISPATCHED", nullable=False)
 
     requested_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     eligible_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -69,7 +69,6 @@ class BatchRunItem(Base):
     )
     shot_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("shots.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -79,8 +78,8 @@ class BatchRunItem(Base):
         nullable=True,
         index=True,
     )
-    decision: Mapped[str] = mapped_column(String(50), nullable=False)  # QUEUED, SKIPPED
-    skip_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # LOCKED, ARCHIVED, etc.
+    decision: Mapped[str] = mapped_column(String(50), nullable=False)  # QUEUED, SKIPPED, FAILED
+    skip_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # LOCKED, ARCHIVED, NOT_FOUND, etc.
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -88,5 +87,9 @@ class BatchRunItem(Base):
 
     # Relationships
     batch_run: Mapped["BatchRun"] = relationship("BatchRun", back_populates="items")
-    shot: Mapped["Shot"] = relationship("Shot")
+    shot: Mapped[Optional["Shot"]] = relationship(
+        "Shot",
+        foreign_keys=[shot_id],
+        primaryjoin="BatchRunItem.shot_id == Shot.id",
+    )
     job: Mapped[Optional["GenerationJob"]] = relationship("GenerationJob")
