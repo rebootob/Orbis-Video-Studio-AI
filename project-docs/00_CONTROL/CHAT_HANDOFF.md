@@ -22,6 +22,7 @@ P2-WP006 = PASS / CLOSED / MERGED
 P2-WP007 = PASS / CLOSED / MERGED
 P2-WP008 = PASS / CLOSED / MERGED
 P2-WP009 = PASS / CLOSED / MERGED
+P2-WP010 = PASS / CLOSED / MERGED
 ```
 
 Key reviewed/merge truth:
@@ -34,7 +35,12 @@ WP008 reviewed HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
 WP008 merge: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
 
 WP009 reviewed HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
-WP009 merge / current documented main HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+WP009 merge: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+
+WP010 reviewed HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
+WP010 merge / current documented main HEAD: 639e61fb69b6abee8598074add458035db906ceb
+WP010 PR: #25 (MERGED / CLOSED)
+WP010 Final Review: PASS / READY TO MERGE (Review ID 5124386306)
 ```
 
 ---
@@ -42,18 +48,38 @@ WP009 merge / current documented main HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da2
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = P2-WP010
-ISSUE = #24
-PR = #25
-BRANCH = ai/p2-wp010-mode-aware-web-workspace
-LAST REVIEWED HEAD = 9fb1d6fdeee8ec14ffcf2063133fca5263754640
-STATUS = CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
-NEXT ALLOWED ACTION = ChatGPT independent re-review of PR #25
+ACTIVE WORK PACKAGE = NONE
+CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
+NEXT CANDIDATE = P2-WP011 (PROPOSED / NOT AUTHORIZED)
+ANTIGRAVITY = STOP / NONE
+CODEX = STOP
+CLAUDE_CODE = STOP
 ```
 
-Do not merge PR #25 yet. Do not start WP011.
+P2-WP010 is fully closed and merged. No active work package is authorized.
+Do NOT start or implement WP011 without explicit Owner authorization.
 
-Antigravity corrective commit has been pushed addressing the 8 review blockers (soft-archive retention, staged mode-aware workflow, truthful readiness copy, provider-neutral routing, multi-project metrics, unsaved edit protection, and upload error surfacing). Antigravity is STOPPED waiting for ChatGPT independent re-review.
+### Future WP011 Planning Consideration
+
+`PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
+
+When P2-WP011 is authorized, the design must account for:
+- selective/batch operations must avoid unbounded loading
+- avoid N+1 database behavior
+- pagination/chunking for large job/shot sets
+- required DB indexes for batch/resume paths
+- bounded concurrency
+- truthful progress for large batches
+- performance/load regression tests
+
+### Future-Performance Backlog Note (Preserved)
+
+- server-side Project pagination
+- Asset/Job history pagination
+- media thumbnail/lazy-loading
+- streaming/multipart large-file upload
+- media preview streaming
+- frontend virtualization where needed
 
 ---
 
@@ -153,9 +179,9 @@ Audio Production is Core V1 and must include VO, BGM, SFX, ambience, basic mixin
 ## Roles
 
 ```text
-Owner = final human authority / UAT / merge approval
+Owner = final human authority / UAT / authorization of next WP
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = bounded low-credit Execution Plane when explicitly authorized
+Antigravity = STOP / NONE (bounded low-credit Execution Plane when explicitly authorized)
 Codex = STOP by default
 Claude Code = STOP
 ```
@@ -166,13 +192,12 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD and PR #25 HEAD.
+1. Fresh-fetch current `main` HEAD.
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
 5. Read `DOCUMENT_INDEX.md`.
 6. Read this handoff.
-7. Read `VIDEO_PRODUCTION_MODES.md`, `PRODUCT_VISION.md`, `USER_WORKFLOW.md` and only other documents directly relevant to the active task.
-8. Read Issue #24 plus all Product Lock / UX addendum comments and the latest PR #25 review/corrective comment.
-9. Do not repeat closed work.
-10. Do not start the next WP or merge without explicit Owner authorization.
+7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for Owner authorization before starting implementation.
+8. Do not repeat closed work.
+9. Do not start WP011 without explicit Owner authorization.

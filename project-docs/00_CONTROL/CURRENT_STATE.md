@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-MAIN_HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+MAIN_HEAD: 639e61fb69b6abee8598074add458035db906ceb
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -27,13 +27,17 @@ P2-WP009_PR: "#23"
 P2-WP009_REVIEWED_HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
 P2-WP009_MERGE_COMMIT: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
-ACTIVE_WORK_PACKAGE: P2-WP010
+P2-WP010: PASS / CLOSED / MERGED
 P2-WP010_ISSUE: "#24"
 P2-WP010_PR: "#25"
 P2-WP010_BRANCH: ai/p2-wp010-mode-aware-web-workspace
-P2-WP010_REVIEWED_HEAD: 9fb1d6fdeee8ec14ffcf2063133fca5263754640
-P2-WP010: CORRECTIVE PUSHED / WAITING RE-REVIEW
-CURRENT_GATE: CHATGPT INDEPENDENT RE-REVIEW
+P2-WP010_REVIEWED_HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
+P2-WP010_MERGE_COMMIT: 639e61fb69b6abee8598074add458035db906ceb
+P2-WP010_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124386306)
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: OWNER DECISION FOR NEXT WORK PACKAGE
+P2-WP011: PROPOSED / NOT AUTHORIZED
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -58,12 +62,13 @@ GUIDED_FLEXIBILITY: REQUIRED
 NEXT_BEST_ACTION_GUIDANCE: REQUIRED
 APPROVAL_GATED_AUTOMATION: REQUIRED
 AUDIO_PRODUCTION_CORE_V1: REQUIRED
+PERFORMANCE_AND_SCALABILITY: REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
 
 LOCAL_AI: DISALLOWED
 CLOUD_AI: REQUIRED
 VIDU: V1 DEFAULT VIDEO PROVIDER BEHIND ADAPTER
 VENDOR_LOCK_IN: DISALLOWED
-ANTIGRAVITY: BOUNDED TO WP010 CORRECTIVE
+ANTIGRAVITY: STOP / NONE
 CODEX: STOP
 CLAUDE_CODE: STOP
 WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
@@ -84,7 +89,8 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | Durable job control, retries, reconciliation, cancellation and secret safety complete. |
 | Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | Hybrid shot engine, lock machine, Core V1 video modes and config inheritance complete. |
 | Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
-| Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | CHANGES REQUIRED | First pass exists in PR #25; corrective required before merge. |
+| Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
+| Selective / Batch Regeneration & Resume Service (P2-WP011) | PROPOSED / NOT AUTHORIZED | Next candidate WP; pending Owner authorization. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -132,10 +138,10 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP009 closed unless a proven regression exists.
-2. Antigravity may work only on the approved WP010 corrective in PR #25.
-3. After a new corrective HEAD is pushed, ChatGPT performs independent review.
-4. Do not merge PR #25 without explicit Owner approval.
-5. Do not start WP011 or any later WP automatically.
+1. Keep WP001-WP010 closed unless a proven regression exists.
+2. `ACTIVE_WORK_PACKAGE = NONE`.
+3. `CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE`.
+4. Antigravity = STOP / NONE.
+5. P2-WP011 remains PROPOSED / NOT AUTHORIZED. Do not start WP011 or any later WP without explicit Owner authorization.
 
 Live GitHub/repository truth newer than this document is authoritative.

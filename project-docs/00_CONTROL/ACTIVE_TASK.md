@@ -7,62 +7,80 @@
 ## Active Work Package
 
 ```text
-P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
 Status:
 
 ```text
-CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW / DO NOT MERGE YET
+WP010 PASS / CLOSED / MERGED
+CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
 ```
 
-Current Pull Request:
+Last Completed Work Package:
 
 ```text
-PR #25
-Branch: ai/p2-wp010-mode-aware-web-workspace
-Reviewed HEAD: 9fb1d6fdeee8ec14ffcf2063133fca5263754640
-Gate: WAITING CHATGPT INDEPENDENT RE-REVIEW
+P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX
+Issue: #24
+PR: #25
+Final Reviewed HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
+Merge Commit: 639e61fb69b6abee8598074add458035db906ceb
+Final ChatGPT Independent Review: PASS / READY TO MERGE (Review ID 5124386306)
 ```
 
-Owner authorization is recorded in GitHub Issue #24 and its Product Lock / UX addendum comments.
-
 Execution Engine:
-Antigravity, bounded to the existing WP010 branch/PR only.
 
-## Current Corrective Priorities
+```text
+Antigravity = STOP / NONE
+Codex = STOP
+Claude Code = STOP
+```
 
-1. Remove unsafe hard-delete behavior that conflicts with full-history retention.
-2. Preserve multi-project history and no-silent-history-loss behavior.
-3. Make staged production explicit and reviewable:
-   `Story -> Storyboard -> Shot Plan -> Images -> Video -> Audio -> Final Review -> Export`.
-4. Support approval gates and a clear next recommended action.
-5. Improve Project Dashboard actions: rename, duplicate, archive, search, sort, recent.
-6. Add truthful actionable queue states, Generate Selected / continue incomplete behavior and safe cost confirmation before chargeable batch work.
-7. Ensure references/upload UX is real rather than placeholder.
-8. Provide lightweight History / Version entry points and reorder/autosave readiness.
-9. Fix unsafe CORS configuration.
-10. Keep UI simple, guided, professional and progressively disclose advanced settings.
+No active execution engine is authorized for application-code implementation.
 
-## Locked Product Direction Relevant to WP010
+---
 
-- Multi-project is required.
-- Full history retention and auditable changes are required.
-- Multi-mode Core V1: STORY / SHORT / LOOP / SCENE.
-- Automation-first: AI handles repetitive production work; human reviews and approves.
-- User must be able to review Story and Storyboard before detailed Shot/Image/Video generation.
-- Guided Flexibility is required: always show a sensible next action while preserving expert control.
-- No live paid provider calls are required for WP010 acceptance.
-- Audio is Core V1, but WP010 only prepares truthful UI/readiness and must not expand into the full audio engine.
+## Next Candidate Work Package (Proposed Only)
+
+```text
+P2-WP011 — Selective / Batch Regeneration & Resume Service
+Status: PROPOSED / NOT AUTHORIZED
+```
+
+Do NOT implement WP011 without explicit Owner authorization.
+
+### Planning Note for Future WP011 Consideration
+
+`PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
+
+For WP011 planning specifically consider:
+- selective/batch operations must avoid unbounded loading
+- avoid N+1 database behavior
+- pagination/chunking for large job/shot sets
+- required DB indexes for batch/resume paths
+- bounded concurrency
+- truthful progress for large batches
+- performance/load regression tests
+
+*(Do not implement these items during documentation closure).*
+
+### Future-Performance Backlog Note (Preserved)
+
+- server-side Project pagination
+- Asset/Job history pagination
+- media thumbnail/lazy-loading
+- streaming/multipart large-file upload
+- media preview streaming
+- frontend virtualization where needed
 
 ---
 
 ## Current Execution Roles
 
 ```text
-Owner = final human authority / UAT / merge approval
+Owner = final human authority / UAT / next WP authorization
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = bounded low-credit Execution Plane for the authorized WP only
+Antigravity = STOP / NONE
 Codex = STOP by default
 Claude Code = STOP
 ```
@@ -73,8 +91,7 @@ The local GitHub watcher/dispatcher remains PAUSED and must not be treated as a 
 
 ## Next Allowed Action
 
-Antigravity corrective commit pushed on PR #25. Antigravity MUST STOP.
-ChatGPT performs independent review of the exact current PR #25 HEAD.
-
-Do not merge PR #25 without explicit Owner approval.
-Do not start WP011 or any later WP automatically.
+1. Keep WP001-WP010 closed unless a proven regression exists.
+2. `ACTIVE_WORK_PACKAGE = NONE`.
+3. Wait for Owner decision and authorization for the next Work Package.
+4. Do not start WP011 or any later WP automatically.

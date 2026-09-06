@@ -27,11 +27,8 @@ Read in exact order:
 9. project-docs/30_PRODUCT/V1_SCOPE.md
 10. only other directly relevant routed documents
 
-Then inspect:
-- GitHub Issue #24 and ALL Product Lock / UX addendum comments
-- PR #25 and latest review/corrective comments
-- exact current PR #25 HEAD and changed files
-- current workflow/CI results for that exact HEAD
+Then note:
+- Closed work packages (including Issue #24 / PR #25) may be consulted only for audit, regression, or historical context when relevant. Do NOT require re-review of closed PR #25.
 
 KNOWN COMPLETED STATE:
 P0-WP001 = PASS / CLOSED / MERGED
@@ -43,6 +40,7 @@ P2-WP006 = PASS / CLOSED / MERGED
 P2-WP007 = PASS / CLOSED / MERGED
 P2-WP008 = PASS / CLOSED / MERGED
 P2-WP009 = PASS / CLOSED / MERGED
+P2-WP010 = PASS / CLOSED / MERGED
 
 WP007 reviewed HEAD:
 5a03d4d7f56ac8ae39a78914276610c0512da78b
@@ -56,34 +54,40 @@ a360c3b38d1d962f9f3c5f6412e3107e90fae7db
 
 WP009 reviewed HEAD:
 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
-WP009 merge / documented main HEAD:
+WP009 merge:
 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
+WP010 reviewed HEAD:
+0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
+WP010 merge / documented main HEAD:
+639e61fb69b6abee8598074add458035db906ceb
+WP010 PR:
+#25 (MERGED / CLOSED)
+
 CURRENT GATE:
-ACTIVE WORK PACKAGE = P2-WP010
-ISSUE = #24
-PR = #25
-BRANCH = ai/p2-wp010-mode-aware-web-workspace
-LAST REVIEWED HEAD = 9fb1d6fdeee8ec14ffcf2063133fca5263754640
-STATUS = CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
+ACTIVE WORK PACKAGE = NONE
+CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE
+NEXT CANDIDATE = P2-WP011 (PROPOSED / NOT AUTHORIZED)
 
-Do not merge PR #25 unless Owner explicitly approves after ChatGPT PASS review.
-Do not start WP011 or any later WP automatically.
+Do not start WP011 or any later WP without explicit Owner authorization.
 
-WP010 CORRECTIVE PRIORITIES:
-- remove unsafe hard-delete behavior / preserve full history
-- staged workflow readiness: Story -> Storyboard -> Shot Plan -> Images -> Video
-- approval gates between stages
-- next recommended action / Guided Flexibility
-- multi-project dashboard: rename / duplicate / archive / search / sort / recent
-- truthful actionable queue states
-- Generate Selected / Continue incomplete
-- safe cost confirmation for chargeable batch work
-- truthful QC/approval UI only
-- real reference upload, not placeholder
-- lightweight History / Version entry point
-- Scene / Shot reorder and safe autosave/unsaved-state UX
-- safe CORS configuration
+PLANNING NOTE FOR FUTURE WP011:
+PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
+When WP011 is authorized, ensure:
+- selective/batch operations avoid unbounded loading
+- avoid N+1 database queries
+- pagination/chunking for large job/shot sets
+- required DB indexes for batch/resume paths
+- bounded concurrency and truthful batch progress
+- performance/load regression tests
+
+FUTURE-PERFORMANCE BACKLOG (PRESERVED):
+- server-side Project pagination
+- Asset/Job history pagination
+- media thumbnail/lazy-loading
+- streaming/multipart large-file upload
+- media preview streaming
+- frontend virtualization where needed
 
 OWNER-LOCKED PRODUCT DIRECTION:
 Orbis is an AI Video Production Orchestrator / Production Control Plane.
@@ -183,8 +187,8 @@ Local Antigravity watcher/dispatcher is PAUSED and not production-trusted.
 Do not depend on it.
 
 FIRST ACTION:
-Report exact live main HEAD and exact PR #25 HEAD.
-If PR #25 has a new corrective HEAD, independently review only the authorized WP010 scope and compare it against Issue #24 + addenda.
-If the PR HEAD is still 291ea773681831a0a68e585eb7e0664902102be3, report that no corrective commit is available yet and wait.
-Do not merge or start another WP automatically.
+1. Fresh-fetch live origin/main and report exact live main HEAD SHA.
+2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE.
+3. Await explicit Owner authorization before starting or implementing any new Work Package (including P2-WP011).
+4. Do not start WP011 or any later WP automatically.
 ```
