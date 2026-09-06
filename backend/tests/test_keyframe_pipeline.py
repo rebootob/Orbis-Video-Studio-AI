@@ -12,11 +12,15 @@ from app.models.asset import Asset
 from app.models.asset_lock import AssetLock
 from app.providers.image.mock_adapter import MockImageProviderAdapter
 from app.providers.image.base import ImageGenerationParams, ReferenceImageInput
+from app.providers.image.factory import ImageProviderFactory
 from app.services.image_generation.continuity_mapper import ContinuityMapper
 from app.services.keyframe_generation import KeyframeGenerationService
 from app.services.production_orchestrator import ProductionOrchestrator
 from app.services.creative_generation.fake_provider import FakeCreativeGenerationProvider
 from app.services.creative_generation.factory import get_creative_provider
+from app.services.pricing import CostStatus
+from app.services.budget import BudgetService
+from fastapi import HTTPException
 
 
 # ---------------------------------------------------------------------------
@@ -668,3 +672,157 @@ def test_bounded_no_n_plus_one_batch_keyframe_generation(db_session):
     assert batch_run2.completed_count == 0
     assert batch_run2.skipped_count == 4
     assert len(jobs2) == 0
+
+
+def test_async_image_cost_ledger_and_budget_reservation(db_session):
+    """
+    ASYNC IMAGE COST LEDGER / BUDGET RESERVATION:
+    - Queued async image job immediately participates in budget/ledger with ESTIMATED cost.
+    - Second submission is blocked when the in-flight reservation would exhaust the budget.
+    - Completion reconciles actual cost without duplicate ledger rows or double counting.
+    - Repeated polling is idempotent.
+    """
+    # 1. Setup project with budget limit of $0.05
+    p = Project(
+        title="Async Budget Reservation Test",
+        video_mode="STORY",
+        status="SHOT_PLAN_APPROVED",
+        budget_limit=0.05,
+        budget_currency="USD",
+    )
+    db_session.add(p)
+    db_session.flush()
+
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.flush()
+
+    s1 = Shot(scene_id=sc.id, shot_number=1, shot_type="AI_GENERATED", visual_prompt="A cyberpunk city skyline at night")
+    s2 = Shot(scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED", visual_prompt="A flying car zooming across skyscrapers")
+    db_session.add_all([s1, s2])
+    db_session.commit()
+
+    mock_prov = MockImageProviderAdapter()
+
+    # 2. Dispatch first async keyframe (estimated cost = 0.04)
+    asset1, job1 = KeyframeGenerationService.generate_shot_keyframe(
+        db=db_session,
+        project_id=p.id,
+        shot_id=s1.id,
+        cost_authorized=True,
+        provider_specific_params={"simulate_async": True},
+    )
+    assert asset1 is None
+    assert job1.status == "QUEUED"
+
+    # Queued async image job immediately participates in budget/ledger
+    ledger_entries = db_session.query(UsageLedger).filter(UsageLedger.project_id == p.id).all()
+    assert len(ledger_entries) == 1
+    entry1 = ledger_entries[0]
+    assert entry1.job_id == job1.id
+    assert entry1.cost_status == CostStatus.ESTIMATED
+    assert entry1.estimated_cost == 0.04
+
+    committed_cost = BudgetService.get_project_committed_cost(db_session, p.id)
+    assert committed_cost == 0.04
+
+    # 3. Second submission must be blocked because in-flight reservation (0.04) + next (0.04) = 0.08 > limit (0.05)
+    with pytest.raises(HTTPException) as exc_info:
+        KeyframeGenerationService.generate_shot_keyframe(
+            db=db_session,
+            project_id=p.id,
+            shot_id=s2.id,
+            cost_authorized=True,
+            provider_specific_params={"simulate_async": True},
+        )
+    assert exc_info.value.status_code == 402
+    assert "budget limit exceeded" in exc_info.value.detail.lower()
+
+    # 4. Completion does not double count cost and does not duplicate ledger rows
+    res_completed = asyncio.run(mock_prov.check_job_status(job1.provider_job_id))
+    assert res_completed.status == "COMPLETED"
+
+    asset_completed = KeyframeGenerationService.complete_async_keyframe_job(
+        db=db_session,
+        job_id=job1.id,
+        result=res_completed,
+    )
+    assert asset_completed is not None
+
+    db_session.refresh(job1)
+    assert job1.status == "COMPLETED"
+    assert job1.output_asset_id == asset_completed.id
+
+    ledger_entries_after = db_session.query(UsageLedger).filter(UsageLedger.project_id == p.id).all()
+    assert len(ledger_entries_after) == 1
+    assert ledger_entries_after[0].id == entry1.id
+    assert ledger_entries_after[0].cost_status == CostStatus.CONFIRMED
+    assert ledger_entries_after[0].actual_cost == 0.04
+
+    committed_after = BudgetService.get_project_committed_cost(db_session, p.id)
+    assert committed_after == 0.04  # Still 0.04, no double-counting!
+
+    # 5. Repeated polling is idempotent
+    second_completion = KeyframeGenerationService.complete_async_keyframe_job(
+        db=db_session,
+        job_id=job1.id,
+        result=res_completed,
+    )
+    assert second_completion is None  # Already completed
+    ledger_entries_idempotent = db_session.query(UsageLedger).filter(UsageLedger.project_id == p.id).all()
+    assert len(ledger_entries_idempotent) == 1
+    assert BudgetService.get_project_committed_cost(db_session, p.id) == 0.04
+
+
+def test_batch_keyframe_no_per_shot_generation_job_queries(db_session):
+    """
+    REMOVE REMAINING PER-SHOT GENERATION_JOB QUERY IN BATCH:
+    Demonstrates GenerationJob eligibility queries do not scale linearly with shot count for batch execution.
+    """
+    p = Project(
+        title="Batch Query Count Test",
+        video_mode="STORY",
+        status="SHOT_PLAN_APPROVED",
+    )
+    db_session.add(p)
+    db_session.flush()
+
+    sc = Scene(project_id=p.id, scene_number=1)
+    db_session.add(sc)
+    db_session.flush()
+
+    # Create 10 shots in the scene
+    shots = [
+        Shot(scene_id=sc.id, shot_number=i, shot_type="AI_GENERATED", visual_prompt=f"Shot visual prompt {i}")
+        for i in range(1, 11)
+    ]
+    db_session.add_all(shots)
+    db_session.commit()
+
+    from sqlalchemy import event
+    engine = db_session.get_bind()
+
+    job_select_queries = []
+
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        stmt_clean = statement.lower().strip()
+        if "generation_jobs" in stmt_clean and stmt_clean.startswith("select"):
+            job_select_queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        batch_run, jobs = KeyframeGenerationService.execute_keyframe_batch(
+            db=db_session,
+            project_id=p.id,
+            operation_type="CONTINUE_INCOMPLETE",
+            cost_authorized=True,
+        )
+        assert batch_run.eligible_count == 10
+        assert batch_run.completed_count == 10
+
+        # With 10 eligible shots in a single chunk (chunk size 50),
+        # only the 1 chunk prefilter query touches generation_jobs.
+        # There are NO per-shot generation_jobs queries!
+        assert len(job_select_queries) == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)

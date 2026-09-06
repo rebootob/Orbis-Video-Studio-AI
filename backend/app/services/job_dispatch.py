@@ -532,6 +532,14 @@ class JobDispatchService:
                 error_message="Transient status failure" if retryable else "Provider job failed",
                 next_poll_at=now + timedelta(seconds=max(POLL_SECONDS, backoff(retries))) if retry else None,
             )
+            if not retry and getattr(job, "job_type", "VIDEO") == "IMAGE" and res.cost_usd is not None:
+                from app.services.cost_ledger import CostLedgerService
+                CostLedgerService.confirm_job_cost(
+                    db,
+                    job.id,
+                    actual_cost=res.cost_usd,
+                    provider_event_id=job.provider_job_id,
+                )
         elif values["status"] in TERMINAL:
             values["next_poll_at"] = None
 
