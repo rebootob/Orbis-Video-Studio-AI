@@ -17,9 +17,9 @@ P2-WP007_PR: "#15"
 P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
 P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: OWNER DECISION ON NEXT WORK PACKAGE
-P2-WP008: PROPOSED / NOT AUTHORIZED
+ACTIVE_WORK_PACKAGE: P2-WP008
+CURRENT_GATE: CHATGPT INDEPENDENT REVIEW
+P2-WP008: IMPLEMENTED / WAITING CHATGPT REVIEW
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -36,7 +36,7 @@ LOCAL_AI: DISALLOWED
 CLOUD_AI: REQUIRED
 VIDU: V1 DEFAULT VIDEO PROVIDER / ADAPTER MERGED
 VENDOR_LOCK_IN: DISALLOWED
-ANTIGRAVITY: STOP UNTIL NEXT EXPLICIT AUTHORIZATION
+ANTIGRAVITY: BOUNDED EXECUTION COMPLETE / AWAITING CHATGPT REVIEW
 CODEX: STOP
 CLAUDE_CODE: STOP
 WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
@@ -55,7 +55,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | OpenAI creative generation service complete. |
 | Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
 | Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | PR #15 merged; durable claim/lease fencing, retry/poll scheduling, cancellation, reconciliation, secret safety and mocked Vidu contract tests complete. |
-| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PROPOSED / NOT AUTHORIZED | Earliest planned implementation point for STORY/SHORT/LOOP/SCENE production-mode configuration. |
+| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | IMPLEMENTED / WAITING REVIEW | Hybrid shot engine (6 sources), asset ownership validation, AssetLock machine with audit trail, Core V1 video modes (STORY/SHORT/LOOP/SCENE), config inheritance, migration 008. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production project delivery until separate no-credit UAT passes. |
 
 ---

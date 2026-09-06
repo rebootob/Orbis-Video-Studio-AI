@@ -7,30 +7,20 @@
 ## Active Work Package
 
 ```text
-NONE
+P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration
 ```
-
-P2-WP007 has passed independent review, received Owner merge approval, and was merged via PR #15.
-
-```text
-P2-WP007 = PASS / CLOSED / MERGED
-Reviewed feature HEAD = 5a03d4d7f56ac8ae39a78914276610c0512da78b
-Merge commit = 9cb098dea7fc2948b023ad48163c729f566573a7
-```
-
----
-
-## Next Candidate Work Package
-
-**P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration**
 
 Status:
 
 ```text
-PROPOSED / NOT AUTHORIZED
+IMPLEMENTED / WAITING CHATGPT INDEPENDENT REVIEW
 ```
 
-No implementation agent is authorized to start WP008 yet.
+Owner Authorization:
+Authorized via GitHub Issue #18 on feature branch `ai/p2-wp008-hybrid-shot-lock-modes`.
+
+Execution Engine:
+Antigravity (bounded execution complete; STOPPING for ChatGPT review).
 
 ### Proposed objective
 

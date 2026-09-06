@@ -111,6 +111,13 @@ class JobDispatchService:
         shot = db.get(Shot, shot_id)
         if not shot:
             raise HTTPException(404, "Shot not found")
+        from app.services.lock_machine import LockMachineService
+        LockMachineService.check_regeneration_allowed(db, shot_id)
+        if shot.shot_type not in ("AI_GENERATED", "MIXED"):
+            raise HTTPException(
+                400,
+                f"Cannot dispatch generation job for shot type '{shot.shot_type}'. Generation queue only supports AI_GENERATED and MIXED shots.",
+            )
         if idempotency_key:
             existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
             if existing:
