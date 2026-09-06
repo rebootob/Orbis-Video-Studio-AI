@@ -19,85 +19,67 @@ P1-WP003 = PASS / CLOSED / MERGED
 P1-WP004 = PASS / CLOSED / MERGED
 P1-WP005 = PASS / CLOSED / MERGED
 P2-WP006 = PASS / CLOSED / MERGED
-P2-WP007 = PASS / CLOSED / MERGED — PR #15
-P2-WP008 = PASS / CLOSED / MERGED — PR #19
-P2-WP009 = PASS / CLOSED / MERGED — PR #23
+P2-WP007 = PASS / CLOSED / MERGED
+P2-WP008 = PASS / CLOSED / MERGED
+P2-WP009 = PASS / CLOSED / MERGED
 ```
 
-Known live `main` at this handoff:
-
-`9f094a5cbe9a4faeb5741231d0a819da0da283c1`
-
-Always fresh-fetch before relying on this SHA.
-
----
-
-## Git / Agent Governance Completed
-
-- `AGENTS.md` merged at repository root.
-- Backend GitHub Actions workflow merged.
-- Active `Protect main` ruleset protects canonical branch.
-- `backend-tests` is required before merge.
-- Unresolved review conversations block merge.
-- Force push and deletion of `main` are blocked.
-- Merged head branches are automatically deleted.
-- One WP = one branch = one PR; corrective work stays on the same branch/PR.
-- Antigravity is primary bounded execution plane; Codex is STOP by default and reserved for genuinely necessary local-only work.
-
----
-
-## Current Gate — P2-WP010
+Key reviewed/merge truth:
 
 ```text
-Issue: #24
-PR: #25
-Branch: ai/p2-wp010-mode-aware-web-workspace
-Initial reviewed HEAD: 291ea773681831a0a68e585eb7e0664902102be3
-Latest known corrective CODE HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
-Exact current PR HEAD: FRESH_FETCH_REQUIRED
-Status: CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
+WP007 reviewed HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
+WP007 merge: 9cb098dea7fc2948b023ad48163c729f566573a7
+
+WP008 reviewed HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
+WP008 merge: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
+
+WP009 reviewed HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
+WP009 merge / current documented main HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 ```
 
-Initial review at `291ea773...` returned **CHANGES REQUIRED / NOT READY TO MERGE** with blockers covering retention, staged review flow, guided next action, multi-project completeness, real upload/reference UX, truthful history/audio/QC, approval/status safety, cost-safe selected/batch generation, storyboard editing/autosave, provider neutrality, truthful progress/language/status, and CORS.
+---
 
-Antigravity pushed corrective code commit `a687c7ad...` with message:
+## Current Gate
 
-`fix(wp010): address review blockers with soft retention, cost confirmation, staged workflow, and truthful readiness`
+```text
+ACTIVE WORK PACKAGE = P2-WP010
+ISSUE = #24
+PR = #25
+BRANCH = ai/p2-wp010-mode-aware-web-workspace
+LAST REVIEWED HEAD = 9fb1d6fdeee8ec14ffcf2063133fca5263754640
+STATUS = CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
+NEXT ALLOWED ACTION = ChatGPT independent re-review of PR #25
+```
 
-At that corrective code HEAD:
-- `backend-tests` = PASS
-- `frontend-tests` = PASS
+Do not merge PR #25 yet. Do not start WP011.
 
-Documentation-sync commits may follow that code commit on the same PR. Therefore the next reviewer must fresh-fetch the exact current PR HEAD and distinguish docs-only commits from the corrective implementation diff.
-
-These CI results do not prove the previous review findings are closed.
+Antigravity corrective commit has been pushed addressing the 8 review blockers (soft-archive retention, staged mode-aware workflow, truthful readiness copy, provider-neutral routing, multi-project metrics, unsaved edit protection, and upload error surfacing). Antigravity is STOPPED waiting for ChatGPT independent re-review.
 
 ---
 
-## Exact Next Step
+## Owner-Locked Product Direction
 
-**ChatGPT fresh-fetches and independently re-reviews PR #25 at its exact current HEAD.**
+Orbis is not intended to recreate foundation AI models. It is an **AI Video Production Orchestrator / Production Control Plane** that coordinates best-of-breed Creative, Image, Video and Audio providers behind adapters.
 
-Use `a687c7adca1bf204767410d51ef0e1cad3ee9436` as the latest known corrective-code baseline.
+Provider-neutral direction:
 
-If PASS:
-1. Report PASS / READY TO MERGE at the exact reviewed PR HEAD.
-2. Wait for explicit Owner approval.
-3. Do not merge automatically.
+```text
+CreativeProvider
+  -> OpenAI / Gemini / future
 
-If findings remain:
-1. Produce only bounded corrective findings.
-2. Send them back to Antigravity on the SAME WP010 branch and PR #25.
-3. Use focused tests during the next corrective loop.
-4. Stop again for independent re-review.
+ImageProvider
+  -> Gemini Image / OpenAI Image / future
 
-Do not create a replacement PR and do not start WP011.
+VideoProvider
+  -> Vidu / Veo / future
 
----
+AudioProvider
+  -> TTS / music / SFX / future
+```
 
-## Product Direction Locks
+The Orbis-owned value is production orchestration and control: Projects, modes, references, Story/Scene/Shot structure, approvals, history/version lineage, locks, durable queue/retry/recovery, cost/budget, QC, assembly and export.
 
-Core V1 modes:
+### Core V1 Modes
 
 ```text
 STORY
@@ -106,7 +88,7 @@ LOOP
 SCENE
 ```
 
-Architecture-ready later only:
+Architecture-ready later:
 
 ```text
 PRODUCT
@@ -115,9 +97,56 @@ PRESENTER
 MONTAGE
 ```
 
-Orbis is an automation-first AI video production workspace, not a developer/admin UI and not a full Premiere/CapCut clone.
+### Multi-Project / History Locks
 
-Story is optional at Project level. Provider-neutral boundaries, history retention, auditable changes, cost safety, asset locks, and human review remain mandatory.
+```text
+MULTI_PROJECT = REQUIRED
+FULL_HISTORY_RETENTION = REQUIRED
+AUDITABLE_CHANGES = REQUIRED
+NO_SILENT_HISTORY_LOSS = REQUIRED
+```
+
+### Automation-First Locks
+
+```text
+AUTOMATION_FIRST = REQUIRED
+AUTO_STORYBOARD = REQUIRED
+AUTO_SHOT_PLANNING = REQUIRED
+AUTO_PROMPT_GENERATION = REQUIRED
+BATCH_GENERATION = REQUIRED
+HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
+```
+
+Target flow:
+
+```text
+Brief / References
+-> Story
+-> Review / Approve
+-> Storyboard
+-> Review / Approve
+-> Detailed Shot Plan + Prompts
+-> Review / Approve
+-> Images / Keyframes
+-> Continuity QC
+-> Review / Approve
+-> Video Generation
+-> VO / BGM / SFX / Ambience
+-> Auto Assembly
+-> Final QC
+-> Final Approval
+-> Render / Export
+```
+
+The user must be able to stop at Story or Storyboard before generating detailed shots/images/video and consuming expensive provider credits.
+
+### Guided Flexibility
+
+The UI should always suggest a sensible next action, use safe defaults and progressive disclosure, avoid dead ends, explain failures in plain language and preserve Advanced controls without trapping the user in a rigid wizard.
+
+### Audio
+
+Audio Production is Core V1 and must include VO, BGM, SFX, ambience, basic mixing/fades/mute/volume and basic auto-ducking. Advanced DAW-style editing is outside V1.
 
 ---
 
@@ -125,25 +154,25 @@ Story is optional at Project level. Provider-neutral boundaries, history retenti
 
 ```text
 Owner = final human authority / UAT / merge approval
-ChatGPT = Control Plane / Architect / Independent Reviewer
-Antigravity = STOP after corrective push pending re-review
+ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
+Antigravity = bounded low-credit Execution Plane when explicitly authorized
 Codex = STOP by default
 Claude Code = STOP
 ```
+
+The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a production dependency.
 
 ---
 
 ## Mandatory Resume Procedure
 
-1. Read root `AGENTS.md`.
-2. Fresh-fetch current `main` HEAD and PR #25 exact HEAD/state/CI.
-3. Read `START_HERE.md`.
-4. Read `CURRENT_STATE.md`.
-5. Read `ACTIVE_TASK.md`.
-6. Read `DOCUMENT_INDEX.md`.
-7. Read this handoff.
-8. Read `VIDEO_PRODUCTION_MODES.md`.
-9. Read GitHub Issue #24 and latest PR #25 review comments.
-10. Independently inspect the exact current PR #25 diff; do not rely only on Antigravity's commit message.
-11. If PR #25 HEAD advanced beyond the latest known corrective code commit, classify later commits (e.g. docs-only vs implementation) and review the actual current repository truth.
-12. Do not repeat closed WPs and do not start WP011 automatically.
+1. Fresh-fetch current `main` HEAD and PR #25 HEAD.
+2. Read `START_HERE.md`.
+3. Read `CURRENT_STATE.md`.
+4. Read `ACTIVE_TASK.md`.
+5. Read `DOCUMENT_INDEX.md`.
+6. Read this handoff.
+7. Read `VIDEO_PRODUCTION_MODES.md`, `PRODUCT_VISION.md`, `USER_WORKFLOW.md` and only other documents directly relevant to the active task.
+8. Read Issue #24 plus all Product Lock / UX addendum comments and the latest PR #25 review/corrective comment.
+9. Do not repeat closed work.
+10. Do not start the next WP or merge without explicit Owner authorization.

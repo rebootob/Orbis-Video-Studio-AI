@@ -2,8 +2,6 @@
 
 > **Canonical Document Location:** [`project-docs/00_CONTROL/CURRENT_STATE.md`](project-docs/00_CONTROL/CURRENT_STATE.md)
 
-Live GitHub/repository truth newer than this document is authoritative.
-
 ---
 
 ## State Flags
@@ -11,51 +9,65 @@ Live GitHub/repository truth newer than this document is authoritative.
 ```yaml
 PHASE: P2 — Generation & Multi-Mode Production Pipeline
 CANONICAL_BRANCH: main
-CURRENT_MAIN_HEAD_AT_HANDOFF: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
+MAIN_HEAD: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
 P2-WP007_PR: "#15"
+P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
+P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
+
 P2-WP008: PASS / CLOSED / MERGED
 P2-WP008_PR: "#19"
+P2-WP008_REVIEWED_HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
+P2-WP008_MERGE_COMMIT: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
+
 P2-WP009: PASS / CLOSED / MERGED
 P2-WP009_PR: "#23"
+P2-WP009_REVIEWED_HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
 P2-WP009_MERGE_COMMIT: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
 
 ACTIVE_WORK_PACKAGE: P2-WP010
-ACTIVE_ISSUE: "#24"
-ACTIVE_PR: "#25"
-ACTIVE_BRANCH: ai/p2-wp010-mode-aware-web-workspace
-INITIAL_REVIEWED_HEAD: 291ea773681831a0a68e585eb7e0664902102be3
-LATEST_CORRECTIVE_CODE_HEAD: a687c7adca1bf204767410d51ef0e1cad3ee9436
-CURRENT_PR_HEAD: FRESH_FETCH_REQUIRED
-CURRENT_GATE: CORRECTIVE PUSHED / WAITING CHATGPT INDEPENDENT RE-REVIEW
-P2-WP010: NOT READY TO MERGE UNTIL RE-REVIEW PASS
+P2-WP010_ISSUE: "#24"
+P2-WP010_PR: "#25"
+P2-WP010_BRANCH: ai/p2-wp010-mode-aware-web-workspace
+P2-WP010_REVIEWED_HEAD: 9fb1d6fdeee8ec14ffcf2063133fca5263754640
+P2-WP010: CORRECTIVE PUSHED / WAITING RE-REVIEW
+CURRENT_GATE: CHATGPT INDEPENDENT RE-REVIEW
 
-CI_AT_LATEST_CORRECTIVE_CODE_HEAD:
-  backend-tests: PASS
-  frontend-tests: PASS
+VIDEO_PRODUCTION_MODES_V1:
+  - STORY
+  - SHORT
+  - LOOP
+  - SCENE
+VIDEO_PRODUCTION_MODES_ARCHITECTURE_READY:
+  - PRODUCT
+  - EXPLAINER
+  - PRESENTER
+  - MONTAGE
 
-ANTIGRAVITY: CORRECTIVE PUSH COMPLETE / STOP FOR RE-REVIEW
-CODEX: STOP BY DEFAULT
+MULTI_PROJECT: REQUIRED
+FULL_HISTORY_RETENTION: REQUIRED
+AUDITABLE_CHANGES: REQUIRED
+NO_SILENT_HISTORY_LOSS: REQUIRED
+AUTOMATION_FIRST: REQUIRED
+AUTO_STORYBOARD: REQUIRED
+AUTO_SHOT_PLANNING: REQUIRED
+BATCH_GENERATION: REQUIRED
+GUIDED_FLEXIBILITY: REQUIRED
+NEXT_BEST_ACTION_GUIDANCE: REQUIRED
+APPROVAL_GATED_AUTOMATION: REQUIRED
+AUDIO_PRODUCTION_CORE_V1: REQUIRED
+
+LOCAL_AI: DISALLOWED
+CLOUD_AI: REQUIRED
+VIDU: V1 DEFAULT VIDEO PROVIDER BEHIND ADAPTER
+VENDOR_LOCK_IN: DISALLOWED
+ANTIGRAVITY: BOUNDED TO WP010 CORRECTIVE
+CODEX: STOP
 CLAUDE_CODE: STOP
 WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 ```
-
-`LATEST_CORRECTIVE_CODE_HEAD` identifies the latest implementation/corrective code commit known at handoff. Documentation-sync commits may appear after it on PR #25, so every session must fresh-fetch the exact current PR HEAD before review or merge decisions.
-
----
-
-## Repository Governance Now Active
-
-- Root `AGENTS.md` is merged and is the first agent policy router.
-- GitHub Actions backend workflow is merged.
-- `main` is protected by active ruleset `Protect main`.
-- PRs must pass required `backend-tests` before merge.
-- Review conversations must be resolved before merge.
-- Force push and deletion of `main` are blocked.
-- Head branches are automatically deleted after merge.
-- Frontend CI workflow exists in the active WP010 PR and was green at the latest corrective code HEAD.
 
 ---
 
@@ -63,86 +75,67 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 
 | Component / Layer | Status | Notes |
 | :--- | :--- | :--- |
-| Governance & Documentation (P0-WP001) | PASS / CLOSED / MERGED | Foundation plus current `AGENTS.md`, protected `main`, PR/CI workflow. |
+| Governance & Documentation (P0-WP001) | PASS / CLOSED / MERGED | Foundation complete. |
 | Backend Core Framework (P1-WP002) | PASS / CLOSED / MERGED | Backend/database foundation complete. |
 | Object Storage & Asset API (P1-WP003) | PASS / CLOSED / MERGED | S3-compatible asset layer complete. |
 | Document Ingestion Engine (P1-WP004) | PASS / CLOSED / MERGED | PDF/DOCX/PPTX/text ingestion complete. |
-| Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | OpenAI creative generation service complete. |
+| Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | Creative generation service complete behind provider-oriented service boundary. |
 | Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
-| Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | Provider-neutral adapter/queue, idempotency, reconciliation, cancellation and secret safety. |
-| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | PR #19 merged; hybrid shots, ownership validation, lock machine, V1 modes, config inheritance. |
-| Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | PR #23 merged; provider-neutral ledger, budget controls, pricing abstraction, manual adjustments, migration 009. |
-| Mode-Aware Web Workspace (P2-WP010) | WAITING RE-REVIEW | PR #25 corrective code was pushed; both CI workflows were green at that code HEAD; exact current PR HEAD still requires independent review. |
-| Watcher / Dispatcher automation | PAUSED | Not a production execution dependency. |
-
----
-
-## P2-WP010 Review History
-
-Initial independent review at HEAD `291ea773681831a0a68e585eb7e0664902102be3` returned **CHANGES REQUIRED / NOT READY TO MERGE**.
-
-Blocking areas were:
-
-1. destructive hard delete vs full history retention
-2. missing staged Story / Storyboard / Shot Plan / Images / Video review gates
-3. missing state-aware Guided Flexibility / Next Best Action
-4. incomplete multi-project dashboard actions/summaries
-5. placeholder reference/document upload and weak effective-reference visibility
-6. untruthful history/version claims
-7. fabricated audio/provider/config readiness claims
-8. QC states not grounded in backend truth
-9. fake approval semantics through raw status mutation
-10. missing Generate Selected / cost-safe batch confirmation / provider-neutral effective config
-11. incomplete reorder/duplicate/autosave UX
-12. unsafe CORS configuration
-13. additional truthful progress, language and status-validation issues
-
-Antigravity then pushed corrective code commit:
-
-`a687c7adca1bf204767410d51ef0e1cad3ee9436`
-
-Commit message:
-`fix(wp010): address review blockers with soft retention, cost confirmation, staged workflow, and truthful readiness`
-
-Both backend and frontend GitHub Actions were green at this corrective code HEAD.
-
-**Important:** previous blockers are not considered closed merely because a corrective commit and green CI exist. ChatGPT must independently review the exact current PR HEAD, using `a687c7ad...` as the corrective-code baseline and distinguishing later docs-only commits from implementation changes.
+| Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | Durable job control, retries, reconciliation, cancellation and secret safety complete. |
+| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | Hybrid shot engine, lock machine, Core V1 video modes and config inheritance complete. |
+| Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
+| Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | CHANGES REQUIRED | First pass exists in PR #25; corrective required before merge. |
+| Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
 
 ## Locked Product Direction
 
-Orbis Video Studio AI is a cloud-first, provider-independent, reference-driven, shot-based, multi-mode AI video production automation workspace.
+Orbis Video Studio AI is a cloud-first, provider-independent **AI Video Production Orchestrator / Production Control Plane**. It should orchestrate best-of-breed creative, image, video and audio providers rather than reimplement foundation models.
 
-Core V1 modes:
+The system owns production state and control: Project, Story/Scene/Shot structure, references, locks, approvals, history/version lineage, durable jobs, cost/budget, QC, assembly and export.
 
-```text
-STORY
-SHORT
-LOOP
-SCENE
-```
-
-Architecture-ready later only:
+Target guided production flow:
 
 ```text
-PRODUCT
-EXPLAINER
-PRESENTER
-MONTAGE
+Brief / References
+-> Story
+-> Review / Approve
+-> Storyboard
+-> Review / Approve
+-> Shot Plan + Prompts
+-> Review / Approve
+-> Images / Keyframes
+-> Continuity QC
+-> Review / Approve
+-> Video Generation
+-> VO / BGM / SFX / Ambience
+-> Auto Assembly
+-> Final QC
+-> Final Approval
+-> Render / Export
 ```
 
-Story is optional at Project level. Video Mode remains separate from Purpose, Target Platform, Aspect Ratio, and Output Preset.
+Users may stop, review, go back, regenerate selected items, restore previous versions and continue from incomplete work. Full Auto remains an option, but it must never remove safe review/control.
+
+UI principle:
+
+```text
+Simple enough for first-time users
+Powerful enough for advanced users
+Consistent across every screen
+Safe for costly AI actions
+Beautiful but not distracting
+```
 
 ---
 
 ## Next Allowed Action
 
-1. Keep WP006-WP009 closed unless a proven regression exists.
-2. Fresh-fetch PR #25 current HEAD/state/CI/comments.
-3. ChatGPT independently re-review the exact current PR #25 HEAD against Issue #24 and the prior blocking findings, using `a687c7ad...` as the latest known corrective-code baseline.
-4. If PASS: report READY TO MERGE and wait for explicit Owner merge approval.
-5. If findings remain: send only bounded corrective findings back to Antigravity on the SAME branch/PR.
-6. Do not create a replacement PR.
-7. Do not start WP011.
-8. Do not merge until ChatGPT PASS and explicit Owner approval.
+1. Keep WP001-WP009 closed unless a proven regression exists.
+2. Antigravity may work only on the approved WP010 corrective in PR #25.
+3. After a new corrective HEAD is pushed, ChatGPT performs independent review.
+4. Do not merge PR #25 without explicit Owner approval.
+5. Do not start WP011 or any later WP automatically.
+
+Live GitHub/repository truth newer than this document is authoritative.
