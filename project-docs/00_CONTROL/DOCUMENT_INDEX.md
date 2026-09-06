@@ -2,69 +2,81 @@
 
 > **Canonical Document Location:** [`project-docs/00_CONTROL/DOCUMENT_INDEX.md`](project-docs/00_CONTROL/DOCUMENT_INDEX.md)
 
-This index defines the authoritative, canonical document for every domain, rule, architecture, and workflow within Orbis Video Studio AI.
+This index routes each project topic to its canonical documentation source.
 
 ---
 
 ## 00_CONTROL — Project Control Plane
 
-| Topic / Responsibility | Authoritative Canonical Document |
+| Topic / Responsibility | Canonical Document |
 | :--- | :--- |
-| **Mandatory Startup Protocol & Reading Order** | [`project-docs/00_CONTROL/START_HERE.md`](project-docs/00_CONTROL/START_HERE.md) |
-| **Real-time Project State & Execution Flags** | [`project-docs/00_CONTROL/CURRENT_STATE.md`](project-docs/00_CONTROL/CURRENT_STATE.md) |
-| **Active Work Package Specification & Boundaries** | [`project-docs/00_CONTROL/ACTIVE_TASK.md`](project-docs/00_CONTROL/ACTIVE_TASK.md) |
-| **Master Topic Routing Matrix** | [`project-docs/00_CONTROL/DOCUMENT_INDEX.md`](project-docs/00_CONTROL/DOCUMENT_INDEX.md) |
-| **Chat Session Handoff & State Snapshot** | [`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md) |
+| Mandatory Startup Protocol | [`START_HERE.md`](START_HERE.md) |
+| Real-time Project State | [`CURRENT_STATE.md`](CURRENT_STATE.md) |
+| Active Work Package / Next Gate | [`ACTIVE_TASK.md`](ACTIVE_TASK.md) |
+| Master Topic Routing Matrix | [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md) |
+| Chat Session Handoff | [`CHAT_HANDOFF.md`](CHAT_HANDOFF.md) |
+| Copy/Paste Prompt for Next Chat | [`NEXT_CHAT_PROMPT.md`](NEXT_CHAT_PROMPT.md) |
 
 ---
 
 ## 10_GOVERNANCE — Project Governance & Rules
 
-| Topic / Responsibility | Authoritative Canonical Document |
+| Topic / Responsibility | Canonical Document |
 | :--- | :--- |
-| **Roles, Human & AI Authority Hierarchy** | [`project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md`](project-docs/10_GOVERNANCE/AUTHORITY_MODEL.md) |
-| **Scope Lock Boundaries & Out-of-V1 Features** | [`project-docs/10_GOVERNANCE/SCOPE_LOCK.md`](project-docs/10_GOVERNANCE/SCOPE_LOCK.md) |
-| **Human Approval Gates & Cost Control Policy** | [`project-docs/10_GOVERNANCE/APPROVAL_POLICY.md`](project-docs/10_GOVERNANCE/APPROVAL_POLICY.md) |
-| **Documentation Change & RFC Rules** | [`project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md`](project-docs/10_GOVERNANCE/CHANGE_GOVERNANCE.md) |
-| **AI Execution Policy & Bounded Guardrails** | [`project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md`](project-docs/10_GOVERNANCE/AI_EXECUTION_POLICY.md) |
-| **Architectural Decision Records (ADRs)** | [`project-docs/10_GOVERNANCE/DECISION_LOG.md`](project-docs/10_GOVERNANCE/DECISION_LOG.md) |
+| Roles & AI/Human Authority | [`../10_GOVERNANCE/AUTHORITY_MODEL.md`](../10_GOVERNANCE/AUTHORITY_MODEL.md) |
+| Scope Locks | [`../10_GOVERNANCE/SCOPE_LOCK.md`](../10_GOVERNANCE/SCOPE_LOCK.md) |
+| Approval Gates | [`../10_GOVERNANCE/APPROVAL_POLICY.md`](../10_GOVERNANCE/APPROVAL_POLICY.md) |
+| Documentation/RFC Change Rules | [`../10_GOVERNANCE/CHANGE_GOVERNANCE.md`](../10_GOVERNANCE/CHANGE_GOVERNANCE.md) |
+| AI Execution Policy | [`../10_GOVERNANCE/AI_EXECUTION_POLICY.md`](../10_GOVERNANCE/AI_EXECUTION_POLICY.md) |
+| Architecture Decisions | [`../10_GOVERNANCE/DECISION_LOG.md`](../10_GOVERNANCE/DECISION_LOG.md) |
 
 ---
 
-## 20_ARCHITECTURE — Technical & System Architecture
+## 20_ARCHITECTURE — Technical Architecture
 
-| Topic / Responsibility | Authoritative Canonical Document |
+| Topic / Responsibility | Canonical Document |
 | :--- | :--- |
-| **Cloud System Architecture & Component Design** | [`project-docs/20_ARCHITECTURE/SYSTEM_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/SYSTEM_ARCHITECTURE.md) |
-| **Core Domain Entities & Data Schemas** | [`project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md`](project-docs/20_ARCHITECTURE/DOMAIN_MODEL.md) |
-| **Provider Adapter Interface & Vidu Specification** | [`project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md) |
-| **External Integration API, Webhooks & Idempotency** | [`project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md) |
-| **Multi-Output Rendering & Platform Presets** | [`project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md`](project-docs/20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md) |
-| **Portability, Migration, Storage Abstraction & DR** | [`project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md`](project-docs/20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md) |
+| Cloud System Architecture | [`../20_ARCHITECTURE/SYSTEM_ARCHITECTURE.md`](../20_ARCHITECTURE/SYSTEM_ARCHITECTURE.md) |
+| Core Domain Model | [`../20_ARCHITECTURE/DOMAIN_MODEL.md`](../20_ARCHITECTURE/DOMAIN_MODEL.md) |
+| Provider Adapter / Vidu Boundary | [`../20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md`](../20_ARCHITECTURE/PROVIDER_ADAPTER_ARCHITECTURE.md) |
+| External API/Webhook Integration | [`../20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md`](../20_ARCHITECTURE/INTEGRATION_ARCHITECTURE.md) |
+| Multi-Output Rendering | [`../20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md`](../20_ARCHITECTURE/MULTI_OUTPUT_ARCHITECTURE.md) |
+| Portability / Migration / DR | [`../20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md`](../20_ARCHITECTURE/PORTABILITY_AND_MIGRATION.md) |
 
 ---
 
 ## 30_PRODUCT — Product & Feature Models
 
-| Topic / Responsibility | Authoritative Canonical Document |
+| Topic / Responsibility | Canonical Document |
 | :--- | :--- |
-| **Product Vision & Core Principles** | [`project-docs/30_PRODUCT/PRODUCT_VISION.md`](project-docs/30_PRODUCT/PRODUCT_VISION.md) |
-| **V1 Scope Definition & Pass Criteria** | [`project-docs/30_PRODUCT/V1_SCOPE.md`](project-docs/30_PRODUCT/V1_SCOPE.md) |
-| **End-to-End User Production Workflow** | [`project-docs/30_PRODUCT/USER_WORKFLOW.md`](project-docs/30_PRODUCT/USER_WORKFLOW.md) |
-| **Ingestion, Story & Script Engine Model** | [`project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md`](project-docs/30_PRODUCT/STORY_SCRIPT_MODEL.md) |
-| **Reference Asset Library & Consistency Model** | [`project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md`](project-docs/30_PRODUCT/REFERENCE_LIBRARY_MODEL.md) |
-| **Scene/Shot Pipeline, Hybrid Shots & Asset Locking** | [`project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md`](project-docs/30_PRODUCT/SCENE_SHOT_MODEL.md) |
-| **Audio Tracks, Subtitles & Auto-Ducking Model** | [`project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md`](project-docs/30_PRODUCT/AUDIO_EDITING_MODEL.md) |
-| **Output Rendering Presets & Aspect Ratio Model** | [`project-docs/30_PRODUCT/OUTPUT_MODEL.md`](project-docs/30_PRODUCT/OUTPUT_MODEL.md) |
+| Product Vision & Core Principles | [`../30_PRODUCT/PRODUCT_VISION.md`](../30_PRODUCT/PRODUCT_VISION.md) |
+| **Video Production Modes** | [`../30_PRODUCT/VIDEO_PRODUCTION_MODES.md`](../30_PRODUCT/VIDEO_PRODUCTION_MODES.md) |
+| V1 Scope / Pass Criteria | [`../30_PRODUCT/V1_SCOPE.md`](../30_PRODUCT/V1_SCOPE.md) |
+| End-to-End User Workflow | [`../30_PRODUCT/USER_WORKFLOW.md`](../30_PRODUCT/USER_WORKFLOW.md) |
+| Story / Script Model | [`../30_PRODUCT/STORY_SCRIPT_MODEL.md`](../30_PRODUCT/STORY_SCRIPT_MODEL.md) |
+| Reference Library Model | [`../30_PRODUCT/REFERENCE_LIBRARY_MODEL.md`](../30_PRODUCT/REFERENCE_LIBRARY_MODEL.md) |
+| Scene / Shot / Hybrid / Lock Model | [`../30_PRODUCT/SCENE_SHOT_MODEL.md`](../30_PRODUCT/SCENE_SHOT_MODEL.md) |
+| Audio / Subtitle / Ducking | [`../30_PRODUCT/AUDIO_EDITING_MODEL.md`](../30_PRODUCT/AUDIO_EDITING_MODEL.md) |
+| Output / Aspect Ratio Model | [`../30_PRODUCT/OUTPUT_MODEL.md`](../30_PRODUCT/OUTPUT_MODEL.md) |
 
 ---
 
 ## 40_DELIVERY — Work Packages, QA & Delivery
 
-| Topic / Responsibility | Authoritative Canonical Document |
+| Topic / Responsibility | Canonical Document |
 | :--- | :--- |
-| **Work Package Roadmap (P0-WP001 to P4-WP020)** | [`project-docs/40_DELIVERY/WORK_PACKAGES.md`](project-docs/40_DELIVERY/WORK_PACKAGES.md) |
-| **Work Package Acceptance Criteria** | [`project-docs/40_DELIVERY/ACCEPTANCE_CRITERIA.md`](project-docs/40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
-| **Test, Provider Mock & UAT Strategy** | [`project-docs/40_DELIVERY/TEST_UAT_STRATEGY.md`](project-docs/40_DELIVERY/TEST_UAT_STRATEGY.md) |
-| **Risk Register & Mitigation Strategies** | [`project-docs/40_DELIVERY/RISKS_ISSUES.md`](project-docs/40_DELIVERY/RISKS_ISSUES.md) |
-| **Quality, Security & Cost Release Gates** | [`project-docs/40_DELIVERY/RELEASE_GATES.md`](project-docs/40_DELIVERY/RELEASE_GATES.md) |
+| Work Package Roadmap | [`../40_DELIVERY/WORK_PACKAGES.md`](../40_DELIVERY/WORK_PACKAGES.md) |
+| **P2-WP008 Proposal** | [`../40_DELIVERY/P2_WP008_PROPOSAL.md`](../40_DELIVERY/P2_WP008_PROPOSAL.md) |
+| WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
+| Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
+| Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
+| Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
+| WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
+
+---
+
+## Routing Rule
+
+When a task affects project creation, Story/Script routing, Scene/Shot behavior, workflow, UI, generation orchestration, timeline, or export logic, read `VIDEO_PRODUCTION_MODES.md` in addition to the topic-specific document.
+
+Live repository truth newer than documentation remains authoritative for execution status.

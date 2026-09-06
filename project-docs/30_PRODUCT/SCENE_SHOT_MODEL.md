@@ -4,70 +4,113 @@
 
 ---
 
-## 1. Scene & Shot Hierarchy
+## 1. Mode-Aware Scene & Shot Hierarchy
 
-Screenplays are broken into a two-level execution hierarchy:
+Scene and Shot are reusable execution entities across all production modes.
 
+Examples:
+
+```text
+STORY
+PROJECT -> STORY -> SCRIPT -> SCENES -> SHOTS
+
+SHORT
+PROJECT -> HOOK/CONCEPT -> SCENE(S) -> SHOTS
+
+LOOP
+PROJECT -> LOOP SPEC -> SHOT(S)
+
+SCENE
+PROJECT -> ONE LOGICAL SCENE -> 1-N SHOTS
 ```
-PROJECT
-  └── SCENE 01: INT. RESEARCH LAB - DAY
-        ├── SHOT 01.1 [AI_GENERATED via Vidu] (Wide angle lab setup, 4s)
-        ├── SHOT 01.2 [IMPORTED_VIDEO] (Stock footage of microscope lens, 3s)
-        └── SHOT 01.3 [MIXED] (AI generated character keyed over imported background, 5s)
-```
+
+Core Shot logic must not require a complete Story when the selected Video Mode intentionally bypasses it.
 
 ---
 
 ## 2. Hybrid Shot Taxonomy
 
-Every shot in a project is classified under the **Hybrid Shot Workflow**, allowing complete flexibility:
-
-| Shot Classification | Source / Method | Provider / Pipeline |
+| Shot Classification | Source / Method | Pipeline |
 | :--- | :--- | :--- |
-| **`AI_GENERATED`** | Synthesized from prompt + reference images. | Default Vidu Provider Adapter. |
-| **`IMPORTED_VIDEO`** | Raw MP4/MOV clip uploaded by user. | Directly placed on timeline (bypasses AI gen). |
-| **`IMPORTED_IMAGE`** | Static image (PNG/JPG) uploaded by user. | Rendered with subtle pan/zoom motion. |
-| **`RECORDED_FOOTAGE`** | Camera or screen recording uploaded by user. | Directly placed on timeline. |
-| **`STOCK_ASSET`** | Sourced from stock media provider. | Downloaded to object storage and attached to shot. |
-| **`MIXED`** | Combination (e.g. AI foreground + imported background). | Composited during timeline pre-render. |
+| `AI_GENERATED` | Prompt + references | Provider-neutral generation service / WP007 durable queue |
+| `IMPORTED_VIDEO` | Uploaded MP4/MOV clip | Existing Asset/object-storage path |
+| `IMPORTED_IMAGE` | Uploaded image | Asset path; later timeline motion treatment where applicable |
+| `RECORDED_FOOTAGE` | Camera/screen recording | Existing Asset/object-storage path |
+| `STOCK_ASSET` | Sourced stock media | Ingest into governed storage before normal use |
+| `MIXED` | Combination of generated/imported elements | Composition/timeline path; provider-specific logic remains isolated |
+
+AI-generated Shot services must not call Vidu directly; they dispatch through the provider-neutral boundary established by WP007.
 
 ---
 
-## 3. Asset Locking State Machine
-
-To prevent accidental regeneration or overwrite of approved production elements, entities support granular **LOCK** states.
+## 3. Asset Lock State Machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> UNLOCKED: Creation
-    UNLOCKED --> LOCKED: User / Agent Approval
-    LOCKED --> UNLOCKED: User Explicit Unlock Prompt
-    
+    [*] --> UNLOCKED
+    UNLOCKED --> LOCKED: Explicit approval / lock
+    LOCKED --> UNLOCKED: Explicit unlock
+
     state UNLOCKED {
         [*] --> Editable
-        Editable --> RegenerateAllowed: AI Trigger
+        Editable --> RegenerationAllowed
     }
-    
+
     state LOCKED {
-        [*] --> ReadOnly
-        ReadOnly --> BlockedOverwrites: Protection Active
+        [*] --> Protected
+        Protected --> MutationBlocked
     }
 ```
 
-### Lockable Entities
-- **Script Lock:** Prevents screenplay text re-generation.
-- **Scene Lock:** Prevents scene heading, location reference, or shot ordering changes.
-- **Shot Lock:** Protects prompt, motion parameters, and generated video clip URL from overwrite.
-- **Character Lock:** Locks character appearance images and voice profile.
-- **Timing Lock:** Prevents timeline start/end clip trimming changes.
+Lockable targets may include:
+- Script
+- Scene
+- Shot
+- Character
+- Location
+- Voice
+- Timing
+
+Rules:
+- locked entities cannot be silently overwritten or regenerated
+- unlock is explicit and auditable
+- compound operations affecting a locked dependency fail closed
+- locks must remain compatible with selective regeneration and mode-specific workflows
 
 ---
 
-## 4. Selective Regeneration Engine
+## 4. Configuration Inheritance
 
-When a user requests video regeneration:
-1. System filters target shots requested by user.
-2. Evaluates the `is_locked` status of each target shot.
-3. **If `LOCKED`:** Regeneration is BLOCKED. User must explicitly unlock the shot first.
-4. **If `UNLOCKED`:** System dispatches job to Vidu Provider Adapter.
-5. Unaffected shots are untouched, preserving budget and generation state.
+```text
+Project
+  ↓
+Scene
+  ↓
+Shot
+```
+
+Mode defaults begin at Project level. Scene and Shot overrides are allowed only where validation and lock rules permit them.
+
+---
+
+## 5. Selective Regeneration Compatibility
+
+The later selective-regeneration service will:
+1. identify target shots
+2. reject locked targets/dependencies
+3. preserve unaffected shots
+4. dispatch only eligible AI-generated work through the provider-neutral queue
+5. avoid unnecessary project-wide regeneration
+
+WP008 may establish the lock/hybrid foundations but must not silently absorb WP011 implementation scope.
+
+---
+
+## 6. WP008 Routing
+
+P2-WP008 is the earliest planned implementation point for:
+- Hybrid Shot Engine
+- Asset Lock Machine
+- base Video Mode configuration for STORY / SHORT / LOOP / SCENE
+
+Status remains **PROPOSED / NOT AUTHORIZED** until explicit Owner approval.

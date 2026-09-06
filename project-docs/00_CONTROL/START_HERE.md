@@ -6,41 +6,89 @@
 
 ## 1. Startup Reading Sequence
 
-EVERY new chat session, AI agent, or execution engine MUST read the following documents in exact order before performing any operations or reading other repository files:
+Every new chat session, AI agent or execution engine MUST read in this order before doing project work:
 
-1. **[`project-docs/00_CONTROL/START_HERE.md`](project-docs/00_CONTROL/START_HERE.md)** — Mandatory session startup protocol & governance rules (This document).
-2. **[`project-docs/00_CONTROL/CURRENT_STATE.md`](project-docs/00_CONTROL/CURRENT_STATE.md)** — Real-time project phase, execution status, and authority state flags.
-3. **[`project-docs/00_CONTROL/ACTIVE_TASK.md`](project-docs/00_CONTROL/ACTIVE_TASK.md)** — Boundaries, requirements, and stop conditions of the current Work Package.
-4. **[`project-docs/00_CONTROL/DOCUMENT_INDEX.md`](project-docs/00_CONTROL/DOCUMENT_INDEX.md)** — Domain-to-document routing matrix.
-5. **[`project-docs/00_CONTROL/CHAT_HANDOFF.md`](project-docs/00_CONTROL/CHAT_HANDOFF.md)** — Session resume protocol, `HANDOFF_BASE_SHA` context, and handoff state (required when resuming existing work).
-6. **Routed Domain Documents** — Read only specific topic documents routed by `DOCUMENT_INDEX.md` relevant to the active task.
+1. `project-docs/00_CONTROL/START_HERE.md`
+2. `project-docs/00_CONTROL/CURRENT_STATE.md`
+3. `project-docs/00_CONTROL/ACTIVE_TASK.md`
+4. `project-docs/00_CONTROL/DOCUMENT_INDEX.md`
+5. `project-docs/00_CONTROL/CHAT_HANDOFF.md`
+6. Routed domain documents relevant to the active task only
 
----
+For any work touching project creation, Story/Script routing, Scene/Shot behavior, workflow, UI, generation orchestration, timeline or export logic, also read:
 
-## 2. Core Governance Rules
-
-### Live Branch HEAD & Repository Truth Rule
-- Every new or resumed session MUST fresh-fetch the live branch HEAD (`git rev-parse HEAD`). Live Git/GitHub repository state is the single source of truth.
-- `HANDOFF_BASE_SHA` in handoff documents provides historical baseline context recording the commit prior to handoff updates. Mismatch with live HEAD after handoff commits is expected and normal. Never commit recursive SHA update loops.
-- If repository truth proves a document stale, update documentation **ONLY** if that update falls within the currently authorized Work Package (WP).
-
-### Bounded Execution Rule
-- AI execution engines (Antigravity) MUST NOT exceed the scope of the currently authorized Work Package.
-- Code implementation, frontend/backend logic, cloud resource provisioning, Vidu API calls, secret provisioning, and deployments are strictly prohibited unless explicitly authorized in the active WP.
-
-### Authority Hierarchy
-- **Project Owner:** Final human authority.
-- **ChatGPT:** Control Plane / Project Lead / System Architect / Independent Reviewer.
-- **Antigravity:** Low-Credit / Bounded Execution Plane.
-- **Codex / Claude Code:** STOP / Inactive.
+`project-docs/30_PRODUCT/VIDEO_PRODUCTION_MODES.md`
 
 ---
 
-## 3. Immediate Action Requirements
+## 2. Repository Truth
 
-Upon starting a session:
-1. Fresh-fetch live branch HEAD from Git.
-2. Verify `CURRENT_STATE.md` to confirm the active Work Package.
-3. Check `ACTIVE_TASK.md` for explicit constraints and stop conditions.
-4. Check `CHAT_HANDOFF.md` for historical handoff context and review status.
-5. Do NOT start any unauthorized tasks.
+- Fresh-fetch live Git/GitHub HEAD before stating status.
+- Live repository truth newer than documentation is authoritative.
+- Historical handoff/base SHAs are context, not a reason to overwrite newer repository truth.
+- Closed WPs must not be reopened without a proven regression.
+
+---
+
+## 3. Bounded Execution
+
+No execution engine may exceed the currently authorized Work Package.
+
+If `ACTIVE_WORK_PACKAGE = NONE`, application-code implementation is prohibited until the Owner explicitly authorizes a new WP.
+
+Do not auto-start the next WP after a merge.
+
+---
+
+## 4. Authority Model
+
+```text
+Project Owner = final human authority / UAT / merge approval
+ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
+Antigravity = low-credit bounded Execution Plane when explicitly authorized
+Codex = STOP by default
+Claude Code = STOP
+```
+
+ChatGPT may manage GitHub Issues, PR metadata/comments and documentation branches where permitted, but direct `main` writes and merges remain governed by Owner approval.
+
+---
+
+## 5. Multi-Mode Rule
+
+Orbis is a multi-mode video production platform.
+
+Core V1 modes:
+
+```text
+STORY
+SHORT
+LOOP
+SCENE
+```
+
+Do not assume Story or Script is mandatory for every Project.
+
+Architecture-ready future modes:
+
+```text
+PRODUCT
+EXPLAINER
+PRESENTER
+MONTAGE
+```
+
+Architecture readiness does not authorize implementation.
+
+---
+
+## 6. Immediate Startup Actions
+
+1. Fetch current `main` and active feature branch/PR if one exists.
+2. Read `CURRENT_STATE.md` and `ACTIVE_TASK.md`.
+3. Confirm whether any WP is actually authorized.
+4. Read only directly relevant routed documents.
+5. Do not repeat completed work.
+6. Do not merge or start another WP without Owner authorization.
+
+The local Antigravity watcher/dispatcher is currently PAUSED and is not a production execution dependency.

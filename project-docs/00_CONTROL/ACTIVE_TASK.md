@@ -4,48 +4,74 @@
 
 ---
 
-## Active Work Package Details
+## Active Work Package
 
-- **Active Work Package:** `P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue`
-- **Current Gate:** `CHATGPT INDEPENDENT REVIEW`
-- **Status:** **IMPLEMENTED / WAITING CHATGPT REVIEW**
-- **Authorized Agent:** Codex (Owner-authorized WP007 final corrective; stopped after delivery)
-- **Authority / Oversight:** ChatGPT (Control Plane / Architect), Project Owner (Final Human Authority)
+```text
+NONE
+```
 
----
+P2-WP007 has passed independent review, received Owner merge approval, and was merged via PR #15.
 
-## Task Objectives
-
-Implement Vidu Provider Adapter & Durable Job Dispatch Queue:
-1. **Provider Abstraction:** `IVideoGenerationProviderAdapter`, `VideoGenerationParams`, `ProviderJobResult`, `ProviderFactory`.
-2. **Vidu Provider Adapter:** `ViduProviderAdapter` aligned with official Vidu v2 API (`Token` auth, explicit `text2video` and `reference2video` mappings, creations status polling, cancel).
-3. **Durable DB Job Queue:** Real DB-backed atomic claim, restart recovery, retry classification (network/429/5xx retry vs 400/401/403/rejection no-retry), bounded retry and bounded polling, no Redis/Celery.
-4. **Idempotency & Concurrency:** DB-level uniqueness constraint on `(shot_id, idempotency_key)`, safe race handling, no duplicate provider submission after restart.
-5. **Secret & Error Safety:** Sanitization of keys/tokens/credentials in logs, errors, and DB results; no raw provider payloads persisted blindly.
-6. **Output Asset Safety:** Provider output URL kept in job/result; no fabricated Asset records with zero file size or dummy checksums.
-7. **Migrations & Tests:** New migration `007_queue_safety`; upgrade / downgrade -1 / upgrade passed on SQLite and PostgreSQL 16.11. Full backend: 101 passed; WP007 suite with PostgreSQL-backed concurrency/recovery fixtures: 53 passed. HTTP is mocked only.
-8. **Final Corrective Safety:** Persisted claim token/lease ownership, atomic submission attempt fencing, `RECONCILIATION_REQUIRED` for ambiguous submissions, durable retry/poll schedules, nested secret rejection and provider result allowlisting, provider-neutral cancel API.
-
-Evidence and operational limits: [`WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md).
+```text
+P2-WP007 = PASS / CLOSED / MERGED
+Reviewed feature HEAD = 5a03d4d7f56ac8ae39a78914276610c0512da78b
+Merge commit = 9cb098dea7fc2948b023ad48163c729f566573a7
+```
 
 ---
 
-## Strictly Enforced Constraints
+## Next Candidate Work Package
 
-> [!CAUTION]
-> **BOUNDED EXECUTION & SCOPE PROTECTION**
-> 
-> The following actions are STRICTLY PROHIBITED in P2-WP007:
-> - Starting P2-WP008 or any subsequent Work Package
-> - Using live Vidu credits / making live unmocked HTTP requests
-> - Introducing Redis, Celery, or external queue brokers
-> - Implementing frontend or web UI components
-> - Merging PR automatically or force pushing
+**P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration**
+
+Status:
+
+```text
+PROPOSED / NOT AUTHORIZED
+```
+
+No implementation agent is authorized to start WP008 yet.
+
+### Proposed objective
+
+Establish the provider-neutral shot execution and locking layer needed by multiple production modes while preserving the existing Story workflow.
+
+Candidate core scope:
+
+1. Hybrid shot source model: AI generated, imported video, imported image, recorded footage, stock asset and mixed composition.
+2. Granular lock state machine for Script / Scene / Shot / Character / Location / Voice / Timing where applicable.
+3. Provider-neutral base `video_mode` model and mode configuration.
+4. Initial V1 modes: `STORY`, `SHORT`, `LOOP`, `SCENE`.
+5. Story becomes optional at Project level where the selected mode does not require it.
+6. Configuration inheritance remains Project -> Scene -> Shot.
+7. Preserve WP006 Reference Library and WP007 provider/queue boundaries.
+
+Strictly not authorized merely by this proposal:
+
+- PRODUCT / EXPLAINER / PRESENTER / MONTAGE implementation
+- frontend workspace implementation
+- cost ledger (WP009)
+- selective regeneration service (WP011)
+- audio/TTS/subtitles
+- timeline/render work
+- production deployment
 
 ---
 
-## Next Allowed Actions
+## Current Execution Roles
 
-1. ChatGPT Independent Review of P2-WP007 PR #15.
-2. Project Owner review and sign-off.
+```text
+Owner = final human authority / UAT / merge approval
+ChatGPT = Control Plane / Architect / Independent Reviewer
+Antigravity = STOP until explicitly authorized for the next bounded implementation
+Codex = STOP
+Claude Code = STOP
+```
 
+The local GitHub watcher/dispatcher remains PAUSED and must not be treated as a production execution dependency.
+
+---
+
+## Next Allowed Action
+
+Owner may review and explicitly authorize P2-WP008. Until then: documentation/review only, no WP008 application-code implementation.
