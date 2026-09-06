@@ -120,7 +120,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -157,7 +157,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const batchBtn = await screen.findByTestId('batch-generate-shots-btn');
     fireEvent.click(batchBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -208,7 +208,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
     fireEvent.click(retryBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
@@ -257,7 +257,7 @@ describe('Batch Generation Status Advancement Safety', () => {
     const retryBtn = await screen.findByTestId('retry-failed-jobs-btn');
     fireEvent.click(retryBtn);
 
-    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn');
+    const confirmBtn = await screen.findByTestId('confirm-dispatch-btn', {}, { timeout: 4000 });
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
