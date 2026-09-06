@@ -87,16 +87,57 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {(['DRAFT', 'READY_FOR_REVIEW', 'APPROVED', 'LOCKED', 'NEEDS_ATTENTION'] as ApprovalStatus[]).map((st) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Current Stage:</span>
+            <span className="badge badge-primary" style={{ fontSize: '0.75rem', padding: '4px 8px' }}>
+              {project.status.replace(/_/g, ' ')}
+            </span>
+
+            {project.status === 'STORY_GENERATED' && (
               <button
-                key={st}
-                className={`btn btn-sm ${project.status === st ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onUpdateStatus(st)}
+                className="btn btn-sm btn-primary"
+                onClick={() => onUpdateStatus('STORY_APPROVED')}
+                data-testid="qc-approve-story-btn"
               >
-                {st.replace(/_/g, ' ')}
+                Approve Story & Proceed
               </button>
-            ))}
+            )}
+            {project.status === 'STORYBOARD_GENERATED' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => onUpdateStatus('STORYBOARD_APPROVED')}
+                data-testid="qc-approve-storyboard-btn"
+              >
+                Approve Storyboard & Proceed
+              </button>
+            )}
+            {project.status === 'SHOT_PLAN_GENERATED' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => onUpdateStatus('SHOT_PLAN_APPROVED')}
+                data-testid="qc-approve-shot-plan-btn"
+              >
+                Approve Shot Plan & Proceed
+              </button>
+            )}
+            {project.status === 'FINAL_REVIEW' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => onUpdateStatus('APPROVED')}
+                data-testid="qc-approve-final-cut-btn"
+              >
+                Approve Final Cut
+              </button>
+            )}
+            {project.status === 'APPROVED' && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => onUpdateStatus('COMPLETED')}
+                data-testid="qc-complete-project-btn"
+              >
+                Mark Completed
+              </button>
+            )}
           </div>
         </div>
 
@@ -164,10 +205,10 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
           <History size={20} color="#818cf8" />
           <div>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
-              Generation Dispatch Audit Log & Discovered Assets
+              Generation Dispatch Audit Log
             </h3>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Full historical log of generation dispatches and output assets per shot. Full asset provenance is preserved across retries.
+              Audit log of dispatched generation jobs and output assets for this project.
             </p>
           </div>
         </div>

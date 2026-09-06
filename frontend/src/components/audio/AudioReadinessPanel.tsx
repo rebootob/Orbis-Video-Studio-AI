@@ -11,29 +11,29 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
       id: 'vo',
       name: 'Voiceover (VO) / Dialogue Stem',
       icon: <Mic size={18} color="#818cf8" />,
-      status: 'Architectural Allocation Ready',
-      desc: 'Schema track slot allocated to receive synthesized narration or recorded speech once audio provider is integrated.',
+      status: 'Planned Blueprint',
+      desc: 'Conceptual track blueprint for synthesized narration or speech once audio provider integration is implemented in a future package.',
     },
     {
       id: 'bgm',
       name: 'Background Score / Music Track',
       icon: <Music size={18} color="#fbbf24" />,
-      status: 'Timing Alignment Ready',
-      desc: 'Music track blueprint mapped to total shot timeline and cut markers.',
+      status: 'Planned Blueprint',
+      desc: 'Conceptual music track blueprint for timeline synchronization and cut markers.',
     },
     {
       id: 'sfx',
       name: 'Sound Effects (SFX)',
       icon: <Sparkles size={18} color="#34d399" />,
-      status: 'Cue Slot Allocation',
-      desc: 'Action-specific sound design cues aligned with individual shot action blueprints.',
+      status: 'Planned Blueprint',
+      desc: 'Conceptual action-specific sound design cues aligned with individual shot action blueprints.',
     },
     {
       id: 'ambience',
       name: 'Environmental Room Tone & Ambience',
       icon: <Wind size={18} color="#22d3ee" />,
-      status: 'Setting Context Mapped',
-      desc: 'Atmospheric audio layer derived from scene setting descriptions.',
+      status: 'Planned Blueprint',
+      desc: 'Conceptual atmospheric audio layer derived from scene setting descriptions.',
     },
   ];
 
@@ -52,10 +52,10 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
         <Volume2 size={20} color="#818cf8" />
         <div>
           <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
-            Audio Production Readiness (Core V1 Architecture)
+            Audio Production Readiness (Planned Capability)
           </h3>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Provider-neutral audio stem schema and track layout ready for future audio rendering integration
+            Architecture blueprint for multi-stem audio layout. Note: Backend audio services, track schemas, and timeline mapping are planned for future work packages and are not yet implemented in V1.
           </p>
         </div>
       </div>
@@ -77,11 +77,11 @@ export const AudioReadinessPanel: React.FC<AudioReadinessPanelProps> = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Sliders size={16} color="#818cf8" />
           <span>
-            <strong>Audio Pipeline Allocation:</strong> 4-stem layout (VO, BGM, SFX, Ambience) prepared for pluggable audio engine
+            <strong>Audio Pipeline Allocation:</strong> 4-stem layout (VO, BGM, SFX, Ambience) prepared for future pluggable audio engine
           </span>
         </div>
         <span className="badge badge-draft" style={{ fontSize: '0.7rem' }}>
-          Schema Ready
+          Blueprint (Planned)
         </span>
       </div>
 

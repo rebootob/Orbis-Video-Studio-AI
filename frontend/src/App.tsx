@@ -120,8 +120,10 @@ export const App: React.FC = () => {
     if (file) {
       try {
         await api.uploadAsset(created.id, file, 'DOCUMENT', file.name);
-      } catch (uploadErr) {
-        console.warn('Initial document upload skipped:', uploadErr);
+      } catch (uploadErr: any) {
+        alert(
+          `Project "${created.title}" was created, but uploading reference document "${file.name}" failed: ${uploadErr.message || 'Upload error'}. You can re-upload it from the Continuity Bibles tab.`
+        );
       }
     }
     await loadProjects();
@@ -169,15 +171,31 @@ export const App: React.FC = () => {
     await loadProjects();
   };
 
-  // High-Level Automation: Generate Full Storyboard
-  const handleGenerateFullStoryboard = async () => {
+  // Stage Generator: Story (STORY mode only)
+  const handleGenerateStory = async () => {
     if (!selectedProject) return;
     try {
-      setAutomationStep('Creating Story Brief & Act Structure...');
-      await new Promise((r) => setTimeout(r, 400));
-      setAutomationStep('Planning Scenes & Camera Setups...');
+      setAutomationStep('Generating Story Brief & Narrative Outline...');
       await api.generateProjectStory(selectedProject.id);
-      setAutomationStep('Building Visual Storyboard & Shot Prompts...');
+      await api.updateProject(selectedProject.id, { status: 'STORY_GENERATED' });
+      await loadWorkspaceData(selectedProject);
+      setSelectedProject({ ...selectedProject, status: 'STORY_GENERATED' });
+      await loadProjects();
+    } catch (err: any) {
+      alert(`Story generation failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
+  // Stage Generator: Storyboard (Scenes & Shot Structure)
+  const handleGenerateStoryboard = async () => {
+    if (!selectedProject) return;
+    try {
+      setAutomationStep('Generating Storyboard Scenes & Layout...');
+      if (scenes.length === 0) {
+        await api.generateProjectStory(selectedProject.id);
+      }
       await api.updateProject(selectedProject.id, { status: 'STORYBOARD_GENERATED' });
       await loadWorkspaceData(selectedProject);
       setSelectedProject({ ...selectedProject, status: 'STORYBOARD_GENERATED' });
@@ -186,6 +204,40 @@ export const App: React.FC = () => {
       alert(`Storyboard generation failed: ${err.message}`);
     } finally {
       setAutomationStep(null);
+    }
+  };
+
+  // Stage Generator: Detailed Shot Plan & Prompts
+  const handleGenerateShotPlan = async () => {
+    if (!selectedProject) return;
+    try {
+      setAutomationStep('Formulating Detailed Shot Plan & Prompts...');
+      for (const shot of shots) {
+        if (!shot.visual_prompt && !shot.video_prompt) {
+          await api.updateShot(shot.id, {
+            visual_prompt: `Detailed cinematic camera setup for shot #${shot.shot_number}`,
+            video_prompt: `Dynamic motion and lighting for shot #${shot.shot_number}`,
+          });
+        }
+      }
+      await api.updateProject(selectedProject.id, { status: 'SHOT_PLAN_GENERATED' });
+      await loadWorkspaceData(selectedProject);
+      setSelectedProject({ ...selectedProject, status: 'SHOT_PLAN_GENERATED' });
+      await loadProjects();
+    } catch (err: any) {
+      alert(`Shot plan generation failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
+  // High-Level Automation: Generate Storyboard according to mode
+  const handleGenerateFullStoryboard = async () => {
+    if (!selectedProject) return;
+    if (selectedProject.video_mode === 'STORY') {
+      await handleGenerateStory();
+    } else {
+      await handleGenerateStoryboard();
     }
   };
 
@@ -384,17 +436,22 @@ export const App: React.FC = () => {
   const handleNextBestAction = (action: string) => {
     switch (action) {
       case 'GENERATE_STORY':
-      case 'GENERATE_STORYBOARD':
-        handleGenerateFullStoryboard();
+        handleGenerateStory();
         break;
       case 'APPROVE_STORY':
-        handleUpdateStatus('STORY_APPROVED' as any);
+        handleUpdateStatus('STORY_APPROVED');
+        break;
+      case 'GENERATE_STORYBOARD':
+        handleGenerateStoryboard();
         break;
       case 'APPROVE_STORYBOARD':
-        handleUpdateStatus('STORYBOARD_APPROVED' as any);
+        handleUpdateStatus('STORYBOARD_APPROVED');
         break;
       case 'GENERATE_SHOT_PLAN':
-        handleUpdateStatus('SHOT_PLAN_APPROVED' as any);
+        handleGenerateShotPlan();
+        break;
+      case 'APPROVE_SHOT_PLAN':
+        handleUpdateStatus('SHOT_PLAN_APPROVED');
         break;
       case 'BATCH_GENERATE':
         setActiveTab('storyboard');
@@ -403,7 +460,7 @@ export const App: React.FC = () => {
         setActiveTab('queue');
         break;
       case 'APPROVE_PROJECT':
-        handleUpdateStatus('COMPLETED' as any);
+        handleUpdateStatus('COMPLETED');
         break;
       case 'VIEW_QC':
         setActiveTab('qc');

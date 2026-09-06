@@ -5,7 +5,7 @@ import {
   Lock,
   Unlock,
   Play,
-  Trash2,
+  Archive,
   Save,
   CheckCircle2,
   Clock,
@@ -66,6 +66,15 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
     if (!shot?.is_locked) {
       setSaveStatus('DIRTY');
     }
+  };
+
+  const handleSafeClose = () => {
+    if (saveStatus === 'DIRTY') {
+      if (!confirm('You have unsaved changes in this shot. Discard changes and close?')) {
+        return;
+      }
+    }
+    onClose();
   };
 
   if (!shot) return null;
@@ -145,7 +154,7 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
             </span>
           )}
         </div>
-        <button className="btn btn-xs btn-outline" onClick={onClose}>
+        <button className="btn btn-xs btn-outline" onClick={handleSafeClose} data-testid="shot-drawer-close-btn" title="Close drawer">
           <X size={16} />
         </button>
       </div>
@@ -344,16 +353,18 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         }}
       >
         <button
-          className="btn btn-xs btn-danger"
+          className="btn btn-xs btn-outline"
           onClick={async () => {
-            if (confirm(`Delete Shot #${shot.shot_number}?`)) {
+            if (confirm(`Archive Shot #${shot.shot_number}? Shot record and assets will be safely retained in history.`)) {
               await onDeleteShot(shot.id);
               onClose();
             }
           }}
           disabled={shot.is_locked}
+          data-testid="archive-shot-btn"
+          title="Archive Shot (Retains history)"
         >
-          <Trash2 size={14} /> Delete
+          <Archive size={14} /> Archive
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

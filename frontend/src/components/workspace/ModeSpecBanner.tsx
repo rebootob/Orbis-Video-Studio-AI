@@ -42,23 +42,44 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
     }
   };
 
-  // Staged workflow progression
-  const stages = [
-    { key: 'STORY', label: 'Story' },
-    { key: 'STORYBOARD', label: 'Storyboard' },
-    { key: 'SHOT_PLAN', label: 'Shot Plan' },
-    { key: 'IMAGES', label: 'Images' },
-    { key: 'VIDEO', label: 'Video' },
-  ];
+  const isStoryMode = mode === 'STORY';
+
+  // Staged workflow progression: STORY requires Story stage; SHORT/LOOP/SCENE bypass Story stage
+  const stages = isStoryMode
+    ? [
+        { key: 'BRIEF', label: 'Brief' },
+        { key: 'STORY', label: 'Story' },
+        { key: 'STORYBOARD', label: 'Storyboard' },
+        { key: 'SHOT_PLAN', label: 'Shot Plan' },
+        { key: 'IMAGES', label: 'Images' },
+        { key: 'VIDEO', label: 'Video' },
+      ]
+    : [
+        { key: 'BRIEF', label: 'Brief' },
+        { key: 'STORYBOARD', label: 'Storyboard' },
+        { key: 'SHOT_PLAN', label: 'Shot Plan' },
+        { key: 'IMAGES', label: 'Images' },
+        { key: 'VIDEO', label: 'Video' },
+      ];
 
   const getActiveStageIndex = (st: string) => {
     const s = st.toUpperCase();
-    if (s === 'DRAFT' || s === 'STORY_GENERATED' || s === 'STORY_APPROVED') return 0;
-    if (s === 'STORYBOARD_GENERATED' || s === 'STORYBOARD_APPROVED') return 1;
-    if (s === 'SHOT_PLAN_GENERATED' || s === 'SHOT_PLAN_APPROVED') return 2;
-    if (s === 'IMAGES_GENERATED') return 3;
-    if (s === 'VIDEO_IN_PROGRESS' || s === 'FINAL_REVIEW' || s === 'APPROVED' || s === 'COMPLETED') return 4;
-    return 1;
+    if (isStoryMode) {
+      if (s === 'DRAFT') return 0;
+      if (s === 'STORY_GENERATED' || s === 'STORY_APPROVED') return 1;
+      if (s === 'STORYBOARD_GENERATED' || s === 'STORYBOARD_APPROVED') return 2;
+      if (s === 'SHOT_PLAN_GENERATED' || s === 'SHOT_PLAN_APPROVED') return 3;
+      if (s === 'IMAGES_GENERATED') return 4;
+      if (s === 'VIDEO_IN_PROGRESS' || s === 'FINAL_REVIEW' || s === 'APPROVED' || s === 'COMPLETED') return 5;
+      return 0;
+    } else {
+      if (s === 'DRAFT') return 0;
+      if (s === 'STORYBOARD_GENERATED' || s === 'STORYBOARD_APPROVED') return 1;
+      if (s === 'SHOT_PLAN_GENERATED' || s === 'SHOT_PLAN_APPROVED') return 2;
+      if (s === 'IMAGES_GENERATED') return 3;
+      if (s === 'VIDEO_IN_PROGRESS' || s === 'FINAL_REVIEW' || s === 'APPROVED' || s === 'COMPLETED') return 4;
+      return 0;
+    }
   };
 
   const activeStageIdx = getActiveStageIndex(status);
@@ -66,46 +87,69 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
   // Determine Next Best Action Guidance
   const getNextBestAction = () => {
     const s = status.toUpperCase();
+
     if (s === 'DRAFT') {
+      if (isStoryMode) {
+        return {
+          action: 'GENERATE_STORY',
+          label: 'Generate Story Brief',
+          reason: 'Initialize story outline, narrative beats, and scene breakdown from your project prompt.',
+          ctaClass: 'btn-primary',
+        };
+      }
       return {
-        action: 'GENERATE_STORY',
-        label: 'Generate Story Brief',
-        reason: 'Initialize story outline, narrative beats, and scene breakdown from your project prompt.',
+        action: 'GENERATE_STORYBOARD',
+        label: 'Create Storyboard & Scenes',
+        reason: 'Generate visual scenes and shot breakdown directly for this mode (Story stage bypassed).',
         ctaClass: 'btn-primary',
       };
     }
+
     if (s === 'STORY_GENERATED') {
       return {
         action: 'APPROVE_STORY',
         label: 'Review & Approve Story',
-        reason: 'Story brief is ready. Review tone, theme, and acts to approve moving to storyboard.',
+        reason: 'Story brief is ready. Inspect narrative outline and approve story before generating scenes.',
         ctaClass: 'btn-primary',
       };
     }
+
     if (s === 'STORY_APPROVED') {
       return {
         action: 'GENERATE_STORYBOARD',
-        label: 'Generate Storyboard',
-        reason: 'Story is approved. Generate visual storyboard scenes and shot breakdowns.',
+        label: 'Generate Storyboard Scenes',
+        reason: 'Story is approved. Generate scene breakdown and camera setups.',
         ctaClass: 'btn-primary',
       };
     }
+
     if (s === 'STORYBOARD_GENERATED') {
       return {
         action: 'APPROVE_STORYBOARD',
         label: 'Review & Approve Storyboard',
-        reason: 'Storyboard scenes populated. Confirm scene structure before detailing shot plan.',
+        reason: 'Storyboard scenes populated. Inspect scene structure before detailing shot plan.',
         ctaClass: 'btn-primary',
       };
     }
+
     if (s === 'STORYBOARD_APPROVED') {
       return {
         action: 'GENERATE_SHOT_PLAN',
-        label: 'Finalize Shot Plan',
-        reason: 'Storyboard approved. Lock prompts, camera angles, and durations for all planned shots.',
+        label: 'Generate Detailed Shot Plan',
+        reason: 'Storyboard approved. Generate and lock visual/video prompts and actions for all shots.',
         ctaClass: 'btn-primary',
       };
     }
+
+    if (s === 'SHOT_PLAN_GENERATED') {
+      return {
+        action: 'APPROVE_SHOT_PLAN',
+        label: 'Review & Approve Shot Plan',
+        reason: 'Inspect shot prompts, camera angles, and durations in grid/drawer to approve for production.',
+        ctaClass: 'btn-primary',
+      };
+    }
+
     if (s === 'SHOT_PLAN_APPROVED' || (shotCount > 0 && completedShotCount < shotCount)) {
       return {
         action: 'BATCH_GENERATE',
@@ -114,6 +158,7 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
         ctaClass: 'btn-primary',
       };
     }
+
     if (s === 'VIDEO_IN_PROGRESS') {
       return {
         action: 'MONITOR_QUEUE',
@@ -122,6 +167,7 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
         ctaClass: 'btn-secondary',
       };
     }
+
     if (s === 'FINAL_REVIEW') {
       return {
         action: 'APPROVE_PROJECT',
@@ -130,7 +176,8 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
         ctaClass: 'btn-primary',
       };
     }
-    if (s === 'COMPLETED') {
+
+    if (s === 'COMPLETED' || s === 'APPROVED') {
       return {
         action: 'VIEW_QC',
         label: 'Project Completed',
@@ -138,6 +185,7 @@ export const ModeSpecBanner: React.FC<ModeSpecBannerProps> = ({
         ctaClass: 'btn-secondary',
       };
     }
+
     return {
       action: 'BATCH_GENERATE',
       label: 'Batch Generate Video',

@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.schemas.generation_job import JobCreateRequest, JobResponse, ClaimResponse, DispatchRequest
 from app.services.job_dispatch import JobDispatchService
 from app.services.pricing import ProviderPricingService, CostStatus
+from app.providers.factory import ProviderFactory
 from app.models.generation_job import GenerationJob
 from app.models.project import Project
 from app.models.scene import Scene
@@ -168,8 +169,12 @@ def estimate_project_batch_jobs(
 
     candidate_shots = []
     for scene in scenes:
+        if (scene.scene_config or {}).get("archived"):
+            continue
         shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
         for shot in shots:
+            if shot.status == "ARCHIVED":
+                continue
             if req.shot_ids is not None and shot.id not in req.shot_ids:
                 continue
             if shot.is_locked:
@@ -191,7 +196,7 @@ def estimate_project_batch_jobs(
 
     total_cost = 0.0
     has_unknown = False
-    provider = req.provider_name or "vidu"
+    provider = req.provider_name or ProviderFactory.get_default_provider_name()
 
     for shot in candidate_shots:
         cost, curr, status_flag = ProviderPricingService.estimate_cost(
@@ -239,7 +244,7 @@ def batch_generate_project_shots(
         )
 
     req = request or BatchJobCreateRequest()
-    eff_provider = req.provider_name or provider_name or "vidu"
+    eff_provider = req.provider_name or provider_name or ProviderFactory.get_default_provider_name()
 
     scenes = (
         db.query(Scene)
@@ -248,8 +253,12 @@ def batch_generate_project_shots(
     )
     created_jobs = []
     for scene in scenes:
+        if (scene.scene_config or {}).get("archived"):
+            continue
         shots = db.query(Shot).filter(Shot.scene_id == scene.id).all()
         for shot in shots:
+            if shot.status == "ARCHIVED":
+                continue
             if req.shot_ids is not None and shot.id not in req.shot_ids:
                 continue
             if shot.is_locked:

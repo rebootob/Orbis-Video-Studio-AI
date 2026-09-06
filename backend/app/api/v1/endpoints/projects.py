@@ -18,6 +18,23 @@ from app.services.lock_machine import LockMachineService
 router = APIRouter()
 
 
+def _enrich_project_response(project: Project, db: Session) -> ProjectResponse:
+    scenes = (
+        db.query(Scene)
+        .filter((Scene.project_id == project.id) | (Scene.story.has(project_id=project.id)))
+        .all()
+    )
+    active_scenes = [s for s in scenes if not (s.scene_config or {}).get("archived")]
+    scene_ids = [s.id for s in active_scenes]
+    shots = db.query(Shot).filter(Shot.scene_id.in_(scene_ids)).all() if scene_ids else []
+    active_shots = [s for s in shots if s.status != "ARCHIVED"]
+
+    resp = ProjectResponse.model_validate(project)
+    resp.scene_count = len(active_scenes)
+    resp.shot_count = len(active_shots)
+    return resp
+
+
 @router.get(
     "/projects",
     response_model=List[ProjectResponse],
@@ -31,7 +48,7 @@ def list_projects(
     if not include_archived:
         query = query.filter(Project.status != "ARCHIVED")
     projects = query.order_by(Project.updated_at.desc()).all()
-    return projects
+    return [_enrich_project_response(p, db) for p in projects]
 
 
 @router.post(
@@ -60,7 +77,7 @@ def create_project(
     db.add(project)
     db.commit()
     db.refresh(project)
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.get(
@@ -78,7 +95,7 @@ def get_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project '{project_id}' not found",
         )
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.patch(
@@ -123,7 +140,7 @@ def update_project(
 
     db.commit()
     db.refresh(project)
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.delete(
@@ -145,7 +162,7 @@ def delete_project(
     project.status = "ARCHIVED"
     db.commit()
     db.refresh(project)
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.post(
@@ -166,7 +183,7 @@ def archive_project(
     project.status = "ARCHIVED"
     db.commit()
     db.refresh(project)
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.post(
@@ -187,7 +204,7 @@ def unarchive_project(
     project.status = "DRAFT"
     db.commit()
     db.refresh(project)
-    return project
+    return _enrich_project_response(project, db)
 
 
 @router.post(
@@ -273,7 +290,7 @@ def duplicate_project(
 
     db.commit()
     db.refresh(new_proj)
-    return new_proj
+    return _enrich_project_response(new_proj, db)
 
 
 
@@ -322,6 +339,7 @@ def create_project_scene(
 )
 def list_project_scenes(
     project_id: uuid.UUID,
+    include_archived: bool = Query(False),
     db: Session = Depends(get_db),
 ):
     project = db.get(Project, project_id)
@@ -330,15 +348,13 @@ def list_project_scenes(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Project '{project_id}' not found",
         )
-    scenes = (
-        db.query(Scene)
-        .filter(
-            (Scene.project_id == project_id)
-            | (Scene.story.has(project_id=project_id))
-        )
-        .order_by(Scene.scene_number)
-        .all()
+    query = db.query(Scene).filter(
+        (Scene.project_id == project_id)
+        | (Scene.story.has(project_id=project_id))
     )
+    scenes = query.order_by(Scene.scene_number).all()
+    if not include_archived:
+        scenes = [s for s in scenes if not (s.scene_config or {}).get("archived")]
     return scenes
 
 
@@ -495,17 +511,14 @@ def delete_scene(
 
     LockMachineService.check_mutation_allowed(db, "SCENE", scene_id)
 
-    # Check if any shots in this scene have existing generation jobs or ledger audit records
+    # Soft-archive scene and contained shots to preserve full historical and auditable lineage
+    cfg = dict(scene.scene_config or {})
+    cfg["archived"] = True
+    scene.scene_config = cfg
+
     shots = db.query(Shot).filter(Shot.scene_id == scene_id).all()
     for s in shots:
-        has_jobs = db.query(GenerationJob).filter(GenerationJob.shot_id == s.id).first() is not None
-        has_ledger = db.query(UsageLedger).filter(UsageLedger.shot_id == s.id).first() is not None
-        if has_jobs or has_ledger:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot delete Scene containing shots with recorded generation jobs or ledger audit history (Shot '{s.id}').",
-            )
+        s.status = "ARCHIVED"
 
-    db.delete(scene)
     db.commit()
     return None

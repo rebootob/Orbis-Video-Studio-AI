@@ -258,9 +258,12 @@ def test_shot_delete_and_lock_guard(client: TestClient, db_session: Session):
         actor="director",
     )
 
-    # Deleting unlocked shot -> 204
+    # Soft-archiving unlocked shot -> 204, row retained in DB
     del_resp = client.delete(f"/api/v1/shots/{shot_id}")
     assert del_resp.status_code == 204
+    archived_shot = db_session.get(Shot, uuid.UUID(shot_id))
+    assert archived_shot is not None
+    assert archived_shot.status == "ARCHIVED"
 
 
 def test_project_queue_and_batch_endpoints(client: TestClient, db_session: Session):
@@ -424,7 +427,7 @@ def test_scene_and_shot_reorder(client: TestClient, db_session: Session):
     assert shots_list[0]["shot_number"] == 1
 
 
-def test_deletion_blocked_on_recorded_history(client: TestClient, db_session: Session):
+def test_scene_and_shot_soft_archive_preserves_full_history(client: TestClient, db_session: Session):
     proj = Project(id=uuid.uuid4(), title="Audit Guard Project", video_mode="STORY")
     db_session.add(proj)
     db_session.commit()
@@ -447,15 +450,26 @@ def test_deletion_blocked_on_recorded_history(client: TestClient, db_session: Se
     db_session.add(job)
     db_session.commit()
 
-    # Attempt to delete shot -> 409 Conflict
+    # Soft-archiving shot preserves record in DB with ARCHIVED status and keeps generation job intact
     del_shot_resp = client.delete(f"/api/v1/shots/{shot.id}")
-    assert del_shot_resp.status_code == 409
-    assert "recorded generation jobs" in del_shot_resp.json()["detail"]
+    assert del_shot_resp.status_code == 204
 
-    # Attempt to delete scene containing this shot -> 409 Conflict
+    # Assert record is NOT hard deleted from DB
+    shot_in_db = db_session.get(Shot, shot.id)
+    assert shot_in_db is not None
+    assert shot_in_db.status == "ARCHIVED"
+    # Generation job is still preserved in DB
+    job_in_db = db_session.get(GenerationJob, job.id)
+    assert job_in_db is not None
+    assert job_in_db.status == "COMPLETED"
+
+    # Soft-archiving scene preserves scene record and sets scene_config["archived"] = True
     del_scene_resp = client.delete(f"/api/v1/scenes/{scene.id}")
-    assert del_scene_resp.status_code == 409
-    assert "recorded generation jobs" in del_scene_resp.json()["detail"]
+    assert del_scene_resp.status_code == 204
+
+    scene_in_db = db_session.get(Scene, scene.id)
+    assert scene_in_db is not None
+    assert (scene_in_db.scene_config or {}).get("archived") is True
 
 
 def test_batch_job_estimate_and_selected_generation(client: TestClient, db_session: Session):
@@ -495,3 +509,41 @@ def test_batch_job_estimate_and_selected_generation(client: TestClient, db_sessi
     created = batch_resp.json()
     assert len(created) == 1
     assert created[0]["shot_id"] == str(shot1.id)
+    # Verifies provider was resolved from ProviderFactory routing
+    assert created[0]["provider_name"] == "vidu"
+
+
+def test_project_dashboard_counts_and_provider_routing(client: TestClient, db_session: Session):
+    proj = Project(id=uuid.uuid4(), title="Dashboard Signals Project", video_mode="STORY")
+    db_session.add(proj)
+    db_session.commit()
+
+    scene = Scene(id=uuid.uuid4(), project_id=proj.id, scene_number=1)
+    db_session.add(scene)
+    db_session.commit()
+
+    shot1 = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="AI_GENERATED")
+    shot2 = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=2, shot_type="AI_GENERATED")
+    db_session.add_all([shot1, shot2])
+    db_session.commit()
+
+    # Verify counts on GET project
+    p_resp = client.get(f"/api/v1/projects/{proj.id}")
+    assert p_resp.status_code == 200
+    data = p_resp.json()
+    assert data["scene_count"] == 1
+    assert data["shot_count"] == 2
+
+    # Soft-archive shot1
+    client.delete(f"/api/v1/shots/{shot1.id}")
+    p_resp_after = client.get(f"/api/v1/projects/{proj.id}")
+    assert p_resp_after.status_code == 200
+    assert p_resp_after.json()["shot_count"] == 1
+
+    # Verify estimate endpoint without explicit provider_name resolves default from ProviderFactory
+    est_resp = client.post(
+        f"/api/v1/projects/{proj.id}/jobs/estimate",
+        json={"only_incomplete": True},
+    )
+    assert est_resp.status_code == 200
+    assert est_resp.json()["shot_count"] == 1

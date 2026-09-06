@@ -73,5 +73,8 @@ class ProjectResponse(BaseModel):
     budget_limit: Optional[float] = None
     budget_currency: Optional[str] = "USD"
     budget_threshold_percentage: Optional[float] = 80.0
+    scene_count: int = 0
+    shot_count: int = 0
+    thumbnail_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime

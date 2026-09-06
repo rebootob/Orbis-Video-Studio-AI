@@ -10,10 +10,18 @@ export type ShotType =
 
 export type ApprovalStatus =
   | 'DRAFT'
-  | 'READY_FOR_REVIEW'
+  | 'STORY_GENERATED'
+  | 'STORY_APPROVED'
+  | 'STORYBOARD_GENERATED'
+  | 'STORYBOARD_APPROVED'
+  | 'SHOT_PLAN_GENERATED'
+  | 'SHOT_PLAN_APPROVED'
+  | 'IMAGES_GENERATED'
+  | 'VIDEO_IN_PROGRESS'
+  | 'FINAL_REVIEW'
   | 'APPROVED'
-  | 'LOCKED'
-  | 'NEEDS_ATTENTION';
+  | 'COMPLETED'
+  | 'ARCHIVED';
 
 export type JobStatus =
   | 'PENDING'
@@ -40,6 +48,9 @@ export interface Project {
   budget_limit?: number | null;
   budget_currency?: string;
   budget_threshold_percentage?: number | null;
+  scene_count?: number;
+  shot_count?: number;
+  thumbnail_url?: string | null;
   created_at: string;
   updated_at: string;
 }

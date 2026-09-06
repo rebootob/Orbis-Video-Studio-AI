@@ -43,6 +43,7 @@ def create_scene_shot(
 )
 def list_scene_shots(
     scene_id: uuid.UUID,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
 ):
     scene = db.get(Scene, scene_id)
@@ -51,7 +52,10 @@ def list_scene_shots(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scene '{scene_id}' not found",
         )
-    shots = db.query(Shot).filter(Shot.scene_id == scene_id).order_by(Shot.shot_number).all()
+    query = db.query(Shot).filter(Shot.scene_id == scene_id)
+    if not include_archived:
+        query = query.filter(Shot.status != "ARCHIVED")
+    shots = query.order_by(Shot.shot_number).all()
     return shots
 
 
@@ -104,16 +108,8 @@ def delete_shot(
 
     LockMachineService.check_mutation_allowed(db, "SHOT", shot_id)
 
-    # Prevent destruction of recorded generation jobs or ledger audit records
-    has_jobs = db.query(GenerationJob).filter(GenerationJob.shot_id == shot_id).first() is not None
-    has_ledger = db.query(UsageLedger).filter(UsageLedger.shot_id == shot_id).first() is not None
-    if has_jobs or has_ledger:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot delete Shot '{shot_id}' with recorded generation jobs or ledger audit history. Retain for auditability.",
-        )
-
-    db.delete(shot)
+    # Soft-archive shot to preserve full production lineage and audit history
+    shot.status = "ARCHIVED"
     db.commit()
     return None
 

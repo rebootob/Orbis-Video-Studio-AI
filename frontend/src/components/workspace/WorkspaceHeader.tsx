@@ -7,7 +7,7 @@ interface WorkspaceHeaderProps {
   budget: BudgetSummary | null;
   jobs: GenerationJob[];
   onBackToDashboard: () => void;
-  onUpdateStatus: (status: ApprovalStatus) => void;
+  onUpdateStatus?: (status: ApprovalStatus) => void;
 }
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
@@ -15,7 +15,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   budget,
   jobs,
   onBackToDashboard,
-  onUpdateStatus,
+  onUpdateStatus: _onUpdateStatus,
 }) => {
   const activeJobs = jobs.filter((j) =>
     ['PENDING', 'CLAIMED', 'SUBMITTED', 'POLLING'].includes(j.status)
@@ -147,28 +147,22 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </span>
         </div>
 
-        {/* Approval / QC State Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {/* Current Workflow Stage Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} data-testid="project-status-badge">
           <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-            QC:
+            Stage:
           </label>
-          <select
-            value={project.status}
-            onChange={(e) => onUpdateStatus(e.target.value as ApprovalStatus)}
+          <span
+            className="badge badge-primary"
             style={{
               fontSize: '0.75rem',
               padding: '4px 8px',
               fontWeight: 600,
-              backgroundColor: 'var(--bg-card)',
+              letterSpacing: '0.02em',
             }}
-            data-testid="project-status-select"
           >
-            <option value="DRAFT">DRAFT</option>
-            <option value="READY_FOR_REVIEW">READY FOR REVIEW</option>
-            <option value="APPROVED">APPROVED</option>
-            <option value="LOCKED">LOCKED</option>
-            <option value="NEEDS_ATTENTION">NEEDS ATTENTION</option>
-          </select>
+            {project.status.replace(/_/g, ' ')}
+          </span>
         </div>
       </div>
     </header>

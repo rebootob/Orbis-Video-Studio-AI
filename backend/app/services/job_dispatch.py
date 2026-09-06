@@ -94,18 +94,22 @@ class JobDispatchService:
     def create_and_dispatch_job(
         db: Session,
         shot_id,
-        provider_name="vidu",
+        provider_name=None,
         idempotency_key=None,
         custom_params=None,
         max_retries=3,
         reference_images=None,
     ):
+        from app.providers.factory import ProviderFactory
+        resolved_provider = provider_name or ProviderFactory.get_default_provider_name()
+
         if not 1 <= max_retries <= 10:
             raise HTTPException(400, "max_retries must be between 1 and 10")
         if contains_secret(custom_params or {}) or contains_secret(reference_images or []):
             raise HTTPException(400, "Secret-like generation parameters are not allowed")
-        if not isinstance(provider_name, str) or len(provider_name) > 50 or contains_secret(provider_name):
+        if not isinstance(resolved_provider, str) or len(resolved_provider) > 50 or contains_secret(resolved_provider):
             raise HTTPException(400, "Invalid provider name")
+        provider_name = resolved_provider
         if idempotency_key is not None and (not idempotency_key or len(idempotency_key) > 255 or contains_secret(idempotency_key)):
             raise HTTPException(400, "Invalid idempotency key")
         shot = db.get(Shot, shot_id)

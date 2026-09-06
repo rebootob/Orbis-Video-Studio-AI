@@ -15,6 +15,7 @@ import {
   ArrowRight,
   ArrowUpDown,
   Filter,
+  Clapperboard,
 } from 'lucide-react';
 
 interface ProjectDashboardProps {
@@ -118,6 +119,38 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
         return 'badge-attention';
       default:
         return 'badge-draft';
+    }
+  };
+
+  const getProgressSummary = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case 'DRAFT':
+        return { pct: 5, label: '5% • Initial Draft' };
+      case 'STORY_GENERATED':
+        return { pct: 20, label: '20% • Story Generated' };
+      case 'STORY_APPROVED':
+        return { pct: 30, label: '30% • Story Approved' };
+      case 'STORYBOARD_GENERATED':
+        return { pct: 40, label: '40% • Storyboard Generated' };
+      case 'STORYBOARD_APPROVED':
+        return { pct: 50, label: '50% • Storyboard Approved' };
+      case 'SHOT_PLAN_GENERATED':
+        return { pct: 60, label: '60% • Shot Plan Generated' };
+      case 'SHOT_PLAN_APPROVED':
+        return { pct: 70, label: '70% • Shot Plan Approved' };
+      case 'IMAGES_GENERATED':
+        return { pct: 80, label: '80% • Images Ready' };
+      case 'VIDEO_IN_PROGRESS':
+        return { pct: 85, label: '85% • Video Generating' };
+      case 'FINAL_REVIEW':
+        return { pct: 95, label: '95% • Final QC & Review' };
+      case 'APPROVED':
+      case 'COMPLETED':
+        return { pct: 100, label: '100% • Production Complete' };
+      case 'ARCHIVED':
+        return { pct: 0, label: 'Archived' };
+      default:
+        return { pct: 10, label: `${status || 'Draft'}` };
     }
   };
 
@@ -380,6 +413,35 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     </span>
                   </div>
 
+                  {/* Thumbnail or Truthful Placeholder */}
+                  {project.thumbnail_url ? (
+                    <div style={{ height: '80px', borderRadius: '6px', overflow: 'hidden', marginBottom: '10px' }}>
+                      <img src={project.thumbnail_url} alt={project.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        height: '70px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                        borderRadius: '6px',
+                        border: '1px dashed var(--border-default)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        marginBottom: '10px',
+                        color: 'var(--text-muted)',
+                      }}
+                      data-testid={`project-thumbnail-placeholder-${project.id}`}
+                    >
+                      <Clapperboard size={18} color="var(--primary)" />
+                      <span style={{ fontSize: '0.6875rem' }}>
+                        No render preview • {project.video_mode} ({project.preferred_aspect_ratio || '16:9'})
+                      </span>
+                    </div>
+                  )}
+
                   {/* Title & Rename */}
                   {isEditing ? (
                     <div
@@ -436,7 +498,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                         fontSize: '0.8125rem',
                         color: 'var(--text-secondary)',
                         lineHeight: '1.4',
-                        marginBottom: '10px',
+                        marginBottom: '8px',
                       }}
                     >
                       {project.purpose}
@@ -448,6 +510,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                         fontSize: '0.75rem',
                         color: 'var(--text-muted)',
                         lineHeight: '1.4',
+                        marginBottom: '8px',
                       }}
                     >
                       {project.description.length > 90
@@ -455,6 +518,53 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                         : project.description}
                     </p>
                   )}
+
+                  {/* Scene & Shot Counts */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-secondary)',
+                      marginTop: '6px',
+                      marginBottom: '6px',
+                    }}
+                    data-testid={`project-counts-${project.id}`}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <Clapperboard size={12} color="#818cf8" />
+                      <strong>{project.scene_count ?? 0}</strong> Scenes
+                    </span>
+                    <span>•</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <Film size={12} color="#fbbf24" />
+                      <strong>{project.shot_count ?? 0}</strong> Shots
+                    </span>
+                  </div>
+
+                  {/* Actual Progress Summary */}
+                  {(() => {
+                    const prog = getProgressSummary(project.status);
+                    return (
+                      <div style={{ marginTop: '6px', marginBottom: '10px' }} data-testid={`project-progress-${project.id}`}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          <span>Progress</span>
+                          <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{prog.label}</span>
+                        </div>
+                        <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--bg-card)', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              width: `${prog.pct}%`,
+                              height: '100%',
+                              backgroundColor: prog.pct === 100 ? '#10b981' : 'var(--primary)',
+                              transition: 'width 0.3s ease',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Specs & Actions Footer */}

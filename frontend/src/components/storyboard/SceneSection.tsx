@@ -4,7 +4,7 @@ import { ShotCard } from './ShotCard';
 import {
   Plus,
   Edit2,
-  Trash2,
+  Archive,
   Check,
   Lock,
   Unlock,
@@ -192,16 +192,17 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
           )}
 
           <button
-            className="btn btn-xs btn-danger"
+            className="btn btn-xs btn-outline"
             onClick={() => {
-              if (confirm(`Delete Scene #${scene.scene_number}? All shots without recorded generation history will be removed.`)) {
+              if (confirm(`Archive Scene #${scene.scene_number}? All scene and shot records will be safely retained in history.`)) {
                 onDeleteScene(scene.id);
               }
             }}
             disabled={scene.is_locked}
-            title="Delete Scene"
+            title="Archive Scene (Retains history)"
+            data-testid={`archive-scene-${scene.id}`}
           >
-            <Trash2 size={12} />
+            <Archive size={12} /> Archive
           </button>
 
           <button
