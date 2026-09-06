@@ -47,7 +47,7 @@ Claude Code = STOP
 
 1. **Transactional Job + Batch Audit Persistence**:
    - Savepoint-level isolation (`begin_nested()`) wrapping `JobDispatchService.create_and_dispatch_job(commit=False)` and `BatchRunItem(decision="QUEUED")`.
-   - Durable consistency: GenerationJob, CostLedger reservation, and BatchRunItem persist atomically or roll back cleanly together without unaudited queued work.
+   - Durable consistency: GenerationJob, UsageLedger entry, and BatchRunItem persist atomically or roll back cleanly together without unaudited queued work.
 2. **Reconciliation / Cancellation Safety**:
    - `CANCELLING` treated as active/in-flight (`CandidateSkipReason.CANCELLATION_IN_PROGRESS`), preventing duplicate generation.
    - `RECONCILIATION_REQUIRED` blocks automatic generation/resume/retry (`CandidateSkipReason.RECONCILIATION_REQUIRED`).
