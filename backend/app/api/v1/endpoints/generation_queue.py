@@ -240,6 +240,8 @@ def list_project_batch_runs(
 def get_batch_run_details(
     project_id: uuid.UUID,
     run_id: uuid.UUID,
+    item_limit: int = Query(100, ge=1, le=500),
+    item_offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     from app.services.batch_resume import BatchResumeService
@@ -247,4 +249,6 @@ def get_batch_run_details(
         db=db,
         project_id=project_id,
         run_id=run_id,
+        item_limit=item_limit,
+        item_offset=item_offset,
     )

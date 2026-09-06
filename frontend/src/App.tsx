@@ -299,11 +299,13 @@ export const App: React.FC = () => {
         shot_ids: shotIds || undefined,
         only_incomplete: onlyIncomplete,
       });
-      await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
+      if (run.queued_count > 0) {
+        await api.updateProject(selectedProject.id, { status: 'VIDEO_IN_PROGRESS' });
+        setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
+        await loadProjects();
+      }
       await loadWorkspaceData(selectedProject);
-      setSelectedProject({ ...selectedProject, status: 'VIDEO_IN_PROGRESS' });
-      await loadProjects();
-      if (run.skipped_count > 0) {
+      if (run.skipped_count > 0 || run.queued_count === 0) {
         alert(`Batch operation summary:\n• Requested: ${run.requested_count}\n• Queued: ${run.queued_count}\n• Skipped: ${run.skipped_count} (due to locks, completed work, or active jobs)`);
       }
     } catch (err: any) {

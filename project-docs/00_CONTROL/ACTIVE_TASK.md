@@ -20,8 +20,9 @@ Current Work Tracking:
 
 ```text
 Issue: #28
+PR: #29
 Branch: ai/p2-wp011-batch-resume
-Gate: WAITING CHATGPT INDEPENDENT REVIEW
+Gate: WAITING CHATGPT INDEPENDENT RE-REVIEW (Review ID 5124507165 corrected)
 ```
 
 Execution Roles:
@@ -36,41 +37,32 @@ Claude Code = STOP
 
 ---
 
-## Scope Implemented in P2-WP011
+## Scope Implemented in P2-WP011 (Including Review ID 5124507165 Corrective)
 
-1. **Canonical Backend Batch / Resume Service (`BatchResumeService`)**:
-   - Centralized candidate evaluation supporting `GENERATE_SELECTED`, `CONTINUE_INCOMPLETE`, `RETRY_FAILED`.
-   - Set-based DB queries (no N+1 loops per shot).
-   - Candidate rules enforce:
-     - Archived shots/scenes -> `ARCHIVED` (including parent scenes marked archived)
-     - Locked shots/scenes/scripts -> `LOCKED`
-     - Non-generatable shots -> `NOT_GENERATABLE`
-     - Completed jobs -> `ALREADY_COMPLETED`
-     - Active jobs -> `ACTIVE_JOB_EXISTS`
-     - Failed jobs without completed/active work -> `ELIGIBLE` for retry
-     - Retry with no failure history -> `NO_FAILED_HISTORY`
-     - Missing or cross-project requested shot IDs -> `NOT_FOUND`
-   - Strict `BatchOperationType` enum validation; unknown operations fail closed with 400 Bad Request.
-   - Bounded chunk pagination (`CHUNK_SIZE = 100`) for shot lookups and job status queries.
-2. **Shot-Level Deduplication & Real Concurrency Fencing**:
-   - Row-level lock on `Shot` during dispatch (`with_for_update()`).
-   - Transactional re-check of active generation jobs in the same transaction.
-   - Database-level partial unique index `uq_generation_jobs_active_shot` preventing duplicate concurrent active jobs.
-   - Concurrency barrier test proving exactly one active job survives races across separate threads/sessions.
-3. **Truthful BatchRun Lifecycle & Dynamic Count Reconciliation**:
-   - `BatchRun` status lifecycle starts at `DISPATCHED` (or `PARTIAL_FAILED` / `FAILED` if dispatch errors occur).
-   - Chunked dispatch execution (`EXECUTE_CHUNK_SIZE = 50`) with per-shot failure capture (`decision="FAILED"` with truthful reason).
-   - Dynamic reconciliation of `completed_count` and `failed_count` on read from linked generation job statuses.
-4. **API & Frontend Preview / Execute Equivalence**:
-   - `/projects/{project_id}/jobs/estimate` accepts `operation_type` and enforces identical candidate selection rules as execution.
-   - Bounded listing query for `/projects/{project_id}/batch-runs` with `limit` and `offset`.
-   - Frontend `CostConfirmationModal` supports `operationType`, wiring both batch generation and `Retry Failed` through preview and confirmation.
+1. **Transactional Job + Batch Audit**:
+   - Atomic savepoint (`begin_nested()`) wrapping `JobDispatchService.create_and_dispatch_job(..., commit=False)` and `BatchRunItem(decision="QUEUED")`.
+   - Failure injection test proving failures between Job construction and audit persistence roll back atomically without unaudited queued work.
+2. **Reconciliation / Cancellation Safety**:
+   - `CANCELLING` treated as active/in-flight (`CandidateSkipReason.CANCELLATION_IN_PROGRESS`), blocking automatic regeneration.
+   - `RECONCILIATION_REQUIRED` blocks automatic generation/resume/retry (`CandidateSkipReason.RECONCILIATION_REQUIRED`).
+   - Single-shot create path fails closed with 409 for both states.
+   - Status sets consistent across `BatchResumeService`, `JobDispatchService`, `GenerationJob` partial index, and migration `011_batch_resume_runs_and_indexes`.
+3. **Real Bounded Processing**:
+   - Evaluates -> persists `BatchRunItems` -> dispatches per bounded chunk (`EXECUTE_CHUNK_SIZE = 50`) without accumulating full-project candidate lists in memory.
+   - Deterministic chunk ordering with stable tie-breaker: `(Scene.scene_number.asc(), Shot.shot_number.asc(), Shot.id.asc())`.
+   - Zero N+1 queries in `list_project_batch_runs`: exactly 2 set-based queries execute regardless of run count.
+   - Bounded items retrieval with pagination in `get_batch_run_details` (`item_limit`, `item_offset`).
+4. **Truthful Run / UI Outcomes**:
+   - BatchRun `failed_count` truthfully reflects dispatch failures and linked worker job failures.
+   - Transactional active-job conflicts during dispatch are truthfully reported as `SKIPPED / ACTIVE_JOB_EXISTS` (not generic FAILED).
+   - Frontend `handleBatchGenerateShots` strictly guards stage transition: does NOT switch project status to `VIDEO_IN_PROGRESS` when `queued_count == 0`.
 
 ---
 
 ## Next Allowed Action
 
 1. Antigravity: STOP.
-2. Open PR targeting `main`.
-3. Do not merge without explicit Owner approval and ChatGPT independent PASS review.
-4. Do not start WP012.
+2. Push corrective commits to existing PR #29.
+3. Wait for ChatGPT independent PASS re-review and explicit Owner approval.
+4. Do not merge without approval.
+5. Do not start WP012.

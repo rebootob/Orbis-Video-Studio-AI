@@ -59,7 +59,17 @@ RETRY_SECONDS = 5
 MAX_BACKOFF_SECONDS = 300
 TERMINAL = ("COMPLETED", "FAILED", "CANCELLED", "RECONCILIATION_REQUIRED")
 ACTIVE = ("QUEUED", "PROCESSING")
-ACTIVE_JOB_STATUSES = ("PENDING", "CLAIMED", "SUBMITTING", "SUBMITTED", "POLLING", "QUEUED", "PROCESSING")
+ACTIVE_JOB_STATUSES = (
+    "PENDING",
+    "CLAIMED",
+    "SUBMITTING",
+    "SUBMITTED",
+    "POLLING",
+    "QUEUED",
+    "PROCESSING",
+    "CANCELLING",
+    "RECONCILIATION_REQUIRED",
+)
 
 def utc_now():
     return datetime.now(timezone.utc)
@@ -212,6 +222,16 @@ class JobDispatchService:
         if active_job:
             if idempotency_key and active_job.idempotency_key == idempotency_key:
                 return active_job
+            if active_job.status == "RECONCILIATION_REQUIRED":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Generation job '{active_job.id}' for Shot '{shot_id}' requires explicit reconciliation before new work can be dispatched.",
+                )
+            if active_job.status == "CANCELLING":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Generation job '{active_job.id}' for Shot '{shot_id}' is currently CANCELLING. Cancellation must complete before new work can be dispatched.",
+                )
             raise HTTPException(
                 status_code=409,
                 detail=f"Active generation job '{active_job.id}' already exists for Shot '{shot_id}'.",

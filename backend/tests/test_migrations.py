@@ -66,13 +66,14 @@ def test_queue_safety_upgrade_preserves_clean_requests_and_quarantines_legacy(tm
     project_id = uuid.uuid4()
     story_id = uuid.uuid4()
     scene_id = uuid.uuid4()
-    shot_id = uuid.uuid4()
+    shot_ids = [uuid.uuid4() for _ in range(3)]
     now = datetime.now(timezone.utc)
     with engine.begin() as connection:
         connection.execute(projects_tbl.insert().values(id=project_id, title="Migration test", status="DRAFT", created_at=now, updated_at=now))
         connection.execute(stories_tbl.insert().values(id=story_id, project_id=project_id, logline="Test", status="DRAFT", is_locked=False, created_at=now, updated_at=now))
         connection.execute(scenes_tbl.insert().values(id=scene_id, story_id=story_id, scene_number=1, heading="Test", is_locked=False, created_at=now, updated_at=now))
-        connection.execute(shots_tbl.insert().values(id=shot_id, scene_id=scene_id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=False, status="PENDING", created_at=now, updated_at=now))
+        for index, s_id in enumerate(shot_ids):
+            connection.execute(shots_tbl.insert().values(id=s_id, scene_id=scene_id, shot_number=index + 1, shot_type="AI_GENERATED", duration_seconds=4.0, is_locked=False, status="PENDING", created_at=now, updated_at=now))
     jobs = Table("generation_jobs", MetaData(), autoload_with=engine)
     jobs.c.id.type = Uuid()
     jobs.c.shot_id.type = Uuid()
@@ -80,7 +81,7 @@ def test_queue_safety_upgrade_preserves_clean_requests_and_quarantines_legacy(tm
     payload = {"prompt": "Clean prompt", "provider_specific_params": {"resolution": "720p"}}
     with engine.begin() as connection:
         for index, job_id in enumerate(ids):
-            connection.execute(jobs.insert().values(id=job_id, shot_id=shot_id, provider_name="vidu",
+            connection.execute(jobs.insert().values(id=job_id, shot_id=shot_ids[index], provider_name="vidu",
                 status="PROCESSING" if index == 1 else "PENDING",
                 payload={"nested": [{"api_key": "LEAK"}]} if index == 2 else payload,
                 result={"untrusted": {"secret": "LEAK"}}, error_message="LEAK",

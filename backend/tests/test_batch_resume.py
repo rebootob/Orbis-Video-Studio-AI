@@ -671,3 +671,342 @@ def test_bounded_pagination_and_query_scalability_large_project(db_session, test
     # Exactly all 250 shots evaluated across paginated chunks
     assert eval_res.total_evaluated == 250
     assert len(eval_res.eligible_shots) == 250
+
+
+def test_atomic_job_and_batch_run_item_persistence(db_session, test_project):
+    """Test 1: Job + BatchRunItem atomic persistence."""
+    project, sc1, _ = test_project
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sc1.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        duration_seconds=4.0,
+        status="PENDING",
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+
+    assert len(jobs) == 1
+    assert run.queued_count == 1
+    item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
+    assert item is not None
+    assert item.decision == "QUEUED"
+    assert item.job_id == jobs[0].id
+
+
+def test_injected_crash_between_job_creation_and_audit_persistence(db_session, test_project, monkeypatch):
+    """Test 2: Injected crash after Job construction but before BatchRunItem persistence
+
+    proves savepoint rollback ensures no unaudited queued work is left in the DB.
+    """
+    project, sc1, _ = test_project
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sc1.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        duration_seconds=4.0,
+        status="PENDING",
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    orig_add = db_session.add
+
+    def failing_add(instance):
+        if isinstance(instance, BatchRunItem) and instance.decision == "QUEUED":
+            raise RuntimeError("Simulated crash immediately before BatchRunItem QUEUED persistence")
+        return orig_add(instance)
+
+    monkeypatch.setattr(db_session, "add", failing_add)
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+
+    # Job was rolled back by the savepoint!
+    assert len(jobs) == 0
+    assert run.queued_count == 0
+    # No unaudited job exists in generation_jobs for this shot
+    existing_job = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot.id).first()
+    assert existing_job is None
+    # Item was captured as FAILED
+    item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
+    assert item is not None
+    assert item.decision == "FAILED"
+    assert "Simulated crash" in item.skip_reason
+
+
+def test_cancelling_blocks_regeneration(db_session, test_project):
+    """Test 3: CANCELLING blocks automatic regeneration and reports CANCELLATION_IN_PROGRESS."""
+    project, sc1, _ = test_project
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sc1.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        duration_seconds=4.0,
+        status="PENDING",
+    )
+    db_session.add(shot)
+    db_session.flush()
+
+    job = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=shot.id,
+        provider_name="vidu",
+        status="CANCELLING",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert len(jobs) == 0
+    assert run.queued_count == 0
+    assert run.skipped_count == 1
+    item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
+    assert item.decision == "SKIPPED"
+    assert item.skip_reason == "CANCELLATION_IN_PROGRESS"
+
+
+def test_reconciliation_required_blocks_automatic_resume(db_session, test_project):
+    """Test 4: RECONCILIATION_REQUIRED blocks automatic generation/resume/retry."""
+    project, sc1, _ = test_project
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sc1.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        duration_seconds=4.0,
+        status="PENDING",
+    )
+    db_session.add(shot)
+    db_session.flush()
+
+    job = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=shot.id,
+        provider_name="vidu",
+        status="RECONCILIATION_REQUIRED",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    # Continue Incomplete must never silently regenerate
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert len(jobs) == 0
+    assert run.queued_count == 0
+    assert run.skipped_count == 1
+    item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
+    assert item.decision == "SKIPPED"
+    assert item.skip_reason == "RECONCILIATION_REQUIRED"
+
+    # Retry Failed must also not regenerate without explicit reconciliation
+    run2, jobs2 = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="RETRY_FAILED",
+    )
+    assert len(jobs2) == 0
+    assert run2.queued_count == 0
+    assert run2.skipped_count == 1
+
+
+def test_single_shot_path_fails_closed_for_ambiguous_provider_state(db_session, test_project):
+    """Test 5: Single-shot create path fails closed with 409 for RECONCILIATION_REQUIRED and CANCELLING."""
+    project, sc1, _ = test_project
+    shot1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    shot2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([shot1, shot2])
+    db_session.flush()
+
+    job1 = GenerationJob(id=uuid.uuid4(), shot_id=shot1.id, provider_name="vidu", status="RECONCILIATION_REQUIRED")
+    job2 = GenerationJob(id=uuid.uuid4(), shot_id=shot2.id, provider_name="vidu", status="CANCELLING")
+    db_session.add_all([job1, job2])
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info1:
+        JobDispatchService.create_and_dispatch_job(db_session, shot_id=shot1.id)
+    assert exc_info1.value.status_code == 409
+    assert "requires explicit reconciliation" in exc_info1.value.detail
+
+    with pytest.raises(HTTPException) as exc_info2:
+        JobDispatchService.create_and_dispatch_job(db_session, shot_id=shot2.id)
+    assert exc_info2.value.status_code == 409
+    assert "currently CANCELLING" in exc_info2.value.detail
+
+
+def test_concurrent_active_conflict_produces_truthful_outcome(db_session, test_project, monkeypatch):
+    """Test 6: Transactional active-job conflict reports SKIPPED / ACTIVE_JOB_EXISTS, not generic FAILED."""
+    project, sc1, _ = test_project
+    shot = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add(shot)
+    db_session.commit()
+
+    def conflict_dispatch(*args, **kwargs):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Active generation job 'dummy-id' already exists for Shot '{shot.id}'.",
+        )
+
+    monkeypatch.setattr(JobDispatchService, "create_and_dispatch_job", conflict_dispatch)
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert len(jobs) == 0
+    assert run.failed_count == 0
+    assert run.skipped_count == 1
+    assert run.status == "DISPATCHED"
+
+    item = db_session.query(BatchRunItem).filter(BatchRunItem.batch_run_id == run.id, BatchRunItem.shot_id == shot.id).first()
+    assert item.decision == "SKIPPED"
+    assert item.skip_reason == "ACTIVE_JOB_EXISTS"
+
+
+def test_batch_run_failed_count_includes_dispatch_failures(db_session, test_project, monkeypatch):
+    """Test 7: BatchRun failed_count truthfully includes dispatch failures."""
+    project, sc1, _ = test_project
+    shot = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add(shot)
+    db_session.commit()
+
+    def failing_dispatch(*args, **kwargs):
+        raise HTTPException(status_code=500, detail="Provider rejected dispatch")
+
+    monkeypatch.setattr(JobDispatchService, "create_and_dispatch_job", failing_dispatch)
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert run.failed_count == 1
+    assert run.status == "FAILED"
+
+    # Dynamic reconciliation also preserves the dispatch failure
+    reconciled = BatchResumeService.get_batch_run_details(db_session, project.id, run.id)
+    assert reconciled.failed_count == 1
+
+
+def test_deterministic_ordering_with_stable_tie_breaker(db_session, test_project):
+    """Test 10: Deterministic ordering with stable tie-breaker: (Scene.scene_number, Shot.shot_number, Shot.id)."""
+    project, sc1, sc2 = test_project
+    # Create shots across scenes in mixed order
+    s2_1 = Shot(id=uuid.uuid4(), scene_id=sc2.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s1_2 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=2, shot_type="AI_GENERATED", duration_seconds=4.0)
+    s1_1 = Shot(id=uuid.uuid4(), scene_id=sc1.id, shot_number=1, shot_type="AI_GENERATED", duration_seconds=4.0)
+    db_session.add_all([s2_1, s1_2, s1_1])
+    db_session.commit()
+
+    run, jobs = BatchResumeService.execute_batch(
+        db=db_session,
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+    )
+    assert len(jobs) == 3
+    # First scene 1 shot 1, then scene 1 shot 2, then scene 2 shot 1
+    assert jobs[0].shot_id == s1_1.id
+    assert jobs[1].shot_id == s1_2.id
+    assert jobs[2].shot_id == s2_1.id
+
+
+def test_list_batch_runs_has_zero_n_plus_one_queries(db_session, test_project):
+    """Test 11: BatchRun listing executes exactly 2 queries regardless of run count."""
+    from sqlalchemy import event
+
+    project, sc1, _ = test_project
+    # Create 5 runs with items
+    for i in range(5):
+        run = BatchRun(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            operation_type="CONTINUE_INCOMPLETE",
+            status="DISPATCHED",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(run)
+        db_session.flush()
+        for j in range(3):
+            item = BatchRunItem(
+                id=uuid.uuid4(),
+                batch_run_id=run.id,
+                shot_id=uuid.uuid4(),
+                decision="SKIPPED",
+                skip_reason="LOCKED",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(item)
+    db_session.commit()
+
+    query_count = [0]
+    def count_queries(conn, cursor, statement, parameters, context, executemany):
+        query_count[0] += 1
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", count_queries)
+    try:
+        runs = BatchResumeService.list_project_batch_runs(db_session, project.id, limit=10)
+        assert len(runs) >= 5
+        # Exactly 2 queries: 1 for BatchRun page, 1 for grouped stats!
+        assert query_count[0] == 2
+    finally:
+        event.remove(engine, "before_cursor_execute", count_queries)
+
+
+def test_batch_run_item_details_are_bounded_and_paginated(db_session, test_project):
+    """Test 12: BatchRun items are bounded and paginated."""
+    project, sc1, _ = test_project
+    run = BatchRun(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        operation_type="CONTINUE_INCOMPLETE",
+        status="DISPATCHED",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run)
+    db_session.flush()
+
+    for i in range(120):
+        db_session.add(BatchRunItem(
+            id=uuid.uuid4(),
+            batch_run_id=run.id,
+            shot_id=uuid.uuid4(),
+            decision="SKIPPED",
+            skip_reason="LOCKED",
+            created_at=datetime.now(timezone.utc),
+        ))
+    db_session.commit()
+
+    # Default bounded limit is 100
+    details = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=0)
+    assert len(details.items) == 50
+
+    # Next offset
+    details_p2 = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=50)
+    assert len(details_p2.items) == 50
+
+    # Remaining items
+    details_p3 = BatchResumeService.get_batch_run_details(db_session, project.id, run.id, item_limit=50, item_offset=100)
+    assert len(details_p3.items) == 20
