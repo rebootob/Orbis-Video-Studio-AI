@@ -117,6 +117,27 @@ def foreign_asset(db_session: Session, foreign_project: Project) -> Asset:
 
 
 @pytest.fixture
+def image_asset(db_session: Session, sample_project: Project) -> Asset:
+    asset = Asset(
+        id=uuid.uuid4(),
+        project_id=sample_project.id,
+        name="test_still.jpg",
+        original_filename="test_still.jpg",
+        asset_type="IMAGE",
+        content_type="image/jpeg",
+        file_size_bytes=51200,
+        checksum_sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        storage_bucket="test-bucket",
+        storage_key=f"projects/{sample_project.id}/images/test_still.jpg",
+        is_locked=False,
+    )
+    db_session.add(asset)
+    db_session.commit()
+    db_session.refresh(asset)
+    return asset
+
+
+@pytest.fixture
 def sample_scene(db_session: Session, sample_project: Project) -> Scene:
     scene = Scene(
         id=uuid.uuid4(),
@@ -138,7 +159,7 @@ def sample_scene(db_session: Session, sample_project: Project) -> Scene:
 # 1. SCOPE A — HYBRID SHOT ENGINE & ASSET OWNERSHIP TESTS
 # ==============================================================================
 
-def test_all_hybrid_source_types_validate_correctly(client, sample_scene, sample_asset):
+def test_all_hybrid_source_types_validate_correctly(client, sample_scene, sample_asset, image_asset):
     for shot_type in ALLOWED_SHOT_TYPES:
         payload = {
             "shot_number": 1,
@@ -146,17 +167,19 @@ def test_all_hybrid_source_types_validate_correctly(client, sample_scene, sample
             "visual_prompt": f"Test prompt for {shot_type}",
             "duration_seconds": 4.0,
         }
-        if shot_type in ("IMPORTED_VIDEO", "IMPORTED_IMAGE", "RECORDED_FOOTAGE", "STOCK_ASSET", "MIXED"):
+        if shot_type in ("IMPORTED_VIDEO", "RECORDED_FOOTAGE", "STOCK_ASSET", "MIXED"):
             payload["source_asset_id"] = str(sample_asset.id)
             payload["source_metadata"] = {"in_point_ms": 0, "out_point_ms": 4000}
+        elif shot_type == "IMPORTED_IMAGE":
+            payload["source_asset_id"] = str(image_asset.id)
+            payload["source_metadata"] = {"scale": "fit"}
 
         resp = client.post(f"/api/v1/scenes/{sample_scene.id}/shots", json=payload)
         assert resp.status_code == 201, f"Failed for {shot_type}: {resp.text}"
         data = resp.json()
         assert data["shot_type"] == shot_type
         if "source_asset_id" in payload:
-            assert data["source_asset_id"] == str(sample_asset.id)
-            assert data["source_metadata"]["in_point_ms"] == 0
+            assert data["source_asset_id"] == payload["source_asset_id"]
 
 
 def test_invalid_shot_source_type_rejected(client, sample_scene):
@@ -315,6 +338,222 @@ def test_lock_unlock_state_transitions_and_audit(client, db_session, sample_proj
 
     db_session.refresh(shot)
     assert shot.is_locked is False
+
+
+def test_cross_project_unlock_rejected(client, db_session, sample_project, foreign_project, sample_scene):
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sample_scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        is_locked=True,
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    # Lock belongs to sample_project
+    LockMachineService.lock(
+        db=db_session,
+        project_id=sample_project.id,
+        entity_type="SHOT",
+        entity_id=shot.id,
+        actor="sample_admin",
+    )
+
+    # Attempt to unlock using foreign_project -> must fail closed with 400
+    resp = client.post(
+        "/api/v1/locks/unlock",
+        json={
+            "project_id": str(foreign_project.id),
+            "entity_type": "SHOT",
+            "entity_id": str(shot.id),
+            "actor": "attacker",
+        },
+    )
+    assert resp.status_code == 400
+    assert "does not belong to Project" in resp.json()["detail"] or "belongs to Project" in resp.json()["detail"]
+
+    # Verify shot remains locked
+    db_session.refresh(shot)
+    assert shot.is_locked is True
+
+
+def test_unlock_nonexistent_project_rejected(client, sample_scene):
+    fake_project_id = uuid.uuid4()
+    resp = client.post(
+        "/api/v1/locks/unlock",
+        json={
+            "project_id": str(fake_project_id),
+            "entity_type": "SCENE",
+            "entity_id": str(sample_scene.id),
+        },
+    )
+    assert resp.status_code == 404
+    assert f"Project '{fake_project_id}' not found" in resp.json()["detail"]
+
+
+def test_unlock_nonexistent_entity_rejected(client, sample_project):
+    fake_entity_id = uuid.uuid4()
+    resp = client.post(
+        "/api/v1/locks/unlock",
+        json={
+            "project_id": str(sample_project.id),
+            "entity_type": "SHOT",
+            "entity_id": str(fake_entity_id),
+        },
+    )
+    assert resp.status_code == 404
+    assert f"SHOT entity '{fake_entity_id}' not found" in resp.json()["detail"]
+
+
+def test_idempotent_same_project_unlock(client, db_session, sample_project, sample_scene):
+    shot = Shot(
+        id=uuid.uuid4(),
+        scene_id=sample_scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        is_locked=False,
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    # Unlocking an entity that is already unlocked succeeds idempotently
+    resp = client.post(
+        "/api/v1/locks/unlock",
+        json={
+            "project_id": str(sample_project.id),
+            "entity_type": "SHOT",
+            "entity_id": str(shot.id),
+            "actor": "user_idempotent",
+            "reason": "Ensure shot is editable",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_locked"] is False
+    assert resp.json()["unlocked_by"] == "user_idempotent"
+
+    # Second unlock also succeeds idempotently
+    resp2 = client.post(
+        "/api/v1/locks/unlock",
+        json={
+            "project_id": str(sample_project.id),
+            "entity_type": "SHOT",
+            "entity_id": str(shot.id),
+            "actor": "user_idempotent_2",
+            "reason": "Ensure shot is still editable",
+        },
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["is_locked"] is False
+    assert resp2.json()["unlocked_by"] == "user_idempotent_2"
+
+
+def test_hybrid_source_type_invariants(client, sample_scene, sample_asset, image_asset):
+    # 1. AI_GENERATED cannot carry a source_asset_id
+    r1 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "AI_GENERATED",
+            "source_asset_id": str(sample_asset.id),
+            "visual_prompt": "Space pilot looking ahead",
+        },
+    )
+    assert r1.status_code == 400
+    assert "AI_GENERATED shots cannot have a source_asset_id" in r1.json()["detail"]
+
+    # 2. AI_GENERATED requires a prompt
+    r2 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={"shot_number": 1, "shot_type": "AI_GENERATED"},
+    )
+    assert r2.status_code == 400
+    assert "require a visual_prompt, video_prompt, image_prompt, or action" in r2.json()["detail"]
+
+    # 3. IMPORTED_VIDEO requires source_asset_id
+    r3 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={"shot_number": 1, "shot_type": "IMPORTED_VIDEO"},
+    )
+    assert r3.status_code == 400
+    assert "requires a source_asset_id" in r3.json()["detail"]
+
+    # 4. IMPORTED_VIDEO with IMAGE asset rejected
+    r4 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "IMPORTED_VIDEO",
+            "source_asset_id": str(image_asset.id),
+        },
+    )
+    assert r4.status_code == 400
+    assert "requires a VIDEO asset" in r4.json()["detail"]
+
+    # 5. IMPORTED_IMAGE requires source_asset_id
+    r5 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={"shot_number": 1, "shot_type": "IMPORTED_IMAGE"},
+    )
+    assert r5.status_code == 400
+    assert "requires a source_asset_id" in r5.json()["detail"]
+
+    # 6. IMPORTED_IMAGE with VIDEO asset rejected
+    r6 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "IMPORTED_IMAGE",
+            "source_asset_id": str(sample_asset.id),
+        },
+    )
+    assert r6.status_code == 400
+    assert "requires an IMAGE asset" in r6.json()["detail"]
+
+    # 7. MIXED requires source_asset_id
+    r7 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "MIXED",
+            "visual_prompt": "Composite alien onto background",
+        },
+    )
+    assert r7.status_code == 400
+    assert "requires a source_asset_id" in r7.json()["detail"]
+
+    # 8. MIXED requires prompt
+    r8 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "MIXED",
+            "source_asset_id": str(sample_asset.id),
+        },
+    )
+    assert r8.status_code == 400
+    assert "requires a prompt" in r8.json()["detail"]
+
+    # 9. MIXED with both succeeds
+    r9 = client.post(
+        f"/api/v1/scenes/{sample_scene.id}/shots",
+        json={
+            "shot_number": 1,
+            "shot_type": "MIXED",
+            "source_asset_id": str(sample_asset.id),
+            "visual_prompt": "Add subtle fog overlay and cinematic sparks",
+        },
+    )
+    assert r9.status_code == 201
+    shot_id = r9.json()["id"]
+
+    # 10. Patching shot to invalid invariant rejected
+    patch_resp = client.patch(
+        f"/api/v1/shots/{shot_id}",
+        json={"shot_type": "AI_GENERATED"},  # shot has source_asset_id, cannot be AI_GENERATED
+    )
+    assert patch_resp.status_code == 400
+    assert "cannot have a source_asset_id" in patch_resp.json()["detail"]
 
 
 def test_locked_mutation_rejection(client, db_session, sample_project, sample_scene):
@@ -479,7 +718,7 @@ def test_short_mode_can_exist_without_story(client, db_session):
     # Shots created under scene
     shot_resp = client.post(
         f"/api/v1/scenes/{scene_data['id']}/shots",
-        json={"shot_number": 1, "shot_type": "AI_GENERATED", "duration_seconds": 3.0},
+        json={"shot_number": 1, "shot_type": "AI_GENERATED", "visual_prompt": "Hook shot prompt", "duration_seconds": 3.0},
     )
     assert shot_resp.status_code == 201
 
@@ -510,7 +749,7 @@ def test_loop_mode_can_exist_without_story_and_script(client, db_session):
 
     shot_resp = client.post(
         f"/api/v1/scenes/{scene_id}/shots",
-        json={"shot_number": 1, "shot_type": "AI_GENERATED", "duration_seconds": 6.0},
+        json={"shot_number": 1, "shot_type": "AI_GENERATED", "visual_prompt": "Looping water ripple", "duration_seconds": 6.0},
     )
     assert shot_resp.status_code == 201
 
@@ -557,7 +796,7 @@ def test_configuration_inheritance_project_scene_shot(client, db_session):
 
     shot1_resp = client.post(
         f"/api/v1/scenes/{s1_id}/shots",
-        json={"shot_number": 1, "shot_type": "AI_GENERATED", "duration_seconds": 5.0},
+        json={"shot_number": 1, "shot_type": "AI_GENERATED", "visual_prompt": "Shot 1 prompt", "duration_seconds": 5.0},
     )
     shot1_id = shot1_resp.json()["id"]
 
@@ -581,7 +820,7 @@ def test_configuration_inheritance_project_scene_shot(client, db_session):
 
     shot2_resp = client.post(
         f"/api/v1/scenes/{s2_id}/shots",
-        json={"shot_number": 1, "shot_type": "AI_GENERATED"},
+        json={"shot_number": 1, "shot_type": "AI_GENERATED", "visual_prompt": "Shot 2 prompt"},
     )
     shot2_id = shot2_resp.json()["id"]
 
@@ -596,6 +835,7 @@ def test_configuration_inheritance_project_scene_shot(client, db_session):
         json={
             "shot_number": 2,
             "shot_type": "AI_GENERATED",
+            "visual_prompt": "Shot 3 prompt",
             "provider_config": {"aspect_ratio": "16:9", "custom_seed": 42},
         },
     )

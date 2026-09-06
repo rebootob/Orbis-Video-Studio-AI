@@ -27,6 +27,63 @@ class HybridShotService:
         return None
 
     @classmethod
+    def _validate_source_invariants(
+        cls,
+        norm_type: str,
+        source_asset_id: Optional[uuid.UUID],
+        asset: Optional[Asset],
+        has_prompt: bool,
+    ):
+        if norm_type == "AI_GENERATED":
+            if source_asset_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="AI_GENERATED shots cannot have a source_asset_id. Use MIXED for shots combining imported assets with AI generation.",
+                )
+            if not has_prompt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="AI_GENERATED shots require a visual_prompt, video_prompt, image_prompt, or action.",
+                )
+        elif norm_type in ("IMPORTED_VIDEO", "IMPORTED_IMAGE", "RECORDED_FOOTAGE", "STOCK_ASSET"):
+            if source_asset_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Shot type '{norm_type}' requires a source_asset_id pointing to an existing Asset.",
+                )
+            if asset is not None:
+                atype = (asset.asset_type or "").upper()
+                if norm_type in ("IMPORTED_VIDEO", "RECORDED_FOOTAGE"):
+                    if atype != "VIDEO" and "video" not in (asset.content_type or ""):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Shot type '{norm_type}' requires a VIDEO asset, but asset '{asset.id}' is '{asset.asset_type}'.",
+                        )
+                elif norm_type == "IMPORTED_IMAGE":
+                    if atype != "IMAGE" and "image" not in (asset.content_type or ""):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Shot type 'IMPORTED_IMAGE' requires an IMAGE asset, but asset '{asset.id}' is '{asset.asset_type}'.",
+                        )
+                elif norm_type == "STOCK_ASSET":
+                    if atype not in ("VIDEO", "IMAGE") and not any(k in (asset.content_type or "") for k in ("video", "image")):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Shot type 'STOCK_ASSET' requires a VIDEO or IMAGE asset, but asset '{asset.id}' is '{asset.asset_type}'.",
+                        )
+        elif norm_type == "MIXED":
+            if source_asset_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Shot type 'MIXED' requires a source_asset_id.",
+                )
+            if not has_prompt:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Shot type 'MIXED' requires a prompt (visual_prompt, video_prompt, image_prompt, or action) for AI generation.",
+                )
+
+    @classmethod
     def create_shot(
         cls,
         db: Session,
@@ -49,6 +106,7 @@ class HybridShotService:
         project_id = cls.get_scene_project_id(db, scene)
 
         # Validate source asset ownership context if provided
+        asset: Optional[Asset] = None
         if request.source_asset_id:
             asset = db.get(Asset, request.source_asset_id)
             if not asset:
@@ -61,6 +119,9 @@ class HybridShotService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Asset '{request.source_asset_id}' belongs to Project '{asset.project_id}', not Scene Project '{project_id}'",
                 )
+
+        has_prompt = bool(request.visual_prompt or request.video_prompt or request.image_prompt or request.action)
+        cls._validate_source_invariants(norm_type, request.source_asset_id, asset, has_prompt)
 
         shot = Shot(
             id=uuid.uuid4(),
@@ -102,25 +163,37 @@ class HybridShotService:
         # Check if shot or parent scene/script is locked
         LockMachineService.check_mutation_allowed(db, "SHOT", shot_id)
 
-        if request.shot_type is not None:
-            shot.shot_type = validate_shot_type(request.shot_type)
+        eff_type = validate_shot_type(request.shot_type) if request.shot_type is not None else shot.shot_type
+        eff_source_asset_id = request.source_asset_id if request.source_asset_id is not None else shot.source_asset_id
 
-        if request.source_asset_id is not None:
-            scene = shot.scene
-            project_id = cls.get_scene_project_id(db, scene) if scene else None
-            asset = db.get(Asset, request.source_asset_id)
-            if not asset:
+        scene = shot.scene
+        project_id = cls.get_scene_project_id(db, scene) if scene else None
+        eff_asset = None
+
+        if eff_source_asset_id is not None:
+            eff_asset = db.get(Asset, eff_source_asset_id)
+            if not eff_asset:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Source Asset '{request.source_asset_id}' not found",
+                    detail=f"Source Asset '{eff_source_asset_id}' not found",
                 )
-            if project_id is not None and asset.project_id != project_id:
+            if project_id is not None and eff_asset.project_id != project_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Asset '{request.source_asset_id}' belongs to Project '{asset.project_id}', not Scene Project '{project_id}'",
+                    detail=f"Asset '{eff_source_asset_id}' belongs to Project '{eff_asset.project_id}', not Scene Project '{project_id}'",
                 )
-            shot.source_asset_id = request.source_asset_id
 
+        eff_prompt = bool(
+            (request.visual_prompt if request.visual_prompt is not None else shot.visual_prompt)
+            or (request.video_prompt if request.video_prompt is not None else shot.video_prompt)
+            or (request.image_prompt if request.image_prompt is not None else shot.image_prompt)
+            or (request.action if request.action is not None else shot.action)
+        )
+        cls._validate_source_invariants(eff_type, eff_source_asset_id, eff_asset, eff_prompt)
+
+        shot.shot_type = eff_type
+        if request.source_asset_id is not None:
+            shot.source_asset_id = request.source_asset_id
         if request.source_metadata is not None:
             shot.source_metadata = request.source_metadata
         if request.provider_config is not None:

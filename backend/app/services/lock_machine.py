@@ -38,6 +38,19 @@ class LockMachineService:
         return None, None
 
     @classmethod
+    def _resolve_entity_project_id(cls, instance) -> Optional[uuid.UUID]:
+        if instance is None:
+            return None
+        if hasattr(instance, "project_id") and instance.project_id:
+            return instance.project_id
+        if isinstance(instance, Scene):
+            return instance.project_id or (instance.story.project_id if instance.story else None)
+        if isinstance(instance, Shot):
+            if instance.scene:
+                return instance.scene.project_id or (instance.scene.story.project_id if instance.scene.story else None)
+        return None
+
+    @classmethod
     def lock(
         cls,
         db: Session,
@@ -63,26 +76,23 @@ class LockMachineService:
             )
 
         # Verify entity project ownership where applicable
-        if instance is not None:
-            entity_project_id = None
-            if hasattr(instance, "project_id") and instance.project_id:
-                entity_project_id = instance.project_id
-            elif isinstance(instance, Scene):
-                entity_project_id = instance.project_id or (instance.story.project_id if instance.story else None)
-            elif isinstance(instance, Shot):
-                if instance.scene:
-                    entity_project_id = instance.scene.project_id or (instance.scene.story.project_id if instance.scene.story else None)
-            
-            if entity_project_id is not None and entity_project_id != project_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{norm_type} '{entity_id}' does not belong to Project '{project_id}'",
-                )
+        entity_project_id = cls._resolve_entity_project_id(instance)
+        if entity_project_id is not None and entity_project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{norm_type} '{entity_id}' does not belong to Project '{project_id}'",
+            )
 
         lock_record = db.query(AssetLock).filter(
             AssetLock.entity_type == norm_type,
             AssetLock.entity_id == entity_id,
         ).first()
+
+        if lock_record is not None and lock_record.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Lock for {norm_type} '{entity_id}' belongs to Project '{lock_record.project_id}', not Project '{project_id}'",
+            )
 
         now = utc_now()
         if lock_record is None:
@@ -125,10 +135,39 @@ class LockMachineService:
         reason: Optional[str] = None,
     ) -> AssetLock:
         norm_type = validate_lock_target(entity_type)
+        project = db.get(Project, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project '{project_id}' not found",
+            )
+
+        model_cls, instance = cls._get_entity_model_and_instance(db, norm_type, entity_id)
+        if model_cls is not None and instance is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{norm_type} entity '{entity_id}' not found",
+            )
+
+        # Verify entity project ownership where applicable
+        entity_project_id = cls._resolve_entity_project_id(instance)
+        if entity_project_id is not None and entity_project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{norm_type} '{entity_id}' does not belong to Project '{project_id}'",
+            )
+
         lock_record = db.query(AssetLock).filter(
             AssetLock.entity_type == norm_type,
             AssetLock.entity_id == entity_id,
         ).first()
+
+        # Reject if existing lock record belongs to another project
+        if lock_record is not None and lock_record.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Lock for {norm_type} '{entity_id}' belongs to Project '{lock_record.project_id}', not Project '{project_id}'",
+            )
 
         now = utc_now()
         if lock_record is None:
@@ -147,6 +186,7 @@ class LockMachineService:
             )
             db.add(lock_record)
         else:
+            # Idempotent unlock: update audit info
             lock_record.is_locked = False
             lock_record.unlocked_by = actor
             lock_record.unlocked_at = now
@@ -154,7 +194,6 @@ class LockMachineService:
             lock_record.updated_at = now
 
         # Update entity instance is_locked attribute if present
-        model_cls, instance = cls._get_entity_model_and_instance(db, norm_type, entity_id)
         if instance is not None and hasattr(instance, "is_locked"):
             instance.is_locked = False
 

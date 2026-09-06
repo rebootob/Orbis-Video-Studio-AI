@@ -83,7 +83,7 @@ def upgrade():
         batch_op.create_index("ix_asset_locks_entity_id", ["entity_id"])
         batch_op.create_unique_constraint("uq_asset_locks_entity", ["entity_type", "entity_id"])
 
-    # 5. Backfill scenes.project_id from stories.project_id where story_id is set
+    # 5. Deterministic backfill: scenes.project_id from stories.project_id
     connection = op.get_bind()
     scenes = sa.table(
         "scenes",
@@ -96,18 +96,31 @@ def upgrade():
         sa.column("id", sa.Uuid()),
         sa.column("project_id", sa.Uuid()),
     )
-    # Perform backfill query
-    try:
-        story_records = connection.execute(sa.select(stories.c.id, stories.c.project_id)).all()
-        for s_id, p_id in story_records:
-            connection.execute(
-                scenes.update().where(scenes.c.story_id == s_id).values(project_id=p_id)
-            )
-    except Exception:
-        pass
+    story_records = connection.execute(
+        sa.select(stories.c.id, stories.c.project_id).where(stories.c.id.isnot(None))
+    ).all()
+    for s_id, p_id in story_records:
+        connection.execute(
+            scenes.update().where(scenes.c.story_id == s_id).values(project_id=p_id)
+        )
 
 
 def downgrade():
+    connection = op.get_bind()
+    scenes = sa.table(
+        "scenes",
+        sa.column("id", sa.Uuid()),
+        sa.column("story_id", sa.Uuid()),
+    )
+    direct_scene_count = connection.execute(
+        sa.select(sa.func.count(scenes.c.id)).where(scenes.c.story_id.is_(None))
+    ).scalar()
+    if direct_scene_count and direct_scene_count > 0:
+        raise RuntimeError(
+            f"Cannot downgrade migration 008: {direct_scene_count} direct Project->Scene row(s) exist with story_id=NULL. "
+            "Downgrade to 007 requires scenes.story_id NOT NULL. Remove or attach direct scenes before downgrading."
+        )
+
     op.drop_table("asset_locks")
 
     with op.batch_alter_table("shots") as batch_op:
