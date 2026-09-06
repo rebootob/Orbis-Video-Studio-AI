@@ -4,91 +4,176 @@
 
 ---
 
-## 1. Domain Entity Relationship Diagram
+## 1. Domain Relationship Model
 
 ```mermaid
 erDiagram
     PROJECT ||--o{ DOCUMENT : ingests
-    PROJECT ||--11 STORY : contains
-    STORY ||--11 SCRIPT : generates
-    SCRIPT ||--o{ SCENE : divides_into
+    PROJECT o|--o| STORY : may_contain
+    STORY o|--o| SCRIPT : may_generate
+    SCRIPT o|--o{ SCENE : divides_into
+    PROJECT ||--o{ SCENE : may_own_directly
     SCENE ||--o{ SHOT : contains
     PROJECT ||--o{ REFERENCE_ASSET : owns
     SHOT ||--o{ SHOT_REFERENCE : links
-    SHOT ||--11 SHOT_LOCK : maintains
-    PROJECT ||--o{ AUDIO_TRACK : includes
-    PROJECT ||--11 EDIT_TIMELINE : orchestrates
+    SHOT ||--o{ ASSET_LOCK : may_lock
     PROJECT ||--o{ GENERATION_JOB : records
+    PROJECT ||--o{ AUDIO_TRACK : includes
+    PROJECT o|--o| EDIT_TIMELINE : orchestrates
     PROJECT ||--o{ OUTPUT_PRESET : configures
     OUTPUT_PRESET ||--o{ RENDER_JOB : executes
 ```
 
+The Story/Script layer is optional at the domain level. `video_mode` determines whether it is required.
+
 ---
 
-## 2. Core Entity Specifications
+## 2. Project
 
-### `Project`
-Root container for a video production story.
-- `id` (UUID): Primary key.
-- `title` (String): Project title.
-- `description` (Text): Brief / initial prompt.
-- `default_config` (JSON): Global default settings (aspect ratio, style preset, default provider, cost ceiling).
-- `status` (Enum): `DRAFT`, `STORY_GENERATED`, `SCRIPT_APPROVED`, `GENERATING_SHOTS`, `IN_EDITING`, `COMPLETED`, `ARCHIVED`.
-- `created_at`, `updated_at` (Timestamp).
+Root container for any supported Orbis video production mode.
 
-### `Document`
-Uploaded source files (Brief, Word, PDF, PowerPoint).
-- `id` (UUID): Primary key.
-- `project_id` (UUID): FK to Project.
-- `file_name` (String): Original file name.
-- `file_type` (Enum): `PDF`, `DOCX`, `PPTX`, `TXT`, `MD`.
-- `storage_path` (String): Object storage key.
-- `extracted_text` (Text): Parsed text payload.
+Suggested core fields:
 
-### `Story`
-High-level narrative outline derived from Brief/Documents.
-- `id` (UUID): Primary key.
-- `project_id` (UUID): FK to Project.
-- `logline` (Text): One-sentence story logline.
-- `synopsis` (Text): Full narrative synopsis.
-- `genre` (String): Cinematic style / genre.
-- `status` (Enum): `DRAFT`, `LOCKED`.
+- `id` (UUID)
+- `title` (String)
+- `description` (Text)
+- `video_mode` (Enum/String): `STORY`, `SHORT`, `LOOP`, `SCENE`; extensible later
+- `purpose` (String/Enum)
+- `target_platform` (String/Enum)
+- `target_duration_seconds` (Float, optional)
+- `preferred_aspect_ratio` (String, optional)
+- `mode_config` (JSON): provider-neutral mode-specific production configuration
+- `default_config` (JSON): project-level inherited defaults
+- `status` (Enum)
+- timestamps
 
-### `Script` & `Scene` & `Shot`
-- **`Script`**: Full formatted screenplay text.
-- **`Scene`**: Narrative location/time scene block (`scene_number`, `heading`, `location_ref_id`, `description`, `locked`).
-- **`Shot`**: Individual camera shot block.
-  - `shot_number` (Integer).
-  - `shot_type` (Enum): `AI_GENERATED`, `IMPORTED_VIDEO`, `IMPORTED_IMAGE`, `RECORDED_FOOTAGE`, `STOCK_ASSET`, `MIXED`.
-  - `visual_prompt` (Text): Prompt sent to provider.
-  - `duration_seconds` (Float): Shot duration.
-  - `camera_motion` (String): Pan, tilt, zoom, dolly spec.
-  - `provider_config` (JSON): Provider-specific settings (e.g. Vidu seed, motion score).
-  - `media_asset_url` (String): Storage URL for generated/imported shot clip.
-  - `status` (Enum): `PENDING`, `GENERATING`, `COMPLETED`, `FAILED`, `LOCKED`.
+`video_mode` must not be encoded as a Vidu/provider setting.
 
-### `ReferenceAsset`
-Centralized character, location, prop, or style reference item.
-- `id` (UUID): Primary key.
-- `project_id` (UUID): FK to Project.
-- `asset_type` (Enum): `CHARACTER`, `LOCATION`, `DOCUMENT`, `PROP`, `BRAND`, `STYLE`, `IMAGE`, `EXISTING_SHOT`, `AUDIO`.
-- `name` (String): Character/location name.
-- `description` (Text): Text description.
-- `media_urls` (Array of Strings): Reference image/audio storage paths.
-- `embedding_data` (JSON): Feature vector metadata for visual consistency.
+---
 
-### `AssetLock`
-Lock state tracker protecting approved entities from accidental regeneration.
-- `entity_type` (Enum): `SCRIPT`, `SCENE`, `SHOT`, `CHARACTER`, `LOCATION`, `VOICE`, `TIMING`.
-- `entity_id` (UUID): Target entity ID.
-- `is_locked` (Boolean): Lock status flag.
-- `locked_by` (String): User/agent identifier.
-- `locked_at` (Timestamp).
+## 3. Document
 
-### `AudioTrack` & `EditTimeline`
-- **`AudioTrack`**: Dialogue, VO, BGM, SFX audio stems with ducking parameters (`track_type`, `media_url`, `start_time`, `volume_db`, `ducking_ratio`).
-- **`EditTimeline`**: Master sequence track layout mapping shots and audio stems onto time axes.
+Uploaded factual/creative source files such as Brief, PDF, DOCX, PPTX, TXT and MD.
 
-### `GenerationJob` & `CostRecord`
-- **`GenerationJob`**: Provider API invocation record (`provider_name`, `job_id`, `status`, `cost_usd`, `idempotency_key`).
-- **`CostRecord`**: Granular usage ledger auditing provider charges per shot.
+Key fields include project ownership, object-storage location and extracted text.
+
+---
+
+## 4. Story / Script
+
+`Story` is an optional high-level narrative outline used by STORY mode and any later mode that explicitly requires narrative structure.
+
+`Script` is an optional screenplay/script layer linked to Story or another explicitly supported creative structure.
+
+Core services must not assume every Project owns a Story or Script.
+
+---
+
+## 5. Scene / Shot
+
+`Scene` is a logical production scene and can exist under a Script or directly under a Project where the selected mode permits it.
+
+`Shot` is the common execution unit across modes.
+
+Suggested Shot source types:
+
+```text
+AI_GENERATED
+IMPORTED_VIDEO
+IMPORTED_IMAGE
+RECORDED_FOOTAGE
+STOCK_ASSET
+MIXED
+```
+
+Typical Shot fields:
+- shot number/order
+- source type
+- visual/video prompt
+- duration
+- camera motion
+- provider-neutral generation request metadata
+- linked Asset where media is actually ingested/stored
+- status / lock state
+
+Provider-specific request handling stays behind the provider adapter boundary.
+
+---
+
+## 6. Reference Assets
+
+Project-level Reference Library supports Character, Location, Document, Prop, Brand, Style, Image, Existing Shot and Audio references.
+
+No embeddings/vector DB/RAG dependency is required by the Core V1 architecture.
+
+Reference priority remains:
+
+```text
+factual documents
+> locked character/location
+> project style/brand
+> scene instruction
+> shot instruction
+> AI creativity
+```
+
+---
+
+## 7. Asset Lock
+
+Lock state protects approved production entities from accidental overwrite or regeneration.
+
+Target entity types may include:
+
+```text
+SCRIPT
+SCENE
+SHOT
+CHARACTER
+LOCATION
+VOICE
+TIMING
+```
+
+Unlock must be explicit and auditable. Lock rules must remain compatible with later selective regeneration.
+
+---
+
+## 8. GenerationJob
+
+WP007 established the provider-neutral durable generation-job model.
+
+Key concerns include:
+- provider name / provider job identity
+- job status
+- idempotency key
+- retry/poll counters and scheduling
+- durable claim/lease ownership
+- submission attempt fencing
+- reconciliation-required state for ambiguous chargeable operations
+- safe allowlisted provider result metadata
+- output URL metadata without fabricated Asset storage records
+
+Core Shot/Scene logic must not directly call Vidu.
+
+---
+
+## 9. Audio / Timeline / Output
+
+`AudioTrack`, `EditTimeline`, `OutputPreset` and `RenderJob` remain shared across modes where applicable.
+
+Video Mode, Purpose, Target Platform and Output Preset are separate concepts. One master Project may render multiple platform/aspect variants.
+
+---
+
+## 10. Configuration Inheritance
+
+```text
+Project
+  ↓
+Scene
+  ↓
+Shot
+```
+
+Lower-level overrides are permitted only within validation and lock rules.
