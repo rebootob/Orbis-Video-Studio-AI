@@ -41,6 +41,13 @@ class MockImageProviderAdapter(IImageGenerationProviderAdapter):
                 error_message="Simulated ambiguous provider response",
                 error_code="SUBMISSION_UNCERTAIN",
             )
+        if extra.get("simulate_async"):
+            return ImageJobResult(
+                provider_job_id=f"img-async-{uuid.uuid4().hex[:8]}",
+                status="QUEUED",
+                cost_usd=0.04,
+                raw_response={"simulated_async": True, "shot_id": params.shot_id},
+            )
 
         # Deterministic generation
         prompt_hash = hashlib.sha256(params.prompt.encode("utf-8")).hexdigest()[:12]
@@ -86,8 +93,21 @@ class MockImageProviderAdapter(IImageGenerationProviderAdapter):
         )
 
     async def check_job_status(self, provider_job_id: str) -> ImageJobResult:
+        # Deterministic completed SVG representation for polled asynchronous job
+        prompt_hash = hashlib.sha256(provider_job_id.encode("utf-8")).hexdigest()[:12]
+        bg_color = f"#{prompt_hash[:6]}"
+        svg_content = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="100%" height="100%" fill="{bg_color}" />
+  <rect x="20" y="20" width="1240" height="680" fill="#0f172a" opacity="0.85" rx="16" />
+  <text x="50" y="80" fill="#38bdf8" font-family="sans-serif" font-size="28" font-weight="bold">Orbis Keyframe Blueprint</text>
+  <text x="50" y="130" fill="#94a3b8" font-family="sans-serif" font-size="18">Polled Job: {provider_job_id}</text>
+</svg>"""
         return ImageJobResult(
             provider_job_id=provider_job_id,
             status="COMPLETED",
+            image_url=f"/mock-images/{provider_job_id}.svg",
+            image_data=svg_content.encode("utf-8"),
+            content_type="image/svg+xml",
             cost_usd=0.04,
+            raw_response={"polled": True, "provider_job_id": provider_job_id},
         )

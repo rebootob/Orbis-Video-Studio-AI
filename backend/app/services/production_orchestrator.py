@@ -1111,7 +1111,7 @@ class ProductionOrchestrator:
                     provider=provider,
                 )
             elif target_stage == "SHOT_PLAN_APPROVED":
-                # Mandatory STOP: Keyframe and video generation require explicit authorization
+                # Mandatory STOP: Keyframe and video generation require explicit execution / authorization
                 pass
             elif target_stage == "IMAGES_APPROVED":
                 # Mandatory STOP: Video generation ALWAYS requires explicit human confirmation!
@@ -1556,6 +1556,38 @@ class ProductionOrchestrator:
                     detail="Project hard budget limit exceeded. Keyframe generation dispatch is blocked.",
                 )
 
+            # Check cost authorization in AUTO mode
+            default_cfg = getattr(project, "default_config", None) or {}
+            mode_cfg = getattr(project, "mode_config", None) or {}
+            has_persisted_cost_auth = False
+            if isinstance(default_cfg, dict):
+                has_persisted_cost_auth = bool(
+                    default_cfg.get("auto_cost_authorized") or default_cfg.get("cost_authorized")
+                )
+            if not has_persisted_cost_auth and isinstance(mode_cfg, dict):
+                has_persisted_cost_auth = bool(
+                    mode_cfg.get("auto_cost_authorized") or mode_cfg.get("cost_authorized")
+                )
+            cost_auth = bool(params.get("cost_authorized", False)) or has_persisted_cost_auth
+
+            if actor == "AUTO" and not cost_auth:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action="AUTO_STOPPED_AWAITING_COST_AUTHORIZATION",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="CHARGEABLE_ACTION_REQUIRES_AUTHORIZATION",
+                    detail="Keyframe generation is chargeable and requires explicit cost authorization.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Keyframe generation is chargeable and requires explicit cost authorization in AUTO mode.",
+                )
+
             # Determine operation type
             if action_upper in ("START_KEYFRAME_GENERATION", "GENERATE_KEYFRAMES", "CONTINUE_INCOMPLETE_KEYFRAMES"):
                 op_type = "CONTINUE_INCOMPLETE"
@@ -1573,6 +1605,7 @@ class ProductionOrchestrator:
                 project_id=project_id,
                 operation_type=op_type,
                 shot_ids=shot_ids,
+                cost_authorized=cost_auth,
                 actor=actor,
             )
 
@@ -1595,11 +1628,63 @@ class ProductionOrchestrator:
                     detail="Parameter 'shot_id' is required for GENERATE_SHOT_KEYFRAME.",
                 )
             shot_id = uuid.UUID(raw_shot_id) if isinstance(raw_shot_id, str) else raw_shot_id
-            force = bool(params.get("force", False))
+
+            b_summary = BudgetService.get_budget_status(db, project_id)
+            if b_summary.get("is_hard_limit_exceeded"):
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action=action_upper,
+                    actor=actor,
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="HARD_BUDGET_LIMIT_EXCEEDED",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Project hard budget limit exceeded. Keyframe generation dispatch is blocked.",
+                )
+
+            default_cfg = getattr(project, "default_config", None) or {}
+            mode_cfg = getattr(project, "mode_config", None) or {}
+            has_persisted_cost_auth = False
+            if isinstance(default_cfg, dict):
+                has_persisted_cost_auth = bool(
+                    default_cfg.get("auto_cost_authorized") or default_cfg.get("cost_authorized")
+                )
+            if not has_persisted_cost_auth and isinstance(mode_cfg, dict):
+                has_persisted_cost_auth = bool(
+                    mode_cfg.get("auto_cost_authorized") or mode_cfg.get("cost_authorized")
+                )
+            cost_auth = bool(params.get("cost_authorized", False)) or has_persisted_cost_auth
+
+            if actor == "AUTO" and not cost_auth:
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=current,
+                    to_state=current,
+                    action="AUTO_STOPPED_AWAITING_COST_AUTHORIZATION",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="CHARGEABLE_ACTION_REQUIRES_AUTHORIZATION",
+                    detail="Keyframe generation is chargeable and requires explicit cost authorization.",
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Keyframe generation is chargeable and requires explicit cost authorization in AUTO mode.",
+                )
+
             asset, job = KeyframeGenerationService.generate_shot_keyframe(
                 db=db,
+                project_id=project_id,
                 shot_id=shot_id,
-                force=force,
+                cost_authorized=cost_auth,
+                actor=actor,
+                provider_specific_params=params.get("provider_specific_params"),
             )
             updated_state = cls.evaluate_state(db, project_id)
             return ExecuteActionResponse(

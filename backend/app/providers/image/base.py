@@ -33,6 +33,7 @@ class ImageJobResult(BaseModel):
     status_code: Optional[int] = None
     retryable: bool = False
     submission_uncertain: bool = False
+    progress_percentage: Optional[float] = None
     raw_response: Optional[Dict[str, Any]] = None
 
 
