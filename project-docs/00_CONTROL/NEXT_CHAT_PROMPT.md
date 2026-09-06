@@ -27,11 +27,8 @@ Read in exact order:
 9. project-docs/30_PRODUCT/V1_SCOPE.md
 10. only other directly relevant routed documents
 
-Then inspect:
-- GitHub Issue #24 and ALL Product Lock / UX addendum comments
-- PR #25 and latest review/corrective comments
-- exact current PR #25 HEAD and changed files
-- current workflow/CI results for that exact HEAD
+Then note:
+- Closed work packages (including Issue #24 / PR #25) may be consulted only for audit, regression, or historical context when relevant. Do NOT require re-review of closed PR #25.
 
 KNOWN COMPLETED STATE:
 P0-WP001 = PASS / CLOSED / MERGED
@@ -190,8 +187,8 @@ Local Antigravity watcher/dispatcher is PAUSED and not production-trusted.
 Do not depend on it.
 
 FIRST ACTION:
-Report exact live main HEAD and exact PR #25 HEAD.
-If PR #25 has a new corrective HEAD, independently review only the authorized WP010 scope and compare it against Issue #24 + addenda.
-If the PR HEAD is still 291ea773681831a0a68e585eb7e0664902102be3, report that no corrective commit is available yet and wait.
-Do not merge or start another WP automatically.
+1. Fresh-fetch live origin/main and report exact live main HEAD SHA.
+2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE.
+3. Await explicit Owner authorization before starting or implementing any new Work Package (including P2-WP011).
+4. Do not start WP011 or any later WP automatically.
 ```
