@@ -29,6 +29,13 @@ from app.models.audio_clip import (
 )
 from app.models.audio_plan import AudioPlan
 from app.models.audio_history import AudioPlanVersion, AudioClipHistory
+from app.models.assembly import (
+    AssemblyTimeline,
+    AssemblyScene,
+    AssemblyShotPlacement,
+    TimelineCheckpoint,
+    TimelineAudit,
+)
 
 __all__ = [
     "Base",
@@ -61,5 +68,10 @@ __all__ = [
     "AudioPlan",
     "AudioPlanVersion",
     "AudioClipHistory",
+    "AssemblyTimeline",
+    "AssemblyScene",
+    "AssemblyShotPlacement",
+    "TimelineCheckpoint",
+    "TimelineAudit",
 ]
 

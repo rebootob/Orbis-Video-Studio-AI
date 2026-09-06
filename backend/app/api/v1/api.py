@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     cost_ledger,
     orchestration,
     audio,
+    assembly,
 )
 
 api_router = APIRouter()
@@ -27,5 +28,6 @@ api_router.include_router(shots.router, tags=["shots"])
 api_router.include_router(locks.router, tags=["locks"])
 api_router.include_router(cost_ledger.router, tags=["costs"])
 api_router.include_router(audio.router, tags=["audio"])
+api_router.include_router(assembly.router, tags=["assembly"])
 
 

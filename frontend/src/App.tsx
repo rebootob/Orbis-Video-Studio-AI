@@ -26,6 +26,7 @@ import { ReferencesPanel } from './components/references/ReferencesPanel';
 import { GenerationQueuePanel } from './components/queue/GenerationQueuePanel';
 import { BudgetLedgerPanel } from './components/budget/BudgetLedgerPanel';
 import { AudioProductionPanel } from './components/audio/AudioProductionPanel';
+import { SimpleTimelinePanel } from './components/assembly/SimpleTimelinePanel';
 import { QCHistoryPanel } from './components/qc/QCHistoryPanel';
 import {
   Film,
@@ -46,7 +47,7 @@ export const App: React.FC = () => {
 
   // Active Workspace Tab
   const [activeTab, setActiveTab] = useState<
-    'storyboard' | 'references' | 'queue' | 'budget' | 'audio' | 'qc'
+    'storyboard' | 'references' | 'queue' | 'budget' | 'audio' | 'assembly' | 'qc'
   >('storyboard');
 
   // Workspace Data
@@ -729,7 +730,14 @@ export const App: React.FC = () => {
                 onClick={() => setActiveTab('audio')}
                 data-testid="tab-audio"
               >
-                <Volume2 size={16} /> Audio Readiness
+                <Volume2 size={16} /> Audio Production
+              </button>
+              <button
+                className={`tab-item ${activeTab === 'assembly' ? 'active' : ''}`}
+                onClick={() => setActiveTab('assembly')}
+                data-testid="tab-assembly"
+              >
+                <Film size={16} /> Timeline Assembly
               </button>
               <button
                 className={`tab-item ${activeTab === 'qc' ? 'active' : ''}`}
@@ -818,6 +826,13 @@ export const App: React.FC = () => {
               <AudioProductionPanel
                 projectId={selectedProject.id}
                 projectStatus={selectedProject.status}
+                onRefreshProject={() => loadWorkspaceData(selectedProject)}
+              />
+            )}
+
+            {activeTab === 'assembly' && (
+              <SimpleTimelinePanel
+                projectId={selectedProject.id}
                 onRefreshProject={() => loadWorkspaceData(selectedProject)}
               />
             )}
