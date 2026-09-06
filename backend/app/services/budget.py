@@ -101,12 +101,18 @@ class BudgetService:
         db: Session,
         project_id: uuid.UUID,
         estimated_cost: Optional[float] = None,
+        lock_row: bool = False,
     ):
         """Fail closed when a known estimated charge would exceed hard budget,
 
         or when project budget is already exhausted.
         """
-        project = cls.get_project_or_404(db, project_id)
+        query = db.query(Project).filter(Project.id == project_id)
+        if lock_row:
+            query = query.with_for_update()
+        project = query.first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
         if project.budget_limit is None:
             return
 

@@ -110,41 +110,42 @@ class ProviderPricingService:
         return round(estimated, 4), rule.currency, CostStatus.ESTIMATED
 
     @classmethod
-    def _init_defaults(cls):
-        cls.register_rule(
-            ProviderPricingRule(
-                provider="vidu",
-                operation="VIDEO_GENERATION",
-                cost_per_second=0.05,
-                currency="USD",
-            )
-        )
-        cls.register_rule(
-            ProviderPricingRule(
-                provider="vidu",
-                operation="TEXT_TO_VIDEO",
-                cost_per_second=0.05,
-                currency="USD",
-            )
-        )
-        cls.register_rule(
-            ProviderPricingRule(
-                provider="vidu",
-                operation="REFERENCE_TO_VIDEO",
-                cost_per_second=0.05,
-                currency="USD",
-            )
-        )
-        cls.register_rule(
-            ProviderPricingRule(
-                provider="openai",
-                operation="STORY_GENERATION",
-                model="gpt-4o",
-                cost_per_1k_prompt_tokens=0.005,
-                cost_per_1k_completion_tokens=0.015,
-                currency="USD",
-            )
-        )
+    def reset(cls):
+        """Reset registry to clean state (clears all registered rules and loads config)."""
+        cls._registry.clear()
+        cls._default_rules.clear()
+        cls.load_from_config()
+
+    @classmethod
+    def load_from_config(cls, config: Optional[Dict[str, Any]] = None):
+        """Load pricing rules from configuration dictionary without hardcoded rates."""
+        if config is None:
+            try:
+                from app.core.config import settings
+                config = getattr(settings, "PROVIDER_PRICING_CONFIG", None)
+            except Exception:
+                config = None
+        if not config:
+            return
+
+        for key, val in config.items():
+            if isinstance(val, dict):
+                parts = key.split(":")
+                provider = val.get("provider", parts[0])
+                operation = val.get("operation", parts[1] if len(parts) > 1 else "VIDEO_GENERATION")
+                model = val.get("model", parts[2] if len(parts) > 2 else None)
+                rule = ProviderPricingRule(
+                    provider=provider,
+                    operation=operation,
+                    model=model,
+                    cost_per_second=val.get("cost_per_second"),
+                    cost_per_generation=val.get("cost_per_generation"),
+                    cost_per_1k_prompt_tokens=val.get("cost_per_1k_prompt_tokens"),
+                    cost_per_1k_completion_tokens=val.get("cost_per_1k_completion_tokens"),
+                    currency=val.get("currency", "USD"),
+                )
+                cls.register_rule(rule)
 
 
-ProviderPricingService._init_defaults()
+# Initialize from settings configuration (empty by default)
+ProviderPricingService.load_from_config()

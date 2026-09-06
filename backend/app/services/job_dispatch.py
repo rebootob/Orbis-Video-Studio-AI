@@ -149,9 +149,6 @@ class JobDispatchService:
             model=None,
             params={"duration_seconds": duration_secs},
         )
-        if project_id:
-            BudgetService.check_budget_before_dispatch(db, project_id, estimated_cost)
-
         job = Job(
             id=uuid.uuid4(),
             shot_id=shot_id,
@@ -163,9 +160,16 @@ class JobDispatchService:
             max_retries=max_retries,
             payload=params.model_dump(),
         )
+
         try:
+            if project_id:
+                # Concurrency-safe budget check with row lock
+                BudgetService.check_budget_before_dispatch(
+                    db, project_id, estimated_cost, lock_row=True
+                )
+
             db.add(job)
-            db.commit()
+            db.flush()
             if project_id:
                 CostLedgerService.record_entry(
                     db,
@@ -179,7 +183,9 @@ class JobDispatchService:
                     currency=currency,
                     cost_status=cost_status,
                     idempotency_key=idempotency_key,
+                    commit=False,
                 )
+            db.commit()
             return load(db, job.id)
         except IntegrityError:
             db.rollback()
@@ -187,6 +193,9 @@ class JobDispatchService:
                 existing = db.query(Job).filter_by(shot_id=shot_id, idempotency_key=idempotency_key).first()
                 if existing:
                     return existing
+            raise
+        except Exception:
+            db.rollback()
             raise
 
     @staticmethod

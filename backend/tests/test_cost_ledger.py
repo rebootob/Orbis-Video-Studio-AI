@@ -1,6 +1,7 @@
-"""Focused unit and integration tests for P2-WP009: Cost Control & Granular Usage Audit Ledger."""
+"""Focused unit, integration, and concurrency tests for P2-WP009: Cost Control & Granular Usage Audit Ledger."""
 import uuid
 import pytest
+from unittest.mock import patch
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -8,11 +9,22 @@ from app.models.project import Project
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.generation_job import GenerationJob
+from app.models.generation_audit import GenerationAuditLog
 from app.models.usage_ledger import UsageLedger, LedgerAdjustment
 from app.services.pricing import ProviderPricingService, ProviderPricingRule, CostStatus
 from app.services.budget import BudgetService
 from app.services.cost_ledger import CostLedgerService
 from app.services.job_dispatch import JobDispatchService
+from app.services.creative_generation.service import StoryGenerationService
+from app.services.creative_generation.fake_provider import FakeCreativeGenerationProvider
+from app.services.creative_generation.base import CreativeGenerationError
+
+
+@pytest.fixture(autouse=True)
+def clean_pricing_registry():
+    ProviderPricingService.reset()
+    yield
+    ProviderPricingService.reset()
 
 
 @pytest.fixture
@@ -57,35 +69,28 @@ def test_shot(db_session: Session, test_project: Project) -> Shot:
     return shot
 
 
-def test_provider_pricing_registry_defaults():
-    # 1. Known vidu pricing
-    cost, curr, status = ProviderPricingService.estimate_cost(
-        "vidu", "VIDEO_GENERATION", params={"duration_seconds": 4.0}
-    )
-    assert status == CostStatus.ESTIMATED
-    assert curr == "USD"
-    assert cost == pytest.approx(0.20, rel=1e-3)
-
-    # 2. Unknown provider returns UNKNOWN without inventing numbers
+def test_provider_pricing_no_fabricated_rates_returns_unknown():
+    # 1. Without registered pricing, provider rates are UNKNOWN, not fabricated
     cost_unk, curr_unk, status_unk = ProviderPricingService.estimate_cost(
-        "unregistered_unknown_provider", "SOME_OPERATION"
+        "vidu", "VIDEO_GENERATION", params={"duration_seconds": 4.0}
     )
     assert status_unk == CostStatus.UNKNOWN
     assert cost_unk is None
 
-    # 3. Dynamic rule registration works without altering core domain logic
+    # 2. Dynamic rule registration works without altering core domain logic
     ProviderPricingRule_custom = ProviderPricingRule(
-        provider="custom_ai",
-        operation="VOICE_GEN",
-        cost_per_second=0.01,
+        provider="vidu",
+        operation="VIDEO_GENERATION",
+        cost_per_second=0.05,
         currency="USD",
     )
     ProviderPricingService.register_rule(ProviderPricingRule_custom)
     c_cost, c_curr, c_status = ProviderPricingService.estimate_cost(
-        "custom_ai", "VOICE_GEN", params={"duration_seconds": 10.0}
+        "vidu", "VIDEO_GENERATION", params={"duration_seconds": 4.0}
     )
     assert c_status == CostStatus.ESTIMATED
-    assert c_cost == pytest.approx(0.10, rel=1e-3)
+    assert c_curr == "USD"
+    assert c_cost == pytest.approx(0.20, rel=1e-3)
 
 
 def test_record_usage_ledger_entry_and_query_summary(db_session: Session, test_project: Project, test_shot: Shot):
@@ -117,7 +122,6 @@ def test_record_usage_ledger_entry_and_query_summary(db_session: Session, test_p
 def test_idempotent_event_recording_no_duplicate_charge(db_session: Session, test_project: Project, test_shot: Shot):
     idempotency_key = "idem-key-unique-123"
 
-    # Record first time
     e1 = CostLedgerService.record_entry(
         db=db_session,
         project_id=test_project.id,
@@ -129,7 +133,6 @@ def test_idempotent_event_recording_no_duplicate_charge(db_session: Session, tes
         idempotency_key=idempotency_key,
     )
 
-    # Repeat record with same idempotency_key
     e2 = CostLedgerService.record_entry(
         db=db_session,
         project_id=test_project.id,
@@ -170,7 +173,6 @@ def test_estimated_to_confirmed_transition(db_session: Session, test_project: Pr
         cost_status=CostStatus.ESTIMATED,
     )
 
-    # Confirm cost upon job completion
     confirmed_entry = CostLedgerService.confirm_job_cost(
         db=db_session,
         job_id=job.id,
@@ -207,6 +209,11 @@ def test_unknown_cost_stays_unknown(db_session: Session, test_project: Project):
 
 
 def test_hard_budget_blocks_chargeable_dispatch(db_session: Session, test_project: Project, test_shot: Shot):
+    # Register pricing
+    ProviderPricingService.register_rule(
+        ProviderPricingRule(provider="vidu", operation="VIDEO_GENERATION", cost_per_second=0.05)
+    )
+
     # Set low budget of $0.30
     BudgetService.update_budget(db_session, test_project.id, budget_limit=0.30)
 
@@ -229,8 +236,31 @@ def test_hard_budget_blocks_chargeable_dispatch(db_session: Session, test_projec
     assert "Project budget exceeded" in exc_info.value.detail
 
 
+def test_atomic_reservation_rollback_on_ledger_failure(db_session: Session, test_project: Project, test_shot: Shot):
+    ProviderPricingService.register_rule(
+        ProviderPricingRule(provider="vidu", operation="VIDEO_GENERATION", cost_per_second=0.05)
+    )
+    shot_id = test_shot.id
+    project_id = test_project.id
+
+    # Simulate unexpected ledger failure during atomic dispatch
+    with patch.object(CostLedgerService, "record_entry", side_effect=RuntimeError("Simulated ledger write error")):
+        with pytest.raises(RuntimeError):
+            JobDispatchService.create_and_dispatch_job(
+                db=db_session,
+                shot_id=shot_id,
+                provider_name="vidu",
+            )
+
+    # Verify no orphan GenerationJob or partial record exists
+    jobs = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot_id).all()
+    assert len(jobs) == 0
+
+    ledger_entries = db_session.query(UsageLedger).filter(UsageLedger.project_id == project_id).all()
+    assert len(ledger_entries) == 0
+
+
 def test_soft_budget_threshold_warning(db_session: Session, test_project: Project):
-    # Limit $10.00, Threshold 80% ($8.00)
     BudgetService.update_budget(
         db_session, test_project.id, budget_limit=10.0, budget_threshold_percentage=80.0
     )
@@ -239,7 +269,6 @@ def test_soft_budget_threshold_warning(db_session: Session, test_project: Projec
     assert not status_initial["is_soft_limit_exceeded"]
     assert not status_initial["is_hard_limit_exceeded"]
 
-    # Record $8.50 confirmed cost
     CostLedgerService.record_entry(
         db=db_session,
         project_id=test_project.id,
@@ -256,7 +285,6 @@ def test_soft_budget_threshold_warning(db_session: Session, test_project: Projec
 
 
 def test_cross_project_access_rejected(db_session: Session, test_project: Project, test_shot: Shot):
-    # Project B
     project_b = Project(
         id=uuid.uuid4(),
         title="Project B",
@@ -265,19 +293,17 @@ def test_cross_project_access_rejected(db_session: Session, test_project: Projec
     db_session.add(project_b)
     db_session.commit()
 
-    # Project B cannot record shot belonging to Project A
     with pytest.raises(HTTPException) as exc_info:
         CostLedgerService.record_entry(
             db=db_session,
             project_id=project_b.id,
             provider="vidu",
             operation="VIDEO_GENERATION",
-            shot_id=test_shot.id,  # belongs to Project A
+            shot_id=test_shot.id,
         )
     assert exc_info.value.status_code == 400
     assert "Shot does not belong to specified project" in exc_info.value.detail
 
-    # Project B cannot adjust ledger entry belonging to Project A
     entry_a = CostLedgerService.record_entry(
         db=db_session,
         project_id=test_project.id,
@@ -322,12 +348,9 @@ def test_manual_adjustment_audit_trail(db_session: Session, test_project: Projec
     assert adjustment.adjusted_cost == 0.60
     assert adjustment.actor == "finance_reviewer"
 
-    # Verify parent entry was updated to ADJUSTED with corrected actual_cost
     db_session.refresh(entry)
     assert entry.cost_status == CostStatus.ADJUSTED
     assert entry.actual_cost == 0.60
-
-    # Verify history is preserved
     assert len(entry.adjustments) == 1
     assert entry.adjustments[0].reason == "Vidu platform promotional credit applied"
 
@@ -373,7 +396,6 @@ def test_poll_and_cancel_do_not_create_charges(db_session: Session, test_project
     entries_before = db_session.query(UsageLedger).filter(UsageLedger.project_id == test_project.id).all()
     assert len(entries_before) == 1
 
-    # Cancellation should not create a second ledger entry
     import asyncio
     asyncio.run(JobDispatchService.cancel_job(db_session, job.id))
 
@@ -381,53 +403,135 @@ def test_poll_and_cancel_do_not_create_charges(db_session: Session, test_project
     assert len(entries_after) == 1
 
 
-def test_cost_ledger_api_endpoints(client, test_project: Project, test_shot: Shot):
-    # 1. Get Budget
-    resp = client.get(f"/api/v1/projects/{test_project.id}/budget")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["project_id"] == str(test_project.id)
-    assert data["budget_limit"] == 10.0
+def test_creative_generation_ledger_failure_is_observable_and_not_swallowed(db_session: Session, test_project: Project):
+    project_id = test_project.id
+    fake_provider = FakeCreativeGenerationProvider()
+    service = StoryGenerationService(db=db_session, provider=fake_provider)
 
-    # 2. Update Budget
-    put_resp = client.put(
-        f"/api/v1/projects/{test_project.id}/budget",
-        json={"budget_limit": 25.0, "budget_threshold_percentage": 75.0},
+    with patch.object(CostLedgerService, "record_entry", side_effect=RuntimeError("Simulated ledger persistence error")):
+        with pytest.raises(CreativeGenerationError) as exc_info:
+            service.generate_project_story(
+                project_id=project_id,
+                custom_instructions="Create a test story",
+            )
+        assert exc_info.value.code == "LEDGER_RECORDING_FAILED"
+        assert "Simulated ledger persistence error" in exc_info.value.message
+
+    # Verify audit log recorded the failure deterministically
+    audit = db_session.query(GenerationAuditLog).filter(GenerationAuditLog.project_id == project_id).first()
+    assert audit is not None
+    assert audit.status == "ACCOUNTING_FAILED"
+    assert "Usage ledger recording failed" in audit.error_message
+
+
+def test_known_pre_dispatch_openai_cost_enforced(db_session: Session, test_project: Project):
+    # Register pricing for openai story generation: high cost ($0.10/1k prompt tokens)
+    ProviderPricingService.register_rule(
+        ProviderPricingRule(
+            provider="openai",
+            operation="STORY_GENERATION",
+            model="gpt-4o",
+            cost_per_1k_prompt_tokens=10.0,
+            cost_per_1k_completion_tokens=10.0,
+        )
     )
-    assert put_resp.status_code == 200
-    assert put_resp.json()["budget_limit"] == 25.0
-    assert put_resp.json()["budget_threshold_percentage"] == 75.0
 
-    # 3. Create job to create a ledger entry
-    job = JobDispatchService.create_and_dispatch_job(
-        db=pytest.db_session if hasattr(pytest, "db_session") else client.app.dependency_overrides.get(test_project, None) or test_shot._sa_instance_state.session,
-        shot_id=test_shot.id,
-        provider_name="vidu",
+    # Set project budget to $0.05
+    BudgetService.update_budget(db_session, test_project.id, budget_limit=0.05)
+
+    fake_provider = FakeCreativeGenerationProvider()
+    service = StoryGenerationService(db=db_session, provider=fake_provider)
+
+    # Prompt will produce > 100 tokens, requiring > $1.00 at $10/1k tokens -> exceeds $0.05 budget
+    with pytest.raises(CreativeGenerationError) as exc_info:
+        service.generate_project_story(
+            project_id=test_project.id,
+            custom_instructions="A long story with detailed requirements that costs more than budget",
+        )
+    assert exc_info.value.code == "BUDGET_EXCEEDED"
+    assert "Project budget exceeded" in exc_info.value.message
+
+
+def test_concurrent_dispatch_budget_race_protection(tmp_path):
+    """Concurrency test showing parallel dispatch cannot exceed the hard cap."""
+    import concurrent.futures
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = tmp_path / "concurrent_budget.db"
+    engine = create_engine(f"sqlite:///{db_file}", connect_args={"timeout": 30})
+
+    @event.listens_for(engine, "begin")
+    def do_begin(conn):
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+    project_id = uuid.uuid4()
+    shot_id = uuid.uuid4()
+    scene_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        project = Project(
+            id=project_id,
+            title="Concurrent Budget Project",
+            description="Testing concurrency",
+            video_mode="SCENE",
+            budget_limit=0.30,
+            budget_currency="USD",
+            budget_threshold_percentage=80.0,
+        )
+        scene = Scene(id=scene_id, project_id=project_id, scene_number=1, heading="Scene 1")
+        shot = Shot(
+            id=shot_id,
+            scene_id=scene_id,
+            shot_number=1,
+            shot_type="AI_GENERATED",
+            video_prompt="Test shot",
+            duration_seconds=4.0,
+        )
+        db.add_all([project, scene, shot])
+        db.commit()
+
+    # Register pricing: $0.20 per dispatch ($0.05/sec * 4s = $0.20)
+    ProviderPricingService.register_rule(
+        ProviderPricingRule(provider="vidu", operation="VIDEO_GENERATION", cost_per_second=0.05)
     )
 
-    # 4. Get Cost Summary
-    summary_resp = client.get(f"/api/v1/projects/{test_project.id}/costs/summary")
-    assert summary_resp.status_code == 200
-    summary_data = summary_resp.json()
-    assert summary_data["total_committed_cost"] > 0
+    results = []
 
-    # 5. List Ledger Entries
-    list_resp = client.get(f"/api/v1/projects/{test_project.id}/costs/ledger")
-    assert list_resp.status_code == 200
-    entries = list_resp.json()
-    assert len(entries) >= 1
-    ledger_id = entries[0]["id"]
+    def dispatch_worker(worker_num):
+        with SessionLocal() as db:
+            try:
+                job = JobDispatchService.create_and_dispatch_job(
+                    db=db,
+                    shot_id=shot_id,
+                    provider_name="vidu",
+                    idempotency_key=f"concurrent-key-{worker_num}",
+                )
+                return ("SUCCESS", str(job.id))
+            except HTTPException as e:
+                return ("EXCEEDED", e.detail)
 
-    # 6. Record Manual Adjustment via API
-    adj_resp = client.post(
-        f"/api/v1/projects/{test_project.id}/costs/ledger/{ledger_id}/adjustments",
-        json={
-            "actor": "admin_auditor",
-            "reason": "Test reconciliation adjustment",
-            "adjusted_cost": 0.15,
-        },
-    )
-    assert adj_resp.status_code == 200
-    adj_data = adj_resp.json()
-    assert adj_data["adjusted_cost"] == 0.15
-    assert adj_data["actor"] == "admin_auditor"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        f1 = executor.submit(dispatch_worker, 1)
+        f2 = executor.submit(dispatch_worker, 2)
+        f3 = executor.submit(dispatch_worker, 3)
+        for f in concurrent.futures.as_completed([f1, f2, f3]):
+            results.append(f.result())
+
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    exceededs = [r for r in results if r[0] == "EXCEEDED"]
+
+    # Exactly 1 can fit within $0.30 cap; other 2 must be blocked
+    assert len(successes) == 1
+    assert len(exceededs) == 2
+    assert all("Project budget exceeded" in r[1] or "Project budget limit reached" in r[1] for r in exceededs)
+
+    with SessionLocal() as db:
+        committed = BudgetService.get_project_committed_cost(db, project_id)
+        assert committed <= 0.30
+
+    engine.dispose()

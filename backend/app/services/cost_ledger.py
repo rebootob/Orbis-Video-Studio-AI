@@ -41,6 +41,7 @@ class CostLedgerService:
         provider_event_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         description: Optional[str] = None,
+        commit: bool = True,
     ) -> UsageLedger:
         # 1. Project existence check
         project = db.get(Project, project_id)
@@ -102,8 +103,11 @@ class CostLedgerService:
                 ):
                     existing.actual_cost = round(actual_cost, 4)
                     existing.cost_status = CostStatus.CONFIRMED
-                    db.commit()
-                    db.refresh(existing)
+                    if commit:
+                        db.commit()
+                        db.refresh(existing)
+                    else:
+                        db.flush()
                 return existing
 
         if job_id:
@@ -119,8 +123,11 @@ class CostLedgerService:
                 ):
                     existing.actual_cost = round(actual_cost, 4)
                     existing.cost_status = CostStatus.CONFIRMED
-                    db.commit()
-                    db.refresh(existing)
+                    if commit:
+                        db.commit()
+                        db.refresh(existing)
+                    else:
+                        db.flush()
                 return existing
 
         if provider_event_id:
@@ -165,8 +172,11 @@ class CostLedgerService:
             description=description,
         )
         db.add(entry)
-        db.commit()
-        db.refresh(entry)
+        if commit:
+            db.commit()
+            db.refresh(entry)
+        else:
+            db.flush()
         return entry
 
     @classmethod
