@@ -59,6 +59,23 @@ async def poll_job(
     return job
 
 
+@router.post("/queue/claim", response_model=Optional[JobResponse])
+def claim_next_job(
+    worker_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    job = JobDispatchService.claim_next_job(db=db, worker_id=worker_id)
+    return job
+
+
+@router.post("/queue/recover")
+def recover_jobs(
+    db: Session = Depends(get_db),
+):
+    count = JobDispatchService.recover_pending_jobs(db=db)
+    return {"recovered_count": count}
+
+
 @router.get("/shots/{shot_id}/jobs", response_model=List[JobResponse])
 def list_shot_jobs(
     shot_id: uuid.UUID,

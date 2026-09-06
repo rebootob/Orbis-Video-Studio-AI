@@ -43,5 +43,5 @@ NEXT ALLOWED ACTION: ChatGPT review only
 
 ## Gate & Transition Rules
 
-1. **Active Work Package Status:** `P2-WP006` implementation complete, awaiting ChatGPT independent review.
-2. **No Unapproved Work Packages:** Execution engines MUST NOT start P2-WP007 or write code without explicit Project Owner authorization.
+1. **Active Work Package Status:** `P2-WP006` is PASS / CLOSED / MERGED. `P2-WP007` implementation complete, awaiting ChatGPT independent review on PR #15.
+2. **No Unapproved Work Packages:** `P2-WP008` is PROPOSED / NOT AUTHORIZED. Execution engines MUST NOT start P2-WP008 or write code without explicit Project Owner authorization.

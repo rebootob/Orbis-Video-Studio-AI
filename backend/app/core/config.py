@@ -43,7 +43,8 @@ class Settings(BaseSettings):
 
     # Vidu Video Generation Provider Settings
     VIDU_API_KEY: str = ""
-    VIDU_BASE_URL: str = "https://api.vidu.com/v1"
+    VIDU_BASE_URL: str = "https://api.vidu.com/ent/v2"
+    VIDU_DEFAULT_MODEL: str = "viduq2-pro"
     VIDU_TIMEOUT_SECONDS: float = 30.0
     VIDU_MAX_RETRIES: int = 3
 

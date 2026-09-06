@@ -31,10 +31,15 @@ def upgrade() -> None:
             ondelete='SET NULL'
         )
         batch_op.create_index('ix_generation_jobs_status', ['status'])
+        batch_op.create_unique_constraint(
+            'uq_generation_jobs_shot_idempotency_key',
+            ['shot_id', 'idempotency_key']
+        )
 
 
 def downgrade() -> None:
     with op.batch_alter_table('generation_jobs') as batch_op:
+        batch_op.drop_constraint('uq_generation_jobs_shot_idempotency_key', type_='unique')
         batch_op.drop_index('ix_generation_jobs_status')
         batch_op.drop_constraint('fk_generation_jobs_output_asset_id', type_='foreignkey')
         batch_op.drop_column('output_asset_id')
