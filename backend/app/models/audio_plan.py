@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, List, TYPE_CHECKING
 from sqlalchemy import String, Integer, JSON, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -8,6 +8,7 @@ from app.db.base_class import Base
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.audio_history import AudioPlanVersion
 
 
 def utc_now() -> datetime:
@@ -41,3 +42,4 @@ class AudioPlan(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship("Project")
+    versions: Mapped[List["AudioPlanVersion"]] = relationship("AudioPlanVersion", back_populates="plan", cascade="all, delete-orphan", order_by="AudioPlanVersion.version_number.desc()")

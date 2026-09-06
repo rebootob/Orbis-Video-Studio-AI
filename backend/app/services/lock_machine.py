@@ -10,6 +10,7 @@ from app.models.story import Story
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.reference_library import CharacterBible, LocationBible
+from app.models.audio_clip import AudioClip
 from app.services.video_modes import validate_lock_target, ALLOWED_LOCK_TARGETS
 
 
@@ -32,6 +33,8 @@ class LockMachineService:
             return CharacterBible, db.get(CharacterBible, entity_id)
         elif normalized_type == "LOCATION":
             return LocationBible, db.get(LocationBible, entity_id)
+        elif normalized_type == "AUDIO_CLIP":
+            return AudioClip, db.get(AudioClip, entity_id)
         elif normalized_type in ("VOICE", "TIMING"):
             # May be tracked via lock table for timeline/voice entities
             return None, None

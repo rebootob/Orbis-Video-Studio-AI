@@ -1,7 +1,7 @@
 import uuid
 from enum import Enum
 from datetime import datetime, timezone
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, List, TYPE_CHECKING
 from sqlalchemy import String, Text, Integer, Float, Boolean, JSON, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -9,6 +9,7 @@ from app.db.base_class import Base
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.audio_history import AudioClipHistory
     from app.models.scene import Scene
     from app.models.shot import Shot
     from app.models.asset import Asset
@@ -131,3 +132,4 @@ class AudioClip(Base):
     shot: Mapped[Optional["Shot"]] = relationship("Shot")
     asset: Mapped[Optional["Asset"]] = relationship("Asset", foreign_keys=[asset_id])
     video_asset: Mapped[Optional["Asset"]] = relationship("Asset", foreign_keys=[video_asset_id])
+    history: Mapped[List["AudioClipHistory"]] = relationship("AudioClipHistory", back_populates="clip", cascade="all, delete-orphan", order_by="AudioClipHistory.version_number.desc()")

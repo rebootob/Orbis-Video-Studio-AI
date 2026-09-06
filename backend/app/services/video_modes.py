@@ -26,6 +26,7 @@ ALLOWED_SHOT_TYPES: Set[str] = {
 }
 
 ALLOWED_LOCK_TARGETS: Set[str] = {
+    "AUDIO_CLIP",
     "SCRIPT",
     "SCENE",
     "SHOT",

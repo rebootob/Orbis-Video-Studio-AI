@@ -21,6 +21,7 @@ from app.models.audio_clip import (
     DuckingRole,
 )
 from app.models.audio_plan import AudioPlan
+from app.models.audio_history import AudioPlanVersion, AudioClipHistory
 from app.schemas.audio_spec import AudioSpec
 from app.providers.audio.base import AudioGenerationParams, AudioJobResult
 from app.providers.audio.mock_adapter import MockAudioProviderAdapter
@@ -633,3 +634,398 @@ def test_patch_project_status_bypass_prevention(client: TestClient, db_session: 
     )
     assert resp.status_code == 400
     assert "Direct modification of project status via generic PATCH /projects is disallowed" in resp.json()["detail"]
+
+
+# ----------------- 11. Review Fix 1: Audio History / Version Retention -----------------
+
+def test_audio_history_retention_and_restoration(db_session: Session, client: TestClient):
+    """Verify full history retention for AudioPlan and AudioClip without silent overwrite."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="History Retention Project",
+        video_mode="STORY",
+        status="FINAL_REVIEW",
+    )
+    db_session.add(project)
+    db_session.commit()
+
+    # 1. Generate initial AudioPlan
+    plan1 = AudioProductionService.generate_audio_plan(db_session, project.id)
+    assert plan1.version == 1
+    versions = db_session.query(AudioPlanVersion).filter(AudioPlanVersion.project_id == project.id).all()
+    assert len(versions) == 1
+    assert versions[0].version_number == 1
+    assert versions[0].action == "CREATE_PLAN"
+
+    # 2. Approve AudioPlan
+    AudioProductionService.approve_audio_plan(db_session, project.id)
+    versions_after_approve = db_session.query(AudioPlanVersion).filter(AudioPlanVersion.project_id == project.id).all()
+    assert len(versions_after_approve) == 2
+    assert any(v.action == "APPROVE_PLAN" for v in versions_after_approve)
+
+    # 3. Regenerate / modify plan -> new version
+    plan2 = AudioProductionService.generate_audio_plan(db_session, project.id)
+    assert plan2.version == 2
+    versions_after_regen = db_session.query(AudioPlanVersion).filter(AudioPlanVersion.project_id == project.id).all()
+    assert len(versions_after_regen) >= 3
+
+    # 4. API History endpoint bounded retrieval
+    resp = client.get(f"/api/v1/projects/{project.id}/audio/plan/history?limit=10&offset=0")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert data["total"] >= 3
+    assert len(data["items"]) >= 3
+    # Check reverse chronological ordering
+    assert data["items"][0]["version_number"] >= data["items"][1]["version_number"]
+
+    # 5. Restore prior plan version
+    restore_resp = client.post(f"/api/v1/projects/{project.id}/audio/plan/restore/1")
+    assert restore_resp.status_code == 200
+    restored_plan = restore_resp.json()
+    assert restored_plan["version"] == 3  # increments version upon restore
+
+    # 6. AudioClip revision history tracking
+    clips = db_session.query(AudioClip).filter(AudioClip.project_id == project.id).all()
+    assert len(clips) > 0
+    test_clip = clips[0]
+
+    # Verify initial creation history exists
+    clip_hist = db_session.query(AudioClipHistory).filter(AudioClipHistory.clip_id == test_clip.id).all()
+    assert len(clip_hist) >= 1
+    assert clip_hist[0].action == "CREATE"
+
+    # Update clip via PATCH
+    patch_resp = client.patch(
+        f"/api/v1/projects/{project.id}/audio/clips/{test_clip.id}",
+        json={"volume": 0.45, "ducking_amount_db": -15.0, "reason": "Adjust volume for mix"},
+    )
+    assert patch_resp.status_code == 200
+    clip_hist_after_patch = (
+        db_session.query(AudioClipHistory)
+        .filter(AudioClipHistory.clip_id == test_clip.id)
+        .order_by(AudioClipHistory.version_number.desc())
+        .all()
+    )
+    assert len(clip_hist_after_patch) >= 2
+    assert clip_hist_after_patch[0].volume == 0.45
+    assert clip_hist_after_patch[0].action == "UPDATE"
+    assert clip_hist_after_patch[0].change_reason == "Adjust volume for mix"
+
+    # History endpoint for clip
+    clip_hist_resp = client.get(f"/api/v1/projects/{project.id}/audio/clips/{test_clip.id}/history?limit=5")
+    assert clip_hist_resp.status_code == 200
+    assert clip_hist_resp.json()["total"] >= 2
+
+
+# ----------------- 12. Review Fix 2: Lock Safety -----------------
+
+def test_lock_safety_isolated_unlock_and_rejection(db_session: Session, client: TestClient):
+    """Verify that unlocking must be an explicit isolated operation and cannot be combined with modifications."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Lock Safety Project",
+        video_mode="STORY",
+        status="AUDIO_IN_PROGRESS",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Locked Test Clip",
+        audio_type=AudioType.VO.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        volume=1.0,
+        is_locked=False,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    # 1. Lock clip via dedicated lock endpoint
+    lock_resp = client.post(
+        f"/api/v1/projects/{project.id}/audio/clips/{clip.id}/lock",
+        json={"actor": "LEAD_EDITOR", "reason": "Voice approved by client"},
+    )
+    assert lock_resp.status_code == 200
+    assert lock_resp.json()["is_locked"] is True
+
+    # 2. Attempt to modify fields on locked clip -> 423 Locked
+    edit_resp = client.patch(
+        f"/api/v1/projects/{project.id}/audio/clips/{clip.id}",
+        json={"volume": 0.2},
+    )
+    assert edit_resp.status_code == 423
+    assert "locked" in edit_resp.json()["detail"].lower()
+
+    # 3. CRITICAL: Attempt to send is_locked=false TOGETHER with other field modifications -> 423 / 400 Fail-Closed!
+    exploit_resp = client.patch(
+        f"/api/v1/projects/{project.id}/audio/clips/{clip.id}",
+        json={"is_locked": False, "volume": 0.2, "name": "Hacked Name"},
+    )
+    assert exploit_resp.status_code == 423
+    assert "Cannot modify fields" in exploit_resp.json()["detail"]
+    assert "Unlocking must be an explicit isolated operation" in exploit_resp.json()["detail"]
+
+    # Verify clip is STILL locked and unchanged in DB
+    db_session.refresh(clip)
+    assert clip.is_locked is True
+    assert clip.volume == 1.0
+
+    # 4. Isolated explicit unlock via dedicated unlock endpoint
+    unlock_resp = client.post(
+        f"/api/v1/projects/{project.id}/audio/clips/{clip.id}/unlock",
+        json={"actor": "LEAD_EDITOR", "reason": "Client requested change"},
+    )
+    assert unlock_resp.status_code == 200
+    assert unlock_resp.json()["is_locked"] is False
+
+    # Verify audit history captured the lock and unlock actions
+    hist = (
+        db_session.query(AudioClipHistory)
+        .filter(AudioClipHistory.clip_id == clip.id)
+        .order_by(AudioClipHistory.version_number.desc())
+        .all()
+    )
+    actions = [h.action for h in hist]
+    assert "LOCK" in actions
+    assert "UNLOCK" in actions
+
+    # 5. Now modification succeeds on unlocked clip
+    valid_edit_resp = client.patch(
+        f"/api/v1/projects/{project.id}/audio/clips/{clip.id}",
+        json={"volume": 0.75},
+    )
+    assert valid_edit_resp.status_code == 200
+    assert valid_edit_resp.json()["volume"] == 0.75
+
+
+# ----------------- 13. Review Fix 3: Bounded Audio Listing -----------------
+
+def test_bounded_audio_listing_pagination(db_session: Session, client: TestClient):
+    """Verify that GET /projects/{project_id}/audio/clips is bounded with limit/offset."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Pagination Project",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    # Create 12 clips
+    for i in range(12):
+        c = AudioClip(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            name=f"Clip {i}",
+            audio_type=AudioType.SFX.value if i % 2 == 0 else AudioType.VO.value,
+            source_type=AudioSourceType.GENERATED_AUDIO.value,
+            generation_mode=AudioGenerationMode.SEPARATE_AUDIO.value,
+            scope=AudioScope.SHOT.value,
+            ducking_role=DuckingRole.EVENT.value,
+            start_time=float(i * 2),
+            status="PENDING",
+        )
+        db_session.add(c)
+    db_session.commit()
+
+    # Page 1: limit 5, offset 0
+    resp_p1 = client.get(f"/api/v1/projects/{project.id}/audio/clips?limit=5&offset=0")
+    assert resp_p1.status_code == 200
+    p1_data = resp_p1.json()
+    assert p1_data["total"] == 12
+    assert len(p1_data["items"]) == 5
+    assert p1_data["limit"] == 5
+    assert p1_data["offset"] == 0
+    p1_ids = [item["id"] for item in p1_data["items"]]
+
+    # Page 2: limit 5, offset 5
+    resp_p2 = client.get(f"/api/v1/projects/{project.id}/audio/clips?limit=5&offset=5")
+    assert resp_p2.status_code == 200
+    p2_data = resp_p2.json()
+    assert len(p2_data["items"]) == 5
+    p2_ids = [item["id"] for item in p2_data["items"]]
+
+    # Ensure no overlap between pages
+    assert set(p1_ids).isdisjoint(set(p2_ids))
+
+    # Page 3: limit 5, offset 10
+    resp_p3 = client.get(f"/api/v1/projects/{project.id}/audio/clips?limit=5&offset=10")
+    assert resp_p3.status_code == 200
+    p3_data = resp_p3.json()
+    assert len(p3_data["items"]) == 2
+
+    # Filtering by audio_type
+    filter_resp = client.get(f"/api/v1/projects/{project.id}/audio/clips?audio_type=SFX")
+    assert filter_resp.status_code == 200
+    assert filter_resp.json()["total"] == 6
+
+
+# ----------------- 14. Review Fix 4: Embedded Audio Truth -----------------
+
+def test_embedded_audio_truth_verification(db_session: Session, client: TestClient):
+    """Verify that ORIGINAL_AUDIO is never invented from image/non-video assets, and truthful metadata is preserved."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="Embedded Truth Project",
+        video_mode="STORY",
+        status="VIDEO_APPROVED",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    scene = Scene(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        scene_number=1,
+        heading="INT. TRUTH LAB",
+    )
+    db_session.add(scene)
+    db_session.flush()
+
+    # Asset 1: IMAGE (keyframe) -> MUST NOT produce ORIGINAL_AUDIO clip
+    image_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Keyframe Image",
+        original_filename="keyframe.png",
+        asset_type="IMAGE",
+        content_type="image/png",
+        file_size_bytes=50000,
+        checksum_sha256="img_hash",
+        storage_bucket="bucket",
+        storage_key="keyframe.png",
+    )
+    db_session.add(image_asset)
+
+    # Asset 2: VIDEO without audio
+    video_no_audio = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Silent Video",
+        original_filename="silent.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=100000,
+        checksum_sha256="silent_hash",
+        storage_bucket="bucket",
+        storage_key="silent.mp4",
+    )
+    db_session.add(video_no_audio)
+
+    # Asset 3: VIDEO with verified audio stream
+    video_with_audio = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Audio Video",
+        original_filename="audio.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=200000,
+        checksum_sha256="audio_hash",
+        storage_bucket="bucket",
+        storage_key="audio.mp4",
+    )
+    db_session.add(video_with_audio)
+
+    # Asset 4: VIDEO with unknown audio metadata
+    video_unknown_audio = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Unknown Audio Video",
+        original_filename="unknown.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=150000,
+        checksum_sha256="unknown_hash",
+        storage_bucket="bucket",
+        storage_key="unknown.mp4",
+    )
+    db_session.add(video_unknown_audio)
+    db_session.flush()
+
+    # Shot 1: references image asset
+    shot1 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        source_asset_id=image_asset.id,
+        duration_seconds=4.0,
+    )
+    db_session.add(shot1)
+
+    # Shot 2: references silent video asset
+    shot2 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=2,
+        shot_type="AI_GENERATED",
+        source_asset_id=video_no_audio.id,
+        source_metadata={"has_audio": False, "audio_channels": 0},
+        duration_seconds=4.0,
+    )
+    db_session.add(shot2)
+
+    # Shot 3: references video with verified audio
+    shot3 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=3,
+        shot_type="AI_GENERATED",
+        source_asset_id=video_with_audio.id,
+        source_metadata={"has_audio": True, "audio_channels": 2, "audio_stream_count": 1},
+        duration_seconds=4.0,
+    )
+    db_session.add(shot3)
+
+    # Shot 4: references video with unknown audio metadata
+    shot4 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene.id,
+        shot_number=4,
+        shot_type="AI_GENERATED",
+        source_asset_id=video_unknown_audio.id,
+        duration_seconds=4.0,
+    )
+    db_session.add(shot4)
+    db_session.commit()
+
+    # Generate plan
+    plan = AudioProductionService.generate_audio_plan(db_session, project.id)
+
+    # Check clips created
+    all_clips = db_session.query(AudioClip).filter(AudioClip.project_id == project.id).all()
+    orig_clips = [c for c in all_clips if c.audio_type == AudioType.ORIGINAL_AUDIO.value]
+
+    # Verify Shot 1 (Image) did NOT produce any ORIGINAL_AUDIO clip
+    assert not any(c.shot_id == shot1.id for c in orig_clips), "Image asset must never invent ORIGINAL_AUDIO"
+
+    # Verify Shot 2 (Silent Video) did NOT produce any ORIGINAL_AUDIO clip
+    assert not any(c.shot_id == shot2.id for c in orig_clips), "Silent video must truthfully omit ORIGINAL_AUDIO"
+
+    # Verify Shot 3 (Verified Audio) produced a READY clip with VERIFIED presence
+    shot3_orig = next(c for c in orig_clips if c.shot_id == shot3.id)
+    assert shot3_orig.status == "READY"
+    assert shot3_orig.provenance["audio_presence"] == "VERIFIED"
+
+    # Verify Shot 4 (Unknown Audio) produced an UNKNOWN clip truthfully
+    shot4_orig = next(c for c in orig_clips if c.shot_id == shot4.id)
+    assert shot4_orig.status == "UNKNOWN"
+    assert shot4_orig.provenance["audio_presence"] == "UNKNOWN"
+
+    # Attempting to generate on an UNKNOWN clip without verified audio probe raises 400
+    with pytest.raises(HTTPException) as exc:
+        AudioProductionService.generate_clip_audio(
+            db=db_session,
+            project_id=project.id,
+            clip_id=shot4_orig.id,
+        )
+    assert exc.value.status_code == 400
+    assert "audio stream probe required" in str(exc.value.detail)

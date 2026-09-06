@@ -31,6 +31,7 @@ from app.models.audio_clip import (
     DuckingRole,
 )
 from app.models.audio_plan import AudioPlan
+from app.models.audio_history import AudioPlanVersion, AudioClipHistory
 from app.schemas.audio_spec import AudioSpec
 from app.providers.audio.factory import AudioProviderFactory
 from app.providers.audio.base import (
@@ -114,6 +115,219 @@ class AudioProductionService:
             "ducking_role": ducking_role.value if isinstance(ducking_role, DuckingRole) else str(ducking_role),
             "ducking_amount_db": ducking_amount_db,
         }
+
+    @classmethod
+    def record_plan_version(
+        cls,
+        db: Session,
+        plan: AudioPlan,
+        actor: str = "SYSTEM",
+        action: str = "CREATE",
+        change_reason: Optional[str] = None,
+    ) -> AudioPlanVersion:
+        v_num = getattr(plan, "version", None) or 1
+        version = AudioPlanVersion(
+            id=uuid.uuid4(),
+            audio_plan_id=plan.id,
+            project_id=plan.project_id,
+            version_number=v_num,
+            status=plan.status,
+            plan_data=plan.plan_data,
+            actor=actor,
+            action=action,
+            change_reason=change_reason,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(version)
+        db.flush()
+        return version
+
+    @classmethod
+    def record_clip_history(
+        cls,
+        db: Session,
+        clip: AudioClip,
+        actor: str = "SYSTEM",
+        action: str = "CREATE",
+        change_reason: Optional[str] = None,
+    ) -> AudioClipHistory:
+        v_num = getattr(clip, "version", None) or 1
+        hist = AudioClipHistory(
+            id=uuid.uuid4(),
+            clip_id=clip.id,
+            project_id=clip.project_id,
+            version_number=v_num,
+            audio_type=clip.audio_type,
+            source_type=clip.source_type,
+            generation_mode=clip.generation_mode,
+            scope=clip.scope,
+            name=clip.name,
+            prompt=clip.prompt,
+            start_time=clip.start_time,
+            duration_seconds=clip.duration_seconds,
+            volume=clip.volume,
+            mute=clip.mute,
+            fade_in=clip.fade_in,
+            fade_out=clip.fade_out,
+            ducking_role=clip.ducking_role,
+            ducking_amount_db=clip.ducking_amount_db,
+            language=clip.language,
+            speaker=clip.speaker,
+            is_locked=clip.is_locked,
+            status=clip.status,
+            asset_id=clip.asset_id,
+            provenance=clip.provenance,
+            actor=actor,
+            action=action,
+            change_reason=change_reason,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(hist)
+        db.flush()
+        return hist
+
+    @classmethod
+    def lock_clip(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        clip_id: uuid.UUID,
+        actor: str = "USER",
+        reason: Optional[str] = None,
+    ) -> AudioClip:
+        clip = db.query(AudioClip).filter(AudioClip.id == clip_id, AudioClip.project_id == project_id).first()
+        if not clip:
+            raise HTTPException(status_code=404, detail=f"AudioClip '{clip_id}' not found in project '{project_id}'.")
+        if not clip.is_locked:
+            clip.is_locked = True
+            clip.version += 1
+            clip.updated_at = datetime.now(timezone.utc)
+            cls.record_clip_history(db, clip, actor=actor, action="LOCK", change_reason=reason or "AudioClip locked")
+            db.commit()
+            db.refresh(clip)
+        return clip
+
+    @classmethod
+    def unlock_clip(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        clip_id: uuid.UUID,
+        actor: str = "USER",
+        reason: Optional[str] = None,
+    ) -> AudioClip:
+        clip = db.query(AudioClip).filter(AudioClip.id == clip_id, AudioClip.project_id == project_id).first()
+        if not clip:
+            raise HTTPException(status_code=404, detail=f"AudioClip '{clip_id}' not found in project '{project_id}'.")
+        if clip.is_locked:
+            clip.is_locked = False
+            clip.version += 1
+            clip.updated_at = datetime.now(timezone.utc)
+            cls.record_clip_history(db, clip, actor=actor, action="UNLOCK", change_reason=reason or "AudioClip explicitly unlocked")
+            db.commit()
+            db.refresh(clip)
+        return clip
+
+    @classmethod
+    def restore_plan_version(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        version_number: int,
+        actor: str = "USER",
+    ) -> AudioPlan:
+        plan = db.query(AudioPlan).filter(AudioPlan.project_id == project_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail=f"No audio plan found for project '{project_id}'.")
+        version_record = (
+            db.query(AudioPlanVersion)
+            .filter(AudioPlanVersion.project_id == project_id, AudioPlanVersion.version_number == version_number)
+            .first()
+        )
+        if not version_record:
+            raise HTTPException(status_code=404, detail=f"Plan version '{version_number}' not found.")
+        now = datetime.now(timezone.utc)
+        plan.version += 1
+        plan.status = version_record.status
+        plan.plan_data = version_record.plan_data
+        plan.updated_at = now
+        cls.record_plan_version(
+            db,
+            plan,
+            actor=actor,
+            action="RESTORE_PLAN",
+            change_reason=f"Restored from version {version_number}",
+        )
+        db.commit()
+        db.refresh(plan)
+        return plan
+
+    @classmethod
+    def list_audio_clips(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+        audio_type: Optional[str] = None,
+        scope: Optional[str] = None,
+    ) -> Tuple[List[AudioClip], int]:
+        base_query = db.query(AudioClip).filter(AudioClip.project_id == project_id)
+        if audio_type:
+            base_query = base_query.filter(AudioClip.audio_type == audio_type)
+        if scope:
+            base_query = base_query.filter(AudioClip.scope == scope)
+        total = base_query.count()
+        items = (
+            base_query
+            .order_by(AudioClip.start_time.asc(), AudioClip.created_at.asc(), AudioClip.id.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return items, total
+
+    @classmethod
+    def get_plan_history(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[AudioPlanVersion], int]:
+        base_query = db.query(AudioPlanVersion).filter(AudioPlanVersion.project_id == project_id)
+        total = base_query.count()
+        items = (
+            base_query
+            .order_by(AudioPlanVersion.version_number.desc(), AudioPlanVersion.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return items, total
+
+    @classmethod
+    def get_clip_history(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        clip_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[AudioClipHistory], int]:
+        base_query = db.query(AudioClipHistory).filter(
+            AudioClipHistory.project_id == project_id,
+            AudioClipHistory.clip_id == clip_id,
+        )
+        total = base_query.count()
+        items = (
+            base_query
+            .order_by(AudioClipHistory.version_number.desc(), AudioClipHistory.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return items, total
 
     @classmethod
     def generate_audio_plan(
@@ -232,33 +446,63 @@ class AudioProductionService:
             shot_duration = float(sh.duration_seconds or 4.0)
             
             # Check for original embedded video audio
+            # Finding 4: Embedded Audio Truth. Verify referenced asset is VIDEO and verify audio presence metadata.
             if sh.source_asset_id:
-                orig_key = (AudioType.ORIGINAL_AUDIO.value, sh.id, sh.scene_id, AudioScope.VIDEO_CLIP.value)
-                if orig_key not in existing_clip_map:
-                    orig_cls = cls.auto_classify_clip(AudioType.ORIGINAL_AUDIO)
-                    orig_clip = AudioClip(
-                        id=uuid.uuid4(),
-                        project_id=project_id,
-                        scene_id=sh.scene_id,
-                        shot_id=sh.id,
-                        video_asset_id=sh.source_asset_id,
-                        name=f"Shot {sh.shot_number} - Original Audio",
-                        prompt="Original embedded audio track from video source",
-                        audio_type=AudioType.ORIGINAL_AUDIO.value,
-                        source_type=orig_cls["source_type"],
-                        generation_mode=orig_cls["generation_mode"],
-                        scope=orig_cls["scope"],
-                        ducking_role=orig_cls["ducking_role"],
-                        ducking_amount_db=orig_cls["ducking_amount_db"],
-                        start_time=shot_time_offset,
-                        duration_seconds=shot_duration,
-                        volume=1.0,
-                        status="READY",
-                        created_at=now,
-                        updated_at=now,
+                source_asset = db.get(Asset, sh.source_asset_id)
+                is_video = bool(
+                    source_asset and (
+                        source_asset.asset_type.upper() == "VIDEO"
+                        or (source_asset.content_type and source_asset.content_type.startswith("video/"))
                     )
-                    db.add(orig_clip)
-                    created_clips.append(orig_clip)
+                )
+                if is_video:
+                    meta = sh.source_metadata or {}
+                    has_audio_explicit = meta.get("has_audio")
+                    audio_channels = meta.get("audio_channels")
+                    audio_stream_count = meta.get("audio_stream_count")
+
+                    if has_audio_explicit is False or audio_channels == 0 or audio_stream_count == 0:
+                        has_audio = False
+                    elif has_audio_explicit is True or (isinstance(audio_channels, int) and audio_channels > 0) or (isinstance(audio_stream_count, int) and audio_stream_count > 0):
+                        has_audio = True
+                    else:
+                        has_audio = None
+
+                    # If has_audio is False: truthfully omit ORIGINAL_AUDIO clip
+                    if has_audio is not False:
+                        orig_key = (AudioType.ORIGINAL_AUDIO.value, sh.id, sh.scene_id, AudioScope.VIDEO_CLIP.value)
+                        if orig_key not in existing_clip_map:
+                            orig_cls = cls.auto_classify_clip(AudioType.ORIGINAL_AUDIO)
+                            clip_status = "READY" if has_audio is True else "UNKNOWN"
+                            presence_val = "VERIFIED" if has_audio is True else "UNKNOWN"
+                            orig_clip = AudioClip(
+                                id=uuid.uuid4(),
+                                project_id=project_id,
+                                scene_id=sh.scene_id,
+                                shot_id=sh.id,
+                                video_asset_id=sh.source_asset_id,
+                                name=f"Shot {sh.shot_number} - Original Audio",
+                                prompt="Original embedded audio track from video source",
+                                audio_type=AudioType.ORIGINAL_AUDIO.value,
+                                source_type=orig_cls["source_type"],
+                                generation_mode=orig_cls["generation_mode"],
+                                scope=orig_cls["scope"],
+                                ducking_role=orig_cls["ducking_role"],
+                                ducking_amount_db=orig_cls["ducking_amount_db"],
+                                start_time=shot_time_offset,
+                                duration_seconds=shot_duration,
+                                volume=1.0,
+                                status=clip_status,
+                                provenance={
+                                    "audio_presence": presence_val,
+                                    "source_asset_id": str(sh.source_asset_id),
+                                    "content_type": source_asset.content_type if source_asset else None,
+                                },
+                                created_at=now,
+                                updated_at=now,
+                            )
+                            db.add(orig_clip)
+                            created_clips.append(orig_clip)
 
             # Check for dialogue vs voiceover in shot attributes
             text_prompt = (
@@ -359,6 +603,18 @@ class AudioProductionService:
             project.status = "AUDIO_PLAN_GENERATED"
             project.updated_at = now
 
+        # Finding 1: Full History Retention & Audit for created clips and plan
+        for c in created_clips:
+            cls.record_clip_history(db, c, actor="SYSTEM", action="CREATE", change_reason="Initial creation from audio plan")
+
+        cls.record_plan_version(
+            db,
+            plan,
+            actor="USER",
+            action="GENERATE_PLAN" if plan.version > 1 else "CREATE_PLAN",
+            change_reason=f"Generated audio plan revision {plan.version}",
+        )
+
         db.commit()
         db.refresh(plan)
         return plan
@@ -383,6 +639,13 @@ class AudioProductionService:
             project.status = "AUDIO_PLAN_APPROVED"
             project.updated_at = now
 
+        cls.record_plan_version(
+            db,
+            plan,
+            actor="USER",
+            action="APPROVE_PLAN",
+            change_reason="Audio plan approved",
+        )
         db.commit()
         db.refresh(plan)
         return plan
@@ -428,9 +691,18 @@ class AudioProductionService:
 
         # Embedded original audio handling: non-destructive
         if clip.source_type == AudioSourceType.EMBEDDED_VIDEO_AUDIO.value and clip.generation_mode == AudioGenerationMode.EMBEDDED_EXISTING.value:
+            prov = clip.provenance or {}
+            if prov.get("audio_presence") == "UNKNOWN":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Embedded audio presence is unknown or unverified; audio stream probe required before making ready.",
+                )
             clip.status = "READY"
+            clip.version += 1
             clip.updated_at = datetime.now(timezone.utc)
+            cls.record_clip_history(db, clip, actor=actor, action="GENERATE", change_reason="Embedded video audio marked READY")
             db.commit()
+            db.refresh(clip)
             return clip
 
         eff_provider_name = provider_name or AudioProviderFactory.get_default_provider_name()

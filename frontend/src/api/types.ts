@@ -419,3 +419,10 @@ export interface AudioPlan {
   plan_data?: Record<string, any> | null;
   updated_at?: string | null;
 }
+
+export interface PaginatedAudioClipsResponse {
+  items: AudioClip[];
+  total: number;
+  limit: number;
+  offset: number;
+}

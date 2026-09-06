@@ -51,7 +51,8 @@ export const AudioProductionPanel: React.FC<AudioProductionPanelProps> = ({
       }
 
       const cList = await api.listAudioClips(projectId);
-      setClips(cList);
+      const items = Array.isArray(cList) ? cList : (cList?.items || []);
+      setClips(items);
     } catch (err: any) {
       console.error('Failed to load audio data', err);
       setError(err.message || 'Failed to load audio data');
@@ -118,6 +119,22 @@ export const AudioProductionPanel: React.FC<AudioProductionPanelProps> = ({
       setError(err.message || 'Failed to generate audio clip');
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleToggleLock = async (clip: AudioClip) => {
+    try {
+      let updated: AudioClip;
+      if (clip.is_locked) {
+        updated = await api.unlockAudioClip(projectId, clip.id, { reason: 'Explicit user unlock' });
+      } else {
+        updated = await api.lockAudioClip(projectId, clip.id, { reason: 'User locked clip' });
+      }
+      setClips((prev) =>
+        prev.map((c) => (c.id === clip.id ? updated : c))
+      );
+    } catch (err: any) {
+      setError(err.message || 'Failed to toggle lock');
     }
   };
 
@@ -425,8 +442,9 @@ export const AudioProductionPanel: React.FC<AudioProductionPanelProps> = ({
 
                   <button
                     className="btn btn-sm btn-secondary"
-                    onClick={() => handleUpdateClip(clip.id, { is_locked: !clip.is_locked })}
+                    onClick={() => handleToggleLock(clip)}
                     title={clip.is_locked ? 'Unlock' : 'Lock'}
+                    data-testid={`toggle-lock-${clip.id}`}
                   >
                     {clip.is_locked ? <Lock size={14} color="#f59e0b" /> : <Unlock size={14} />}
                   </button>

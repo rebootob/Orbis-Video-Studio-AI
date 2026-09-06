@@ -28,6 +28,7 @@ from app.models.audio_clip import (
     DuckingRole,
 )
 from app.models.audio_plan import AudioPlan
+from app.models.audio_history import AudioPlanVersion, AudioClipHistory
 
 __all__ = [
     "Base",
@@ -58,5 +59,7 @@ __all__ = [
     "AudioScope",
     "DuckingRole",
     "AudioPlan",
+    "AudioPlanVersion",
+    "AudioClipHistory",
 ]
 

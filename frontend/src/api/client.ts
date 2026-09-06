@@ -1,5 +1,6 @@
 import type {
   Project,
+  PaginatedAudioClipsResponse,
   ProjectCreatePayload,
   ProjectUpdatePayload,
   Scene,
@@ -547,8 +548,64 @@ export const api = {
     });
   },
 
-  async listAudioClips(projectId: string): Promise<AudioClip[]> {
-    return request<AudioClip[]>(`/projects/${projectId}/audio/clips`);
+  async listAudioClips(
+    projectId: string,
+    params: { limit?: number; offset?: number; audio_type?: string; scope?: string } = {}
+  ): Promise<PaginatedAudioClipsResponse> {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    if (params.audio_type) query.set('audio_type', params.audio_type);
+    if (params.scope) query.set('scope', params.scope);
+    const qs = query.toString();
+    return request<PaginatedAudioClipsResponse>(
+      `/projects/${projectId}/audio/clips${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  async lockAudioClip(
+    projectId: string,
+    clipId: string,
+    payload: { actor?: string; reason?: string } = {}
+  ): Promise<AudioClip> {
+    return request<AudioClip>(`/projects/${projectId}/audio/clips/${clipId}/lock`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async unlockAudioClip(
+    projectId: string,
+    clipId: string,
+    payload: { actor?: string; reason?: string } = {}
+  ): Promise<AudioClip> {
+    return request<AudioClip>(`/projects/${projectId}/audio/clips/${clipId}/unlock`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getAudioPlanHistory(
+    projectId: string,
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const qs = query.toString();
+    return request<any>(`/projects/${projectId}/audio/plan/history${qs ? `?${qs}` : ''}`);
+  },
+
+  async getAudioClipHistory(
+    projectId: string,
+    clipId: string,
+    params: { limit?: number; offset?: number } = {}
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const qs = query.toString();
+    return request<any>(`/projects/${projectId}/audio/clips/${clipId}/history${qs ? `?${qs}` : ''}`);
   },
 
   async generateClipAudio(
