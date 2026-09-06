@@ -334,6 +334,7 @@ class AudioProductionService:
         cls,
         db: Session,
         project_id: uuid.UUID,
+        video_provider_name: Optional[str] = None,
     ) -> AudioPlan:
         """Analyze project narrative, scenes, shots, and video assets to generate a structured AudioPlan."""
         project = db.get(Project, project_id)
@@ -357,6 +358,31 @@ class AudioProductionService:
                 .order_by(Shot.shot_number.asc())
                 .all()
             )
+
+        # 1. CANONICAL PROVIDER-CAPABILITY ROUTING
+        # Resolve selected/current VideoProvider capability truth
+        eff_video_provider = video_provider_name
+        if not eff_video_provider and shots:
+            shot_ids = [sh.id for sh in shots]
+            latest_video_job = (
+                db.query(GenerationJob)
+                .filter(GenerationJob.shot_id.in_(shot_ids))
+                .order_by(GenerationJob.created_at.desc())
+                .first()
+            )
+            if latest_video_job and latest_video_job.provider_name:
+                eff_video_provider = latest_video_job.provider_name
+
+        from app.providers.factory import ProviderFactory
+        video_supports_native_audio = False
+        try:
+            video_adapter = ProviderFactory.get_provider(eff_video_provider)
+            video_supports_native_audio = bool(
+                getattr(video_adapter, "supports_native_audio", False)
+                or getattr(video_adapter, "supports_dialogue", False)
+            )
+        except Exception:
+            video_supports_native_audio = False
 
         # Get or create AudioPlan
         plan = db.query(AudioPlan).filter(AudioPlan.project_id == project_id).first()
@@ -512,13 +538,23 @@ class AudioProductionService:
                 or getattr(sh, "visual_prompt", None)
                 or getattr(sh, "video_prompt", None)
             )
-            speaker = getattr(sh, "speaker_name", None) or getattr(sh, "subject", None) or "Narrator"
-            is_dialogue = bool(getattr(sh, "dialogue_text", None))
+            meta = sh.source_metadata or {}
+            text_prompt = (
+                meta.get("dialogue_text")
+                or meta.get("voiceover_text")
+                or getattr(sh, "voiceover_text", None)
+                or getattr(sh, "dialogue_text", None)
+                or getattr(sh, "action", None)
+                or getattr(sh, "visual_prompt", None)
+                or getattr(sh, "video_prompt", None)
+            )
+            speaker = meta.get("speaker_name") or getattr(sh, "speaker_name", None) or getattr(sh, "subject", None) or "Narrator"
+            is_dialogue = bool(meta.get("is_dialogue") or meta.get("dialogue_text") or getattr(sh, "dialogue_text", None))
             atype = AudioType.DIALOGUE if is_dialogue else AudioType.VO
 
             voice_key = (atype.value, sh.id, sh.scene_id, AudioScope.SHOT.value)
             if voice_key not in existing_clip_map and text_prompt:
-                v_cls = cls.auto_classify_clip(atype)
+                v_cls = cls.auto_classify_clip(atype, video_supports_native_audio=video_supports_native_audio)
                 v_clip = AudioClip(
                     id=uuid.uuid4(),
                     project_id=project_id,
@@ -689,8 +725,10 @@ class AudioProductionService:
                 detail=f"AudioClip '{clip_id}' requires reconciliation. Resolve ambiguous outcome first.",
             )
 
-        # Embedded original audio handling: non-destructive
-        if clip.source_type == AudioSourceType.EMBEDDED_VIDEO_AUDIO.value and clip.generation_mode == AudioGenerationMode.EMBEDDED_EXISTING.value:
+        # 2. GENERATION_MODE MUST CONTROL EXECUTION
+        # Branch explicitly by generation_mode: EMBEDDED_EXISTING, WITH_VIDEO, SEPARATE_AUDIO
+
+        if clip.generation_mode == AudioGenerationMode.EMBEDDED_EXISTING.value or clip.source_type == AudioSourceType.EMBEDDED_VIDEO_AUDIO.value:
             prov = clip.provenance or {}
             if prov.get("audio_presence") == "UNKNOWN":
                 raise HTTPException(
@@ -704,6 +742,42 @@ class AudioProductionService:
             db.commit()
             db.refresh(clip)
             return clip
+
+        if clip.generation_mode == AudioGenerationMode.WITH_VIDEO.value:
+            # CRITICAL: A WITH_VIDEO clip must NEVER silently call AudioProvider.
+            # Enforce Cost Safety & Hard Budget Check before video provider regeneration
+            estimated_cost = 0.10  # Video provider estimated cost
+            budget_summary = BudgetService.get_budget_status(db, project_id)
+            committed_cost = budget_summary.get("total_committed_cost", 0.0)
+            limit = project.budget_limit
+            if budget_summary.get("is_hard_limit_exceeded") or (
+                limit is not None and round(committed_cost + estimated_cost, 4) > limit
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=f"Project hard budget limit exceeded or will be exceeded by video generation.",
+                )
+
+            default_cfg = getattr(project, "default_config", None) or {}
+            mode_cfg = getattr(project, "mode_config", None) or {}
+            has_persisted = False
+            if isinstance(default_cfg, dict):
+                has_persisted = bool(default_cfg.get("auto_cost_authorized") or default_cfg.get("cost_authorized"))
+            if not has_persisted and isinstance(mode_cfg, dict):
+                has_persisted = bool(mode_cfg.get("auto_cost_authorized") or mode_cfg.get("cost_authorized"))
+            effective_cost_auth = cost_authorized or has_persisted
+
+            if not effective_cost_auth:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Video provider regeneration is chargeable. Explicit cost authorization required.",
+                )
+
+            # Fail closed with explicit blocker string WITH_VIDEO_REQUIRES_VIDEO_REGENERATION
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="WITH_VIDEO_REQUIRES_VIDEO_REGENERATION: Native video provider regeneration for WITH_VIDEO audio is not implemented in WP014. Trigger video generation action or use SEPARATE_AUDIO mode.",
+            )
 
         eff_provider_name = provider_name or AudioProviderFactory.get_default_provider_name()
         provider = AudioProviderFactory.get_provider(eff_provider_name)

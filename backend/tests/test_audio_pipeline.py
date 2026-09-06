@@ -1029,3 +1029,144 @@ def test_embedded_audio_truth_verification(db_session: Session, client: TestClie
         )
     assert exc.value.status_code == 400
     assert "audio stream probe required" in str(exc.value.detail)
+
+
+# ----------------- 15. Review Fix: Canonical Provider-Capability Routing & WITH_VIDEO Safety -----------------
+
+from app.providers.base import IVideoGenerationProviderAdapter, VideoGenerationParams, ProviderJobResult
+from app.providers.factory import ProviderFactory
+
+class MockNativeAudioVideoAdapter(IVideoGenerationProviderAdapter):
+    @property
+    def provider_id(self) -> str:
+        return "mock_native_video"
+
+    async def submit_generation_job(self, params: VideoGenerationParams) -> ProviderJobResult:
+        return ProviderJobResult(provider_job_id="job123", status="COMPLETED", video_url="http://vid.mp4")
+
+    async def check_job_status(self, provider_job_id: str) -> ProviderJobResult:
+        return ProviderJobResult(provider_job_id=provider_job_id, status="COMPLETED")
+
+    async def cancel_job(self, provider_job_id: str) -> bool:
+        return True
+
+    def validate_config(self, config: dict) -> bool:
+        return True
+
+    @property
+    def supports_native_audio(self) -> bool:
+        return True
+
+    @property
+    def supports_dialogue(self) -> bool:
+        return True
+
+
+def test_provider_capability_routing_dialogue_and_vo(db_session: Session):
+    """Test A & B: Prove Dialogue recommends WITH_VIDEO when provider supports native audio, and SEPARATE_AUDIO when provider lacks capability."""
+    # Register mock native video provider
+    ProviderFactory.register("mock_native_video", MockNativeAudioVideoAdapter)
+
+    project1 = Project(id=uuid.uuid4(), title="Native Audio Project", video_mode="STORY")
+    db_session.add(project1)
+    db_session.flush()
+
+    scene1 = Scene(id=uuid.uuid4(), project_id=project1.id, scene_number=1, heading="INT. SCENE")
+    db_session.add(scene1)
+    db_session.flush()
+
+    shot1 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene1.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        source_metadata={"is_dialogue": True, "dialogue_text": "Hello world native dialogue!", "speaker_name": "Hero"},
+        duration_seconds=4.0,
+    )
+    db_session.add(shot1)
+    db_session.commit()
+
+    # Test A: Provider with native audio capability -> Dialogue receives WITH_VIDEO
+    plan1 = AudioProductionService.generate_audio_plan(db_session, project1.id, video_provider_name="mock_native_video")
+    clips1 = db_session.query(AudioClip).filter(AudioClip.project_id == project1.id).all()
+    dialogue_clip1 = next(c for c in clips1 if c.audio_type == AudioType.DIALOGUE.value)
+    assert dialogue_clip1.generation_mode == AudioGenerationMode.WITH_VIDEO.value
+
+    # Test B: Provider without native audio capability (default Vidu) -> Dialogue receives SEPARATE_AUDIO
+    project2 = Project(id=uuid.uuid4(), title="Non-Native Audio Project", video_mode="STORY")
+    db_session.add(project2)
+    db_session.flush()
+
+    scene2 = Scene(id=uuid.uuid4(), project_id=project2.id, scene_number=1, heading="INT. SCENE 2")
+    db_session.add(scene2)
+    db_session.flush()
+
+    shot2 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene2.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        source_metadata={"is_dialogue": True, "dialogue_text": "Hello world separate dialogue!", "speaker_name": "Hero"},
+        duration_seconds=4.0,
+    )
+    db_session.add(shot2)
+    db_session.commit()
+
+    plan2 = AudioProductionService.generate_audio_plan(db_session, project2.id, video_provider_name="vidu")
+    clips2 = db_session.query(AudioClip).filter(AudioClip.project_id == project2.id).all()
+    dialogue_clip2 = next(c for c in clips2 if c.audio_type == AudioType.DIALOGUE.value)
+    assert dialogue_clip2.generation_mode == AudioGenerationMode.SEPARATE_AUDIO.value
+
+
+def test_with_video_generation_mode_safety_and_blocker(db_session: Session):
+    """Test C, D & E: Prove WITH_VIDEO clip NEVER calls AudioProvider, fails closed with blocker string, and enforces cost authorization."""
+    project = Project(
+        id=uuid.uuid4(),
+        title="WITH_VIDEO Safety Project",
+        video_mode="STORY",
+        status="AUDIO_PLAN_APPROVED",
+        automation_mode="AUTO",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    clip = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Native Dialogue Clip",
+        audio_type=AudioType.DIALOGUE.value,
+        source_type=AudioSourceType.GENERATED_AUDIO.value,
+        generation_mode=AudioGenerationMode.WITH_VIDEO.value,
+        scope=AudioScope.SHOT.value,
+        ducking_role=DuckingRole.FOREGROUND.value,
+        status="PENDING",
+    )
+    db_session.add(clip)
+    db_session.commit()
+
+    # Test E: Cost authorization required before any paid video regeneration attempt
+    with pytest.raises(HTTPException) as exc_e:
+        AudioProductionService.generate_clip_audio(
+            db=db_session,
+            project_id=project.id,
+            clip_id=clip.id,
+            cost_authorized=False,
+            actor="AUTO",
+        )
+    assert exc_e.value.status_code == 402
+    assert "cost authorization required" in str(exc_e.value.detail).lower()
+
+    # Test C & D: Generate on WITH_VIDEO clip with cost_authorized=True MUST NEVER call AudioProvider and MUST fail closed with WITH_VIDEO_REQUIRES_VIDEO_REGENERATION
+    with patch("app.providers.audio.factory.AudioProviderFactory.get_provider") as mock_get_audio_provider:
+        with pytest.raises(HTTPException) as exc_d:
+            AudioProductionService.generate_clip_audio(
+                db=db_session,
+                project_id=project.id,
+                clip_id=clip.id,
+                cost_authorized=True,
+                actor="USER",
+            )
+        assert exc_d.value.status_code == 422
+        assert "WITH_VIDEO_REQUIRES_VIDEO_REGENERATION" in exc_d.value.detail
+        # Prove AudioProvider was NEVER called!
+        assert mock_get_audio_provider.call_count == 0
