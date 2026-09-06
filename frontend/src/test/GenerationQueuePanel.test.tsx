@@ -69,6 +69,6 @@ describe('GenerationQueuePanel', () => {
     expect(handleRetry).toHaveBeenCalledWith('shot-b');
 
     // Reconciliation row does not show normal retry
-    expect(screen.getByText('Investigate')).toBeInTheDocument();
+    expect(screen.getByText('Reconcile')).toBeInTheDocument();
   });
 });

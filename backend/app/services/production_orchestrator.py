@@ -374,9 +374,9 @@ class ProductionOrchestrator:
         if recon_jobs > 0:
             recommended = OrchestrationActionModel(
                 action="RESOLVE_RECONCILIATION",
-                display_name="Resolve Reconciliation Required Jobs",
+                display_name="Review & Reconcile Jobs",
                 description="Investigate and reconcile in-flight jobs that lost provider synchronization.",
-                action_type=OrchestrationActionType.RECOVERY,
+                action_type=OrchestrationActionType.NAVIGATION,
                 is_chargeable=False,
             )
             return recommended, available

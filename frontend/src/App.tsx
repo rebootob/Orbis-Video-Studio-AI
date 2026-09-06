@@ -322,17 +322,7 @@ export const App: React.FC = () => {
       return;
     }
     if (action.action === 'RESOLVE_RECONCILIATION') {
-      try {
-        setAutomationStep('Resolving job reconciliation...');
-        await api.executeOrchestrationAction(selectedProject.id, { action: 'RESOLVE_RECONCILIATION' });
-        await loadWorkspaceData(selectedProject);
-        await loadProjects();
-        await loadOrchestrationData(selectedProject.id);
-      } catch (err: any) {
-        alert(`Failed to resolve reconciliation: ${err.message}`);
-      } finally {
-        setAutomationStep(null);
-      }
+      setActiveTab('queue');
       return;
     }
     if (action.action === 'GENERATE_STORY') {
@@ -389,6 +379,24 @@ export const App: React.FC = () => {
       await loadOrchestrationData(selectedProject.id);
     } catch (err: any) {
       alert(`Execution failed: ${err.message}`);
+    } finally {
+      setAutomationStep(null);
+    }
+  };
+
+  const handleResolveReconciliation = async (jobId: string, resolution: string, evidence: string) => {
+    if (!selectedProject) return;
+    try {
+      setAutomationStep('Applying reconciliation resolution...');
+      await api.executeOrchestrationAction(selectedProject.id, {
+        action: 'RESOLVE_RECONCILIATION',
+        parameters: { job_id: jobId, resolution, evidence },
+      });
+      await loadWorkspaceData(selectedProject);
+      await loadProjects();
+      await loadOrchestrationData(selectedProject.id);
+    } catch (err: any) {
+      alert(`Failed to resolve reconciliation: ${err.message}`);
     } finally {
       setAutomationStep(null);
     }
@@ -776,6 +784,7 @@ export const App: React.FC = () => {
                 onCancelJob={handleCancelJob}
                 onPollJob={handlePollJob}
                 onRetryJob={handleGenerateShot}
+                onResolveReconciliation={handleResolveReconciliation}
               />
             )}
 

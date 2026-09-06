@@ -4,7 +4,7 @@ import { App } from '../App';
 import { api } from '../api/client';
 import { AutomationBar } from '../components/storyboard/AutomationBar';
 import { QCHistoryPanel } from '../components/qc/QCHistoryPanel';
-import type { OrchestrationStateResponse, OrchestrationAuditResponse, Project, Scene, Shot } from '../api/types';
+import type { OrchestrationStateResponse, OrchestrationAuditResponse, Project, Scene, Shot, GenerationJob } from '../api/types';
 
 vi.mock('../api/client', () => ({
   api: {
@@ -577,5 +577,106 @@ describe('Recommended Action Canonical Execution via Orchestration API', () => {
       });
     });
     expect(api.resumeProjectJobs).not.toHaveBeenCalled();
+  });
+
+  it('handles RESOLVE_RECONCILIATION recommended action by switching to queue tab without parameterless execute call', async () => {
+    const orchState: OrchestrationStateResponse = {
+      project_id: 'proj-orch-test',
+      current_stage: 'VIDEO_IN_PROGRESS',
+      video_mode: 'STORY',
+      automation_mode: 'MANUAL',
+      stage_display_name: 'Video In Progress',
+      stage_description: 'Ambiguous job detected.',
+      is_approval_required: false,
+      is_blocked: true,
+      blocked_reasons: ['1 job(s) require reconciliation before automatic workflow continuation.'],
+      recommended_action: {
+        action: 'RESOLVE_RECONCILIATION',
+        display_name: 'Review & Reconcile Jobs',
+        description: 'Resolve ambiguous provider jobs before resuming generation.',
+        action_type: 'NAVIGATION',
+        is_chargeable: false,
+        is_blocked: false,
+      },
+      available_actions: [],
+      summary: {},
+    };
+
+    (api.getOrchestrationState as any).mockResolvedValue(orchState);
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    const recActionBtn = await screen.findByTestId('orchestration-recommended-action-btn');
+    expect(recActionBtn).toHaveTextContent('Review & Reconcile Jobs');
+
+    fireEvent.click(recActionBtn);
+
+    // Verify executeOrchestrationAction was NOT called without parameters
+    expect(api.executeOrchestrationAction).not.toHaveBeenCalled();
+
+    // Verify queue tab is activated
+    const queueTab = screen.getByTestId('tab-queue');
+    expect(queueTab).toHaveClass('active');
+  });
+
+  it('allows reconciling ambiguous job from queue panel with explicit parameters', async () => {
+    const mockReconJob: GenerationJob = {
+      id: 'job-recon-1',
+      shot_id: 'shot-test-1',
+      provider_name: 'comfyui',
+      status: 'RECONCILIATION_REQUIRED',
+      provider_job_id: 'prov-job-999',
+      retries: 0,
+      max_retries: 3,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    (api.listProjectJobs as any).mockResolvedValue([mockReconJob]);
+    (api.executeOrchestrationAction as any).mockResolvedValue({
+      success: true,
+      action: 'RESOLVE_RECONCILIATION',
+      result: 'APPLIED',
+      message: 'Job reconciled',
+    });
+
+    render(<App />);
+
+    const projectCard = await screen.findByText('Orchestration Test Project');
+    fireEvent.click(projectCard);
+
+    // Switch to queue tab
+    const queueTab = await screen.findByTestId('tab-queue');
+    fireEvent.click(queueTab);
+
+    // Find Reconcile button for ambiguous job
+    const reconcileBtn = await screen.findByTestId('reconcile-job-btn-job-recon-1');
+    expect(reconcileBtn).toBeInTheDocument();
+    fireEvent.click(reconcileBtn);
+
+    // Modal should be visible
+    expect(screen.getByTestId('reconciliation-modal')).toBeInTheDocument();
+
+    // Fill in evidence
+    const evidenceInput = screen.getByTestId('reconciliation-evidence-input');
+    fireEvent.change(evidenceInput, { target: { value: 'Verified provider timed out' } });
+
+    // Click confirm resolution
+    const confirmBtn = screen.getByTestId('confirm-reconciliation-btn');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(api.executeOrchestrationAction).toHaveBeenCalledWith('proj-orch-test', {
+        action: 'RESOLVE_RECONCILIATION',
+        parameters: {
+          job_id: 'job-recon-1',
+          resolution: 'CONFIRMED_FAILED',
+          evidence: 'Verified provider timed out',
+        },
+      });
+    });
   });
 });
