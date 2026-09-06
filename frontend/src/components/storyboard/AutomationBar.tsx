@@ -44,7 +44,9 @@ export const AutomationBar: React.FC<AutomationBarProps> = ({
   // Production generation requires SHOT_PLAN_APPROVED or downstream production status
   const allowedProductionStatuses = [
     'SHOT_PLAN_APPROVED',
+    'IMAGES_IN_PROGRESS',
     'IMAGES_GENERATED',
+    'IMAGES_APPROVED',
     'VIDEO_IN_PROGRESS',
   ];
   const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));

@@ -112,13 +112,16 @@ The roadmap should prioritize end-to-end production automation rather than build
 ### Phase 2 — Production Orchestration & Generation
 
 - **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
-  - **Status:** IMPLEMENTED / AWAITING INDEPENDENT REVIEW
+  - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #31
+  - **PR:** #32 (Merged into `main` at `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`)
   - **Branch:** `ai/p2-wp012-production-orchestrator`
   - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior. Guard stage gates against arbitrary PATCH bypass, integrate append-only orchestration audit trail, and wire frontend state machine controls.
 
 - **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - **Status:** ACTIVE / AUTHORIZED
+  - **Issue:** #33
+  - **Branch:** `ai/p2-wp013-image-keyframe-pipeline`
   - Dedicated ImageProvider abstraction, batch storyboard/keyframe generation, continuity/reference mapping and retry/resume.
 
 ### Future Provider Planning Note — ComfyUI / Cloud GPU

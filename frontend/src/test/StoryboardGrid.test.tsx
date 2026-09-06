@@ -128,4 +128,73 @@ describe('StoryboardGrid', () => {
 
     expect(handleGenerate).toHaveBeenCalled();
   });
+
+  it('renders keyframe preview and badge when shot has keyframe_url', () => {
+    const keyframeShots: Shot[] = [
+      {
+        ...mockShots[0],
+        keyframe_url: 'https://example.com/keyframe-1.svg',
+      },
+    ];
+
+    render(
+      <StoryboardGrid
+        scenes={mockScenes}
+        shots={keyframeShots}
+        jobs={[]}
+        automationStep={null}
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+        onAddScene={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onDeleteScene={vi.fn()}
+        onAddShot={vi.fn()}
+        onUpdateShot={vi.fn()}
+        onDeleteShot={vi.fn()}
+        onToggleShotLock={vi.fn()}
+        onToggleSceneLock={vi.fn()}
+        onGenerateShot={vi.fn()}
+      />
+    );
+
+    // KEYFRAME badge rendered in card preview
+    expect(screen.getByText('KEYFRAME')).toBeInTheDocument();
+    const img = screen.getByAltText('Shot 1 Keyframe');
+    expect(img).toHaveAttribute('src', 'https://example.com/keyframe-1.svg');
+  });
+
+  it('allows triggering keyframe generation from ShotDetailDrawer', () => {
+    const handleGenerateKeyframe = vi.fn();
+    render(
+      <StoryboardGrid
+        scenes={mockScenes}
+        shots={mockShots}
+        jobs={[]}
+        automationStep={null}
+        onGenerateFullStoryboard={vi.fn()}
+        onBatchGenerateShots={vi.fn()}
+        onRetryFailed={vi.fn()}
+        onAddScene={vi.fn()}
+        onUpdateScene={vi.fn()}
+        onDeleteScene={vi.fn()}
+        onAddShot={vi.fn()}
+        onUpdateShot={vi.fn()}
+        onDeleteShot={vi.fn()}
+        onToggleShotLock={vi.fn()}
+        onToggleSceneLock={vi.fn()}
+        onGenerateShot={vi.fn()}
+        onGenerateKeyframe={handleGenerateKeyframe}
+      />
+    );
+
+    const shot1Card = screen.getByTestId('shot-card-sh-1');
+    fireEvent.click(shot1Card);
+
+    const keyframeBtn = screen.getByTestId('drawer-generate-keyframe-btn');
+    expect(keyframeBtn).toBeInTheDocument();
+    fireEvent.click(keyframeBtn);
+
+    expect(handleGenerateKeyframe).toHaveBeenCalledWith('sh-1');
+  });
 });

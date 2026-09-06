@@ -1,11 +1,14 @@
 import uuid
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from sqlalchemy.orm import joinedload
 from app.models.shot import Shot
 from app.models.scene import Scene
+from app.services.storage.factory import get_storage_provider
+from app.services.storage.base import ObjectStorageProvider
 from app.services.hybrid_shot import HybridShotService
 from app.services.lock_machine import LockMachineService
 from app.models.generation_job import GenerationJob
@@ -18,7 +21,21 @@ from app.schemas.shot import (
     ReorderRequest,
 )
 
+
 router = APIRouter()
+
+
+def _shot_to_response(shot: Shot, storage: Optional[ObjectStorageProvider] = None) -> ShotDetailResponse:
+    resp = ShotDetailResponse.model_validate(shot)
+    if shot.keyframe_asset:
+        if storage is None:
+            storage = get_storage_provider()
+        resp.keyframe_url = storage.generate_presigned_url(
+            shot.keyframe_asset.storage_bucket,
+            shot.keyframe_asset.storage_key,
+        )
+    return resp
+
 
 
 
@@ -31,9 +48,10 @@ def create_scene_shot(
     scene_id: uuid.UUID,
     request: ShotCreateRequest,
     db: Session = Depends(get_db),
+    storage: ObjectStorageProvider = Depends(get_storage_provider),
 ):
     shot = HybridShotService.create_shot(db=db, scene_id=scene_id, request=request)
-    return shot
+    return _shot_to_response(shot, storage)
 
 
 @router.get(
@@ -45,6 +63,7 @@ def list_scene_shots(
     scene_id: uuid.UUID,
     include_archived: bool = False,
     db: Session = Depends(get_db),
+    storage: ObjectStorageProvider = Depends(get_storage_provider),
 ):
     scene = db.get(Scene, scene_id)
     if not scene:
@@ -52,11 +71,11 @@ def list_scene_shots(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scene '{scene_id}' not found",
         )
-    query = db.query(Shot).filter(Shot.scene_id == scene_id)
+    query = db.query(Shot).options(joinedload(Shot.keyframe_asset)).filter(Shot.scene_id == scene_id)
     if not include_archived:
         query = query.filter(Shot.status != "ARCHIVED")
     shots = query.order_by(Shot.shot_number).all()
-    return shots
+    return [_shot_to_response(s, storage) for s in shots]
 
 
 @router.get(
@@ -67,14 +86,15 @@ def list_scene_shots(
 def get_shot(
     shot_id: uuid.UUID,
     db: Session = Depends(get_db),
+    storage: ObjectStorageProvider = Depends(get_storage_provider),
 ):
-    shot = db.get(Shot, shot_id)
+    shot = db.query(Shot).options(joinedload(Shot.keyframe_asset)).filter(Shot.id == shot_id).first()
     if not shot:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Shot '{shot_id}' not found",
         )
-    return shot
+    return _shot_to_response(shot, storage)
 
 
 @router.patch(
@@ -86,9 +106,10 @@ def update_shot(
     shot_id: uuid.UUID,
     request: ShotUpdateRequest,
     db: Session = Depends(get_db),
+    storage: ObjectStorageProvider = Depends(get_storage_provider),
 ):
     shot = HybridShotService.update_shot(db=db, shot_id=shot_id, request=request)
-    return shot
+    return _shot_to_response(shot, storage)
 
 
 @router.delete(
@@ -138,8 +159,9 @@ def reorder_scene_shots(
             shot.shot_number = item.order
 
     db.commit()
-    shots = db.query(Shot).filter(Shot.scene_id == scene_id).order_by(Shot.shot_number).all()
-    return shots
+    shots = db.query(Shot).options(joinedload(Shot.keyframe_asset)).filter(Shot.scene_id == scene_id).order_by(Shot.shot_number).all()
+    storage = get_storage_provider()
+    return [_shot_to_response(s, storage) for s in shots]
 
 
 

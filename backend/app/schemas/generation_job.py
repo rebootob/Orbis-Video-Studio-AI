@@ -18,6 +18,7 @@ class JobResponse(BaseModel):
 
     id: uuid.UUID
     shot_id: uuid.UUID
+    job_type: str = "VIDEO"
     provider_name: str
     provider_job_id: Optional[str] = None
     status: str

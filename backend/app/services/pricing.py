@@ -28,13 +28,6 @@ class ProviderPricingService:
     _default_rules: Dict[Tuple[str, str], ProviderPricingRule] = {}
 
     @classmethod
-    def reset(cls):
-        """Reset registry to default state (useful for tests)."""
-        cls._registry.clear()
-        cls._default_rules.clear()
-        cls._init_defaults()
-
-    @classmethod
     def register_rule(cls, rule: ProviderPricingRule):
         key = (
             rule.provider.lower(),

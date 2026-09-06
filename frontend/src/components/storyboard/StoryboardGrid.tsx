@@ -30,6 +30,7 @@ interface StoryboardGridProps {
   onToggleShotLock: (shot: Shot) => Promise<void>;
   onToggleSceneLock: (scene: Scene) => Promise<void>;
   onGenerateShot: (shotId: string) => Promise<void>;
+  onGenerateKeyframe?: (shotId: string) => Promise<void>;
   onStageReview?: (stage: 'STORY' | 'STORYBOARD' | 'SHOT_PLAN') => void;
   onExecuteRecommendedAction?: () => Promise<void>;
   onUpdateAutomationMode?: (mode: AutomationMode) => Promise<void>;
@@ -59,6 +60,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
   onToggleShotLock,
   onToggleSceneLock,
   onGenerateShot,
+  onGenerateKeyframe,
   onStageReview,
   onExecuteRecommendedAction,
   onUpdateAutomationMode,
@@ -294,6 +296,7 @@ export const StoryboardGrid: React.FC<StoryboardGridProps> = ({
           onDeleteShot={onDeleteShot}
           onToggleLock={onToggleShotLock}
           onGenerateShot={onGenerateShot}
+          onGenerateKeyframe={onGenerateKeyframe}
         />
       )}
 

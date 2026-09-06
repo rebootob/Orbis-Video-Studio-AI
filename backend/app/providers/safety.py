@@ -59,7 +59,7 @@ def safe_result(result):
         "video_url": safe_url(getattr(result, "video_url", None)),
         "thumbnail_url": safe_url(getattr(result, "thumbnail_url", None)),
     }
-    progress = result.progress_percentage
+    progress = getattr(result, "progress_percentage", None)
     if isinstance(progress, (int, float)) and math.isfinite(progress) and 0 <= progress <= 100:
         data["progress_percentage"] = progress
     return data

@@ -23,7 +23,7 @@ class BudgetService:
         entries = db.query(UsageLedger).filter(UsageLedger.project_id == project_id).all()
         total = 0.0
         for e in entries:
-            if e.cost_status in (CostStatus.CONFIRMED, CostStatus.ADJUSTED):
+            if e.cost_status in (CostStatus.CONFIRMED, CostStatus.ADJUSTED, "COMMITTED"):
                 total += (e.actual_cost or 0.0)
             elif e.cost_status == CostStatus.ESTIMATED:
                 total += (e.estimated_cost or 0.0)

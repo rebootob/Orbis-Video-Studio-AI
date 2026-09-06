@@ -25,6 +25,7 @@ interface ShotDetailDrawerProps {
   onDeleteShot: (shotId: string) => Promise<void>;
   onToggleLock: (shot: Shot) => Promise<void>;
   onGenerateShot: (shotId: string) => Promise<void>;
+  onGenerateKeyframe?: (shotId: string) => Promise<void>;
 }
 
 export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
@@ -36,6 +37,7 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
   onDeleteShot,
   onToggleLock,
   onGenerateShot,
+  onGenerateKeyframe,
 }) => {
   const [visualPrompt, setVisualPrompt] = useState('');
   const [shotType, setShotType] = useState<ShotType>('AI_GENERATED');
@@ -182,10 +184,34 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
               controls
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
+          ) : shot.keyframe_url ? (
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              <img
+                src={shot.keyframe_url}
+                alt={`Keyframe #${shot.shot_number}`}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  bottom: '8px',
+                  left: '8px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                  color: '#93c5fd',
+                  fontSize: '0.65rem',
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(147, 197, 253, 0.3)',
+                }}
+              >
+                KEYFRAME
+              </span>
+            </div>
           ) : (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
               <Sparkles size={32} style={{ marginBottom: '8px', opacity: 0.5 }} />
-              <p style={{ fontSize: '0.8125rem' }}>No generated video yet</p>
+              <p style={{ fontSize: '0.8125rem' }}>No generated preview yet</p>
               <span style={{ fontSize: '0.7rem' }}>
                 Status: {latestJob?.status || 'NOT_DISPATCHED'}
               </span>
@@ -197,14 +223,16 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
         {(() => {
           const allowedProductionStatuses = [
             'SHOT_PLAN_APPROVED',
+            'IMAGES_IN_PROGRESS',
             'IMAGES_GENERATED',
+            'IMAGES_APPROVED',
             'VIDEO_IN_PROGRESS',
           ];
           const isProductionGated = Boolean(projectStatus && !allowedProductionStatuses.includes(projectStatus));
 
           return (
             <>
-              <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   className={`btn btn-sm ${shot.is_locked ? 'btn-danger' : 'btn-outline'}`}
                   style={{ flex: 1 }}
@@ -212,8 +240,29 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
                   data-testid="drawer-lock-toggle-btn"
                 >
                   {shot.is_locked ? <Unlock size={14} /> : <Lock size={14} />}
-                  {shot.is_locked ? 'Unlock Shot' : 'Lock Shot'}
+                  {shot.is_locked ? 'Unlock' : 'Lock'}
                 </button>
+
+                {onGenerateKeyframe && (
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={async () => {
+                      try {
+                        setGenerating(true);
+                        await onGenerateKeyframe(shot.id);
+                      } catch (err: any) {
+                        alert(`Keyframe generation failed: ${err.message}`);
+                      } finally {
+                        setGenerating(false);
+                      }
+                    }}
+                    disabled={shot.is_locked || generating}
+                    data-testid="drawer-generate-keyframe-btn"
+                    title={shot.is_locked ? 'Shot is locked' : 'Generate keyframe image for this shot'}
+                  >
+                    <Sparkles size={14} /> Keyframe
+                  </button>
+                )}
 
                 <button
                   className="btn btn-sm btn-primary"
@@ -230,7 +279,7 @@ export const ShotDetailDrawer: React.FC<ShotDetailDrawerProps> = ({
                   }
                 >
                   <Play size={14} />
-                  {generating ? 'Dispatching...' : 'Generate Shot'}
+                  {generating ? 'Dispatching...' : 'Generate Video'}
                 </button>
               </div>
 

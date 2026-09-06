@@ -29,6 +29,7 @@ from app.providers.safety import (
 ALLOWED_PRODUCTION_STATUSES = {
     "SHOT_PLAN_APPROVED",
     "IMAGES_GENERATED",
+    "IMAGES_APPROVED",
     "VIDEO_IN_PROGRESS",
 }
 
@@ -504,7 +505,11 @@ class JobDispatchService:
 
         job = load(db, job_id)
         try:
-            adapter = ProviderFactory.get_provider(job.provider_name)
+            if getattr(job, "job_type", "VIDEO") == "IMAGE":
+                from app.providers.image.factory import ImageProviderFactory
+                adapter = ImageProviderFactory.get_provider(job.provider_name)
+            else:
+                adapter = ProviderFactory.get_provider(job.provider_name)
             res = await adapter.check_job_status(job.provider_job_id)
         except Exception as exc:
             res = failure(exc)
@@ -527,18 +532,30 @@ class JobDispatchService:
                 error_message="Transient status failure" if retryable else "Provider job failed",
                 next_poll_at=now + timedelta(seconds=max(POLL_SECONDS, backoff(retries))) if retry else None,
             )
+            if not retry and getattr(job, "job_type", "VIDEO") == "IMAGE" and res.cost_usd is not None:
+                from app.services.cost_ledger import CostLedgerService
+                CostLedgerService.confirm_job_cost(
+                    db,
+                    job.id,
+                    actual_cost=res.cost_usd,
+                    provider_event_id=job.provider_job_id,
+                )
         elif values["status"] in TERMINAL:
             values["next_poll_at"] = None
 
         change(db, [Job.id == job_id, Job.status == "POLLING", Job.claim_token == token], values)
         if res.status == "COMPLETED":
-            from app.services.cost_ledger import CostLedgerService
-            CostLedgerService.confirm_job_cost(
-                db,
-                job_id,
-                actual_cost=res.cost_usd,
-                provider_event_id=job.provider_job_id,
-            )
+            if getattr(job, "job_type", "VIDEO") == "IMAGE":
+                from app.services.keyframe_generation import KeyframeGenerationService
+                KeyframeGenerationService.complete_async_keyframe_job(db, job_id=job.id, result=res)
+            else:
+                from app.services.cost_ledger import CostLedgerService
+                CostLedgerService.confirm_job_cost(
+                    db,
+                    job_id,
+                    actual_cost=res.cost_usd,
+                    provider_event_id=job.provider_job_id,
+                )
         return load(db, job_id)
 
     @staticmethod

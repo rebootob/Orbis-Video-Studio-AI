@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -99,7 +99,7 @@ class BatchResumeService:
 
     @classmethod
     def _categorize_job_rows(
-        cls, job_rows: List[Tuple[uuid.UUID, str]]
+        cls, job_rows: List[Any]
     ) -> Tuple[Set[uuid.UUID], Set[uuid.UUID], Set[uuid.UUID], Set[uuid.UUID], Set[uuid.UUID]]:
         shot_has_completed: Set[uuid.UUID] = set()
         shot_has_cancelling: Set[uuid.UUID] = set()
@@ -107,17 +107,24 @@ class BatchResumeService:
         shot_has_active: Set[uuid.UUID] = set()
         shot_has_failed: Set[uuid.UUID] = set()
 
-        for s_id, j_status in job_rows:
-            if j_status == "COMPLETED":
-                shot_has_completed.add(s_id)
-            elif j_status == "RECONCILIATION_REQUIRED":
+        for row in job_rows:
+            s_id = row[0]
+            j_status = row[1]
+            j_type = row[2] if len(row) > 2 else "VIDEO"
+            jt = (j_type or "VIDEO").upper()
+
+            if jt == "VIDEO":
+                if j_status == "COMPLETED":
+                    shot_has_completed.add(s_id)
+                elif j_status == "FAILED":
+                    shot_has_failed.add(s_id)
+
+            if j_status == "RECONCILIATION_REQUIRED":
                 shot_has_reconciliation.add(s_id)
             elif j_status == "CANCELLING":
                 shot_has_cancelling.add(s_id)
             elif j_status in ACTIVE_JOB_STATUSES:
                 shot_has_active.add(s_id)
-            elif j_status == "FAILED":
-                shot_has_failed.add(s_id)
 
         return shot_has_completed, shot_has_cancelling, shot_has_reconciliation, shot_has_active, shot_has_failed
 
@@ -409,7 +416,7 @@ class BatchResumeService:
             job_rows: List[Tuple[uuid.UUID, str]] = []
             if found_ids:
                 job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
+                    db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
                     .filter(GenerationJob.shot_id.in_(found_ids))
                     .all()
                 )
@@ -529,7 +536,7 @@ class BatchResumeService:
             job_rows: List[Tuple[uuid.UUID, str]] = []
             if found_ids:
                 job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
+                    db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
                     .filter(GenerationJob.shot_id.in_(found_ids))
                     .all()
                 )
@@ -705,7 +712,7 @@ class BatchResumeService:
             job_rows: List[Tuple[uuid.UUID, str]] = []
             if found_ids:
                 job_rows = (
-                    db.query(GenerationJob.shot_id, GenerationJob.status)
+                    db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
                     .filter(GenerationJob.shot_id.in_(found_ids))
                     .all()
                 )
