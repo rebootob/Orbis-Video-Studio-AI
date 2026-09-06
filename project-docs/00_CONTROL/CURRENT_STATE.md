@@ -17,9 +17,12 @@ P2-WP007_PR: "#15"
 P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
 P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
 
-ACTIVE_WORK_PACKAGE: P2-WP008
+P2-WP008: PASS / CLOSED / MERGED
+P2-WP008_PR: "#19"
+
+ACTIVE_WORK_PACKAGE: P2-WP009
 CURRENT_GATE: CHATGPT INDEPENDENT REVIEW
-P2-WP008: IMPLEMENTED / WAITING CHATGPT REVIEW
+P2-WP009: IMPLEMENTED / WAITING CHATGPT REVIEW
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -55,7 +58,8 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | OpenAI creative generation service complete. |
 | Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
 | Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | PR #15 merged; durable claim/lease fencing, retry/poll scheduling, cancellation, reconciliation, secret safety and mocked Vidu contract tests complete. |
-| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | IMPLEMENTED / WAITING REVIEW | Hybrid shot engine (6 sources), asset ownership validation, AssetLock machine with audit trail, Core V1 video modes (STORY/SHORT/LOOP/SCENE), config inheritance, migration 008. |
+| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | PR #19 merged; hybrid shot engine, asset ownership validation, AssetLock machine with audit trail, Core V1 video modes, config inheritance, migration 008. |
+| Cost Control & Granular Usage Audit Ledger (P2-WP009) | IMPLEMENTED / WAITING REVIEW | Provider-neutral usage ledger, idempotency deduplication, project budget controls (soft warning & hard cap), provider pricing abstraction, manual adjustment audit trail, migration 009. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production project delivery until separate no-credit UAT passes. |
 
 ---

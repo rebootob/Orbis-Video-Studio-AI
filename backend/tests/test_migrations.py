@@ -220,3 +220,109 @@ def test_008_downgrade_guarded_refusal_when_direct_scenes_exist(tmp_path, monkey
     meta_downgraded.reflect(bind=engine)
     assert "asset_locks" not in meta_downgraded.tables
     engine.dispose()
+
+
+def test_009_cost_ledger_and_budget_lifecycle(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+    url = f"sqlite:///{tmp_path / 'wp009_migration.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to 008
+    command.upgrade(cfg, "008_hybrid_shot_locks_modes")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "usage_ledger" not in meta.tables
+    assert "ledger_adjustments" not in meta.tables
+
+    # 2. Upgrade to 009 / head
+    command.upgrade(cfg, "head")
+
+    meta2 = MetaData()
+    meta2.reflect(bind=engine)
+    assert "usage_ledger" in meta2.tables
+    assert "ledger_adjustments" in meta2.tables
+
+    projects = Table("projects", meta2, autoload_with=engine)
+    projects.c.id.type = Uuid()
+    ledger = Table("usage_ledger", meta2, autoload_with=engine)
+    ledger.c.id.type = Uuid()
+    ledger.c.project_id.type = Uuid()
+    adjustments = Table("ledger_adjustments", meta2, autoload_with=engine)
+    adjustments.c.id.type = Uuid()
+    adjustments.c.ledger_id.type = Uuid()
+
+    p_id = uuid.uuid4()
+    l_id = uuid.uuid4()
+    a_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    with engine.begin() as conn:
+        conn.execute(
+            projects.insert().values(
+                id=p_id,
+                title="WP009 Project",
+                status="DRAFT",
+                video_mode="SCENE",
+                budget_limit=50.0,
+                budget_currency="USD",
+                budget_threshold_percentage=85.0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        conn.execute(
+            ledger.insert().values(
+                id=l_id,
+                project_id=p_id,
+                provider="vidu",
+                operation="VIDEO_GENERATION",
+                estimated_cost=0.20,
+                currency="USD",
+                cost_status="ESTIMATED",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        conn.execute(
+            adjustments.insert().values(
+                id=a_id,
+                ledger_id=l_id,
+                actor="reviewer",
+                reason="Audit discount",
+                previous_cost=0.20,
+                adjusted_cost=0.15,
+                created_at=now,
+            )
+        )
+
+    # Verify query
+    with engine.connect() as conn:
+        p_row = conn.execute(select(projects).where(projects.c.id == p_id)).mappings().first()
+        assert p_row["budget_limit"] == 50.0
+        assert p_row["budget_threshold_percentage"] == 85.0
+        l_row = conn.execute(select(ledger).where(ledger.c.id == l_id)).mappings().first()
+        assert l_row["estimated_cost"] == 0.20
+        a_row = conn.execute(select(adjustments).where(adjustments.c.id == a_id)).mappings().first()
+        assert a_row["adjusted_cost"] == 0.15
+
+    # 3. Downgrade -1 (to 008)
+    command.downgrade(cfg, "-1")
+    meta3 = MetaData()
+    meta3.reflect(bind=engine)
+    assert "usage_ledger" not in meta3.tables
+    assert "ledger_adjustments" not in meta3.tables
+
+    # 4. Re-upgrade to head
+    command.upgrade(cfg, "head")
+    meta4 = MetaData()
+    meta4.reflect(bind=engine)
+    assert "usage_ledger" in meta4.tables
+    assert "ledger_adjustments" in meta4.tables
+    engine.dispose()

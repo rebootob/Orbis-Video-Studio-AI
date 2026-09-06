@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.asset import Asset
     from app.models.scene import Scene
     from app.models.asset_lock import AssetLock
+    from app.models.usage_ledger import UsageLedger
 
 
 def utc_now() -> datetime:
@@ -33,6 +34,9 @@ class Project(Base):
     preferred_aspect_ratio: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     mode_config: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     default_config: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    budget_limit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    budget_currency: Mapped[str] = mapped_column(String(10), default="USD", nullable=False)
+    budget_threshold_percentage: Mapped[Optional[float]] = mapped_column(Float, default=80.0, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
@@ -53,4 +57,7 @@ class Project(Base):
     )
     locks: Mapped[List["AssetLock"]] = relationship(
         "AssetLock", back_populates="project", cascade="all, delete-orphan"
+    )
+    usage_ledger_entries: Mapped[List["UsageLedger"]] = relationship(
+        "UsageLedger", back_populates="project", cascade="all, delete-orphan"
     )

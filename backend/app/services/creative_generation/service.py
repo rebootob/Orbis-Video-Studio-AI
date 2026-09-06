@@ -78,6 +78,37 @@ class StoryGenerationService:
         self.db.add(audit)
         if commit:
             self.db.commit()
+            if result and not error:
+                try:
+                    from app.services.cost_ledger import CostLedgerService
+                    from app.services.pricing import ProviderPricingService, CostStatus
+                    cost, curr, _ = ProviderPricingService.estimate_cost(
+                        provider=getattr(result, "provider", "openai"),
+                        operation="STORY_GENERATION",
+                        model=getattr(result, "model", "gpt-4o"),
+                        params={
+                            "prompt_tokens": getattr(result, "prompt_tokens", None) or 0,
+                            "completion_tokens": getattr(result, "completion_tokens", None) or 0,
+                        },
+                    )
+                    CostLedgerService.record_entry(
+                        self.db,
+                        project_id=project_id,
+                        provider=getattr(result, "provider", "openai"),
+                        operation=f"STORY_{request_type}",
+                        model=getattr(result, "model", "gpt-4o"),
+                        usage_units={
+                            "prompt_tokens": getattr(result, "prompt_tokens", None),
+                            "completion_tokens": getattr(result, "completion_tokens", None),
+                            "duration_ms": duration_ms,
+                        },
+                        estimated_cost=cost,
+                        actual_cost=cost,
+                        currency=curr,
+                        cost_status=CostStatus.CONFIRMED if cost is not None else CostStatus.UNKNOWN,
+                    )
+                except Exception:
+                    pass
         return audit
 
     def generate_project_story(
@@ -96,6 +127,14 @@ class StoryGenerationService:
         if not project:
             raise CreativeGenerationError(
                 "PROJECT_NOT_FOUND", f"Project with ID '{project_id}' not found."
+            )
+
+        from app.services.budget import BudgetService
+        try:
+            BudgetService.check_budget_before_dispatch(self.db, project_id)
+        except Exception as exc:
+            raise CreativeGenerationError(
+                "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
             )
 
         # 2. Check existing Story lock state
@@ -246,6 +285,14 @@ class StoryGenerationService:
         if story.is_locked:
             raise CreativeGenerationError("STORY_LOCKED", "Story is locked.")
 
+        from app.services.budget import BudgetService
+        try:
+            BudgetService.check_budget_before_dispatch(self.db, story.project_id)
+        except Exception as exc:
+            raise CreativeGenerationError(
+                "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+            )
+
         doc_extractions = self._gather_document_extractions(story.project_id)
 
         prompt = ScenePromptComposer.compose(
@@ -341,7 +388,17 @@ class StoryGenerationService:
         if scene.is_locked:
             raise CreativeGenerationError("SCENE_LOCKED", "Scene is locked.")
 
-        doc_extractions = self._gather_document_extractions(scene.story.project_id)
+        project_id = scene.project_id or (scene.story.project_id if scene.story else None)
+        if project_id:
+            from app.services.budget import BudgetService
+            try:
+                BudgetService.check_budget_before_dispatch(self.db, project_id)
+            except Exception as exc:
+                raise CreativeGenerationError(
+                    "BUDGET_EXCEEDED", str(exc.detail if hasattr(exc, "detail") else exc)
+                )
+
+        doc_extractions = self._gather_document_extractions(project_id) if project_id else []
 
         prompt = ShotPromptComposer.compose(
             scene_heading=scene.heading or f"Scene {scene.scene_number}",

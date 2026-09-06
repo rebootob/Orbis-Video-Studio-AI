@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     projects,
     shots,
     locks,
+    cost_ledger,
 )
 
 api_router = APIRouter()
@@ -21,5 +22,6 @@ api_router.include_router(reference_library.router, tags=["reference-library"])
 api_router.include_router(generation_queue.router, tags=["generation-queue"])
 api_router.include_router(shots.router, tags=["shots"])
 api_router.include_router(locks.router, tags=["locks"])
+api_router.include_router(cost_ledger.router, tags=["costs"])
 
 
