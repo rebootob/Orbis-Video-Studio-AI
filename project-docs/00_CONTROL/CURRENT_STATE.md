@@ -7,19 +7,39 @@
 ## State Flags
 
 ```yaml
-PHASE: P2 — Multi-Modal Reference, Continuity & Scene Engine
-ACTIVE WORK PACKAGE: P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue
-CURRENT GATE: CHATGPT INDEPENDENT REVIEW
-DOCUMENTATION: COMPLETE
-IMPLEMENTATION: FINAL CORRECTIVE IMPLEMENTED / WAITING CHATGPT REVIEW
-HANDOFF_BASE_SHA: 6469e2390fea96a8c2693f4eb838c5903d333c45
-VIDU: ADAPTER IMPLEMENTED & TESTED (MOCKED)
-CLOUD INFRASTRUCTURE: PLANNED / NOT STARTED
-ANTIGRAVITY: BOUNDED EXECUTION COMPLETE / AWAITING REVIEW
-CODEX: FINAL CORRECTIVE COMPLETE / STOP AFTER DELIVERY
-CLAUDE CODE: STOP
-NEXT WP: P2-WP008 — PROPOSED / NOT AUTHORIZED
-NEXT ALLOWED ACTION: ChatGPT review only
+PHASE: P2 — Generation & Multi-Mode Production Pipeline
+CANONICAL_BRANCH: main
+MAIN_HEAD_AFTER_WP007: 9cb098dea7fc2948b023ad48163c729f566573a7
+
+P2-WP006: PASS / CLOSED / MERGED
+P2-WP007: PASS / CLOSED / MERGED
+P2-WP007_PR: "#15"
+P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
+P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: OWNER DECISION ON NEXT WORK PACKAGE
+P2-WP008: PROPOSED / NOT AUTHORIZED
+
+VIDEO_PRODUCTION_MODES_V1:
+  - STORY
+  - SHORT
+  - LOOP
+  - SCENE
+VIDEO_PRODUCTION_MODES_ARCHITECTURE_READY:
+  - PRODUCT
+  - EXPLAINER
+  - PRESENTER
+  - MONTAGE
+
+LOCAL_AI: DISALLOWED
+CLOUD_AI: REQUIRED
+VIDU: V1 DEFAULT VIDEO PROVIDER / ADAPTER MERGED
+VENDOR_LOCK_IN: DISALLOWED
+ANTIGRAVITY: STOP UNTIL NEXT EXPLICIT AUTHORIZATION
+CODEX: STOP
+CLAUDE_CODE: STOP
+WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 ```
 
 ---
@@ -28,20 +48,51 @@ NEXT ALLOWED ACTION: ChatGPT review only
 
 | Component / Layer | Status | Notes |
 | :--- | :--- | :--- |
-| **Governance & Documentation (P0-WP001)** | **PASS / CLOSED (MERGED)** | Merged into `main` at commit `4eddc44f0733f6d8e6e9772090183b3b3f4c3194`. |
-| **Backend Core Framework (P1-WP002)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
-| **Domain Database & Schemas (P1-WP002)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
-| **Object Storage & Asset API (P1-WP003)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
-| **Document Ingestion Engine (P1-WP004)** | **PASS / CLOSED (MERGED)** | Merged into `main`. |
-| **Story & Script Generator (P1-WP005)** | **PASS / CLOSED (MERGED)** | Merged into `main` at commit `a3cf384bc312eb257ef8b838922debdbc71bdc24`. |
-| **Reference Library & Bibles (P2-WP006)** | **PASS / CLOSED (MERGED)** | Merged into `main` via PR #7. |
-| **Vidu Provider Adapter & Job Queue (P2-WP007)** | **IMPLEMENTED / WAITING REVIEW** | IVideoGenerationProviderAdapter, ViduProviderAdapter, ProviderFactory, Alembic migration 007; lease-fenced dispatch/cancel, durable schedules and safe reconciliation. Full backend 101 passed; WP007 PostgreSQL fixture run 53 passed. |
-| **Cloud Infrastructure / DB** | **PLANNED / NOT STARTED** | Architecture defined, cloud provisioning unauthorized. |
-| **External Integration API** | **PLANNED / NOT STARTED** | Integration architecture documented in P0-WP001; operational gateway is post-core V1. |
+| Governance & Documentation (P0-WP001) | PASS / CLOSED / MERGED | Foundation complete. |
+| Backend Core Framework (P1-WP002) | PASS / CLOSED / MERGED | Backend/database foundation complete. |
+| Object Storage & Asset API (P1-WP003) | PASS / CLOSED / MERGED | S3-compatible asset layer complete. |
+| Document Ingestion Engine (P1-WP004) | PASS / CLOSED / MERGED | PDF/DOCX/PPTX/text ingestion complete. |
+| Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | OpenAI creative generation service complete. |
+| Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
+| Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | PR #15 merged; durable claim/lease fencing, retry/poll scheduling, cancellation, reconciliation, secret safety and mocked Vidu contract tests complete. |
+| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PROPOSED / NOT AUTHORIZED | Earliest planned implementation point for STORY/SHORT/LOOP/SCENE production-mode configuration. |
+| Watcher / Dispatcher automation | PAUSED | Do not depend on it for production project delivery until separate no-credit UAT passes. |
 
 ---
 
-## Gate & Transition Rules
+## Locked Product Direction
 
-1. **Active Work Package Status:** `P2-WP006` is PASS / CLOSED / MERGED. `P2-WP007` implementation complete, awaiting ChatGPT independent review on PR #15.
-2. **No Unapproved Work Packages:** `P2-WP008` is PROPOSED / NOT AUTHORIZED. Execution engines MUST NOT start P2-WP008 or write code without explicit Project Owner authorization.
+Orbis Video Studio AI is a cloud-first, provider-independent, reference-driven, shot-based, **multi-mode** video production platform.
+
+The system MUST NOT require a complete Story -> Script workflow for every project.
+
+Core V1 modes:
+
+```text
+STORY
+SHORT
+LOOP
+SCENE
+```
+
+Architecture-ready future modes:
+
+```text
+PRODUCT
+EXPLAINER
+PRESENTER
+MONTAGE
+```
+
+Video Mode is separate from Purpose, Target Platform, Aspect Ratio and Output Preset.
+
+---
+
+## Next Allowed Action
+
+1. Keep WP007 closed; do not reopen without a proven regression.
+2. Review the P2-WP008 proposal.
+3. Start P2-WP008 only after explicit Project Owner authorization.
+4. Do not automatically start any later WP.
+
+Live GitHub/repository truth newer than this document is authoritative.
