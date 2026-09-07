@@ -7,25 +7,22 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P3-WP016
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
 Status:
 
 ```text
-ACTIVE / AUTHORIZED
+POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
 ```
 
 Current Work Tracking:
 
 ```text
-Active Package: P3-WP016 (QC / Approval Pipeline)
-Issue: #40
-PR: To be opened
-Branch: ai/p3-wp016-qc-approval
-Start HEAD: a8eef74792f037466b5f366c76a961c1610a85da
-Canonical main HEAD: a8eef74792f037466b5f366c76a961c1610a85da
-Gate: IMPLEMENTATION / IN PROGRESS
+Active Package: NONE
+Next Candidate: P3-WP017 (Cloud Render Workers) — PROPOSED / NOT AUTHORIZED
+Canonical main HEAD: 43e5221e7f39a19e8c6fde54c450324aa8333059
+Gate: POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
 ```
 
 Execution Roles:
@@ -33,14 +30,22 @@ Execution Roles:
 ```text
 Owner = final human authority / authorization
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = Bounded Low-Credit Execution Plane (when authorized)
+Antigravity = STOP / NONE (bounded low-credit Execution Plane when authorized)
 Codex = STOP
 Claude Code = STOP
 ```
 
 ---
 
-## Prior Deliveries: WP015 & WP014 Closure Truth
+## Prior Deliveries: WP016, WP015 & WP014 Closure Truth
+
+- **P3-WP016**: PASS / CLOSED / MERGED
+  - Issue: #40
+  - PR: #41
+  - Branch: `ai/p3-wp016-qc-approval`
+  - Reviewed HEAD: `5def41c8bba9b3004b7007f671899e045438a8c4`
+  - Merge commit: `43e5221e7f39a19e8c6fde54c450324aa8333059`
+  - Final Independent Review: PASS / READY TO MERGE (Review ID 5127769635)
 
 - **P3-WP015**: PASS / CLOSED / MERGED
   - Issue: #37
@@ -68,9 +73,9 @@ Claude Code = STOP
 ## Next Allowed Action
 
 1. `ACTIVE_WORK_PACKAGE = NONE`.
-2. `CURRENT_GATE = POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-3. Wait for explicit Owner authorization before starting P3-WP016 or any implementation work.
+2. `CURRENT_GATE = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+3. Wait for explicit Owner authorization before starting P3-WP017 or any implementation work.
 4. Antigravity: STOP / NONE.
 5. Codex: STOP.
 6. Claude Code: STOP.
-7. Do NOT start WP016.
+7. Do NOT start WP017.

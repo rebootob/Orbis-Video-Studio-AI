@@ -46,31 +46,31 @@ P2-WP012 = PASS / CLOSED / MERGED
 P2-WP013 = PASS / CLOSED / MERGED
 P3-WP014 = PASS / CLOSED / MERGED
 P3-WP015 = PASS / CLOSED / MERGED
-
-WP014 reviewed HEAD:
-fb425feaec2dede3201e054d0b842b68820473d8
-WP014 merge:
-f50e2568d197b3c4bab5e4303f31af817db6e1bf
-WP014 PR:
-#36 (MERGED / CLOSED)
+P3-WP016 = PASS / CLOSED / MERGED
 
 WP015 reviewed HEAD:
 640212f71182ba3f6a5024a442beb363868eabc1
-WP015 merge / main HEAD:
+WP015 merge:
 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
 WP015 PR:
 #38 (MERGED / CLOSED)
 
+WP016 reviewed HEAD:
+5def41c8bba9b3004b7007f671899e045438a8c4
+WP016 merge / main HEAD:
+43e5221e7f39a19e8c6fde54c450324aa8333059
+WP016 PR:
+#41 (MERGED / CLOSED)
+
 CURRENT GATE:
 ACTIVE WORK PACKAGE = NONE
-CURRENT_GATE = POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION
-NEXT CANDIDATE = P3-WP016 (PROPOSED / NOT AUTHORIZED)
+CURRENT_GATE = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
+NEXT CANDIDATE = P3-WP017 (PROPOSED / NOT AUTHORIZED)
 
-Do not start WP016 or any later WP without explicit Owner authorization.
+Do not start WP017 or any later WP without explicit Owner authorization.
 
-PLANNING NOTE FOR FUTURE WP011:
+PERFORMANCE & SCALABILITY GUARDRAILS (DELIVERED IN WP011):
 PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
-When WP011 is authorized, ensure:
 - selective/batch operations avoid unbounded loading
 - avoid N+1 database queries
 - pagination/chunking for large job/shot sets
@@ -186,6 +186,6 @@ Do not depend on it.
 FIRST ACTION:
 1. Fresh-fetch live origin/main and report exact live main HEAD SHA.
 2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE.
-3. Await explicit Owner authorization before starting or implementing any new Work Package (including P2-WP011).
-4. Do not start WP011 or any later WP automatically.
+3. Await explicit Owner authorization before starting or implementing any new Work Package (including P3-WP017).
+4. Do not start WP017 or any later WP automatically.
 ```

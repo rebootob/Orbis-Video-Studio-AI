@@ -125,6 +125,15 @@ graph TD
   - **Final Review:** PASS / READY TO MERGE (Review ID 5127082342)
   - **Scope Delivered:** Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, frontend timeline workspace.
 
+- **P3-WP016 — Core V1 QC & Approval Pipeline**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #40
+  - **PR:** #41
+  - **Reviewed Head:** `5def41c8bba9b3004b7007f671899e045438a8c4`
+  - **Merge Commit:** `43e5221e7f39a19e8c6fde54c450324aa8333059`
+  - **Final Review:** PASS / READY TO MERGE (Review ID 5127769635)
+  - **Scope Delivered:** Provider/revision-bound QC engine, structured findings (BLOCKER / WARNING / INFO), warning decision audit history (ACCEPTED_WITH_REASON / FIX_REQUIRED), 1-shot approval per timeline revision, production orchestrator workflow integration.
+
 ---
 
 ## 3. Active Work Package
@@ -133,12 +142,12 @@ graph TD
 ACTIVE_WORK_PACKAGE = NONE
 ```
 
-- **Current Status:** POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION
-- P3-WP016 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP016 without explicit Owner authorization.
+- **Current Status:** POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
+- P3-WP017 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP017 without explicit Owner authorization.
 
 ---
 
-## 4. Remaining Roadmap — Direction After WP015
+## 4. Remaining Roadmap — Direction After WP016
 
 The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
 
@@ -191,9 +200,10 @@ Important product locks:
   - **Issue:** #37
   - **PR:** #38 (Merged into `main` at `35b31c3c41834209fcb9d63ad7ac52e9632d63d2`)
 
-- **P3-WP016 — QC / Approval Pipeline**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - Continuity checks, missing-asset checks, final review and explicit approval semantics.
+- **P3-WP016 — Core V1 QC & Approval Pipeline**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #40
+  - **PR:** #41 (Merged into `main` at `43e5221e7f39a19e8c6fde54c450324aa8333059`)
 
 - **P3-WP017 — Cloud Render Workers**
   - **Status:** PROPOSED / NOT AUTHORIZED

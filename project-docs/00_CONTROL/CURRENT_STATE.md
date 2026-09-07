@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P3 — Audio, Assembly, QC & Cloud Render
 CANONICAL_BRANCH: main
-MAIN_HEAD: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
+MAIN_HEAD: 43e5221e7f39a19e8c6fde54c450324aa8333059
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -76,13 +76,17 @@ P3-WP015_REVIEWED_HEAD: 640212f71182ba3f6a5024a442beb363868eabc1
 P3-WP015_MERGE_COMMIT: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
 P3-WP015_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127082342)
 
-ACTIVE_WORK_PACKAGE: P3-WP016
-CURRENT_GATE: IMPLEMENTATION / IN PROGRESS
-
-P3-WP016: ACTIVE / AUTHORIZED
+P3-WP016: PASS / CLOSED / MERGED
 P3-WP016_ISSUE: "#40"
+P3-WP016_PR: "#41"
 P3-WP016_BRANCH: ai/p3-wp016-qc-approval
 P3-WP016_STARTING_HEAD: a8eef74792f037466b5f366c76a961c1610a85da
+P3-WP016_REVIEWED_HEAD: 5def41c8bba9b3004b7007f671899e045438a8c4
+P3-WP016_MERGE_COMMIT: 43e5221e7f39a19e8c6fde54c450324aa8333059
+P3-WP016_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127769635)
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -140,6 +144,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Storyboard Image / Keyframe Pipeline (P2-WP013) | PASS / CLOSED / MERGED | Storyboard keyframe pipeline, ImageProvider abstraction, batch generation & continuity references complete. PR #34 merged at c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd. |
 | Core V1 Audio Production Automation (P3-WP014) | PASS / CLOSED / MERGED | Provider-neutral AudioProvider boundary, 3D audio taxonomy, AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration. PR #36 merged at f50e2568d197b3c4bab5e4303f31af817db6e1bf. |
 | Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
+| Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -187,14 +192,14 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP015 closed unless a proven regression exists.
+1. Keep WP001-WP016 closed unless a proven regression exists.
 2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-4. Await explicit Owner authorization before starting P3-WP016 (QC / Approval Pipeline) or any future Work Package.
+3. `CURRENT_GATE = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+4. Await explicit Owner authorization before starting P3-WP017 (Cloud Render Workers) or any future Work Package.
 5. Antigravity = bounded low-credit Execution Plane when authorized.
 6. Codex = STOP.
 7. Claude Code = STOP.
 8. Do NOT merge without Owner approval.
-9. Do NOT start WP016.
+9. Do NOT start WP017.
 
 Live GitHub/repository truth newer than this document is authoritative.
