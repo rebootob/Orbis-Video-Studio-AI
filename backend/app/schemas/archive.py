@@ -1,13 +1,20 @@
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProjectExportRequest(BaseModel):
     package_type: str = Field(default="FULL_SELF_CONTAINED", description="FULL_SELF_CONTAINED or REFERENCE_ONLY")
     include_history: bool = Field(default=True, description="Whether to include historical jobs, audits, and ledgers")
     include_renders: bool = Field(default=True, description="Whether to include rendered video/audio binaries")
+
+    @field_validator("include_renders")
+    @classmethod
+    def validate_include_renders(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("include_renders=False is not supported in V1 FULL_SELF_CONTAINED archives. All assets must be included.")
+        return v
 
 
 class ProjectValidationResponse(BaseModel):

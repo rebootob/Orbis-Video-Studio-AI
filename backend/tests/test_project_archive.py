@@ -591,7 +591,14 @@ def test_api_archive_export_and_import_round_trip(client: TestClient, db_session
     assert create_resp.status_code == 201
     proj_id = create_resp.json()["id"]
 
-    # 2. Export project archive
+    # 2. Test API rejection of include_renders=False
+    bad_export_resp = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"package_type": "FULL_SELF_CONTAINED", "include_history": True, "include_renders": False},
+    )
+    assert bad_export_resp.status_code == 422
+
+    # 3. Export project archive with canonical options
     export_resp = client.post(
         f"/api/v1/projects/{proj_id}/export",
         json={"package_type": "FULL_SELF_CONTAINED", "include_history": True, "include_renders": True},
@@ -1171,6 +1178,172 @@ def test_export_clone_import_history_preservation_round_trip(db_session: Session
         assert len(rjs) == 2
         gjs = db_session.query(GenerationJob).filter(GenerationJob.shot_id == cloned_shot.id).all()
         assert len(gjs) == 2
+
+    finally:
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
+
+
+def test_preflight_catalog_size_mismatch_rejected_independently(db_session: Session, mock_storage: InMemoryObjectStorageProvider):
+    """Catalog size_bytes mismatch against payload is rejected independently."""
+    proj = Project(title="Test Catalog Size", video_mode="STORY")
+    db_session.add(proj)
+    db_session.flush()
+    content = b"sample image exact size test"
+    content_hash = ArchiveChecksumService.compute_sha256_bytes(content)
+    storage_key = f"projects/{proj.id}/assets/test.jpg"
+    mock_storage.put_object("default", storage_key, content, "image/jpeg")
+    asset = Asset(
+        project_id=proj.id,
+        name="test.jpg",
+        original_filename="test.jpg",
+        asset_type="IMAGE",
+        content_type="image/jpeg",
+        file_size_bytes=len(content),
+        checksum_sha256=content_hash,
+        storage_bucket="default",
+        storage_key=storage_key,
+    )
+    db_session.add(asset)
+    db_session.commit()
+
+    export_svc = ProjectExportService(storage_provider=mock_storage)
+    archive_path, _ = export_svc.export_project(db=db_session, project_id=proj.id)
+
+    td = tempfile.mkdtemp()
+    try:
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            zf.extractall(td)
+        manifest_path = os.path.join(td, "assets", "manifest.json")
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest_data = json.load(f)
+        # Tamper ONLY the catalog size_bytes to be mismatched with payload
+        aid_str = str(asset.id)
+        assert aid_str in manifest_data
+        manifest_data[aid_str]["size_bytes"] = len(content) + 999
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f)
+
+        val = ArchivePreflightValidator(td)
+        with pytest.raises(ArchiveImportError, match="size mismatch: payload.*!= manifest"):
+            val.validate_graph()
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
+
+
+def test_export_with_render_output_asset_self_contained_round_trip(db_session: Session, mock_storage: InMemoryObjectStorageProvider):
+    """Project with render output asset exports self-contained archive, validates, and imports successfully."""
+    proj = Project(title="Render Output Round Trip", video_mode="STORY")
+    db_session.add(proj)
+    db_session.flush()
+
+    # 1. Timeline & Approval
+    timeline = AssemblyTimeline(project_id=proj.id, version=1, status="READY")
+    db_session.add(timeline)
+    db_session.flush()
+
+    qc_run = QCRun(project_id=proj.id, timeline_id=timeline.id, timeline_version=1)
+    db_session.add(qc_run)
+    db_session.flush()
+
+    approval = ApprovalRecord(project_id=proj.id, timeline_id=timeline.id, timeline_version=1, qc_run_id=qc_run.id)
+    db_session.add(approval)
+    db_session.flush()
+
+    # 2. Render output asset in storage & DB
+    render_content = b"fake mp4 video binary render output payload"
+    render_sha = ArchiveChecksumService.compute_sha256_bytes(render_content)
+    render_storage_key = f"projects/{proj.id}/renders/output_master.mp4"
+    mock_storage.put_object("default", render_storage_key, render_content, "video/mp4")
+
+    render_asset = Asset(
+        project_id=proj.id,
+        name="output_master.mp4",
+        original_filename="output_master.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=len(render_content),
+        checksum_sha256=render_sha,
+        storage_bucket="default",
+        storage_key=render_storage_key,
+    )
+    db_session.add(render_asset)
+    db_session.flush()
+
+    # 3. RenderBatch & RenderJob pointing to render_asset
+    render_batch = RenderBatch(
+        project_id=proj.id,
+        timeline_id=timeline.id,
+        timeline_version=1,
+        status="COMPLETED",
+        total_variants=1,
+        completed_variants=1,
+        failed_variants=0,
+    )
+    db_session.add(render_batch)
+    db_session.flush()
+
+    render_job = RenderJob(
+        project_id=proj.id,
+        timeline_id=timeline.id,
+        timeline_version=1,
+        approval_id=approval.id,
+        batch_id=render_batch.id,
+        render_profile="MASTER_HD",
+        render_variant_key="MASTER",
+        status="COMPLETED",
+        idempotency_key="render_job_with_output_idem",
+        output_asset_id=render_asset.id,
+        progress=1.0,
+        estimated_cost_usd=1.00,
+        actual_cost_usd=0.95,
+    )
+    db_session.add(render_job)
+    db_session.commit()
+
+    # 4. Attempt export with include_renders=False -> MUST FAIL CLOSED
+    export_svc = ProjectExportService(storage_provider=mock_storage)
+    with pytest.raises(ArchiveExportError, match="include_renders=False is not supported"):
+        export_svc.export_project(db=db_session, project_id=proj.id, include_renders=False)
+
+    # 5. Export supported canonical FULL_SELF_CONTAINED (include_renders=True)
+    archive_path, manifest = export_svc.export_project(
+        db=db_session,
+        project_id=proj.id,
+        package_type="FULL_SELF_CONTAINED",
+        include_renders=True,
+    )
+
+    try:
+        import_svc = ProjectImportService(storage_provider=mock_storage)
+
+        # 6. Validate archive preflight -> MUST PASS
+        val_res = import_svc.validate_project_archive(archive_path, db=db_session)
+        assert val_res["valid"] is True
+        assert val_res["entity_counts"]["assets"] == 1
+        assert val_res["entity_counts"]["render_jobs"] == 1
+
+        # 7. Execute Import (CLONE mode) -> MUST PASS
+        cloned_proj = import_svc.execute_import(db=db_session, archive_path=archive_path, import_mode="CLONE")
+        assert cloned_proj.id != proj.id
+
+        # Verify cloned render job and output asset
+        cloned_rj = db_session.query(RenderJob).filter(RenderJob.project_id == cloned_proj.id).one()
+        assert cloned_rj.status == "COMPLETED"
+        assert cloned_rj.output_asset_id is not None
+        assert cloned_rj.output_asset_id != render_asset.id
+
+        cloned_asset = db_session.get(Asset, cloned_rj.output_asset_id)
+        assert cloned_asset is not None
+        assert cloned_asset.project_id == cloned_proj.id
+        assert cloned_asset.file_size_bytes == len(render_content)
+        assert cloned_asset.checksum_sha256 == render_sha
+
+        # Verify binary payload in mock storage under new project key prefix
+        stored_bytes = mock_storage.get_object(cloned_asset.storage_bucket, cloned_asset.storage_key)
+        assert stored_bytes == render_content
 
     finally:
         if os.path.exists(archive_path):

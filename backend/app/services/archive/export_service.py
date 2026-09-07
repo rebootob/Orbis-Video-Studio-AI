@@ -154,6 +154,12 @@ class ProjectExportService:
         if not project:
             raise ArchiveExportError(f"Project '{project_id}' not found")
 
+        if not include_renders:
+            raise ArchiveExportError(
+                "include_renders=False is not supported for FULL_SELF_CONTAINED archives in V1. "
+                "All project assets including render outputs must be included to ensure archive self-consistency."
+            )
+
         temp_dir = tempfile.mkdtemp(prefix="orbis_export_")
         try:
             return self._build_archive(
@@ -340,15 +346,11 @@ class ProjectExportService:
             file_sizes[rel_path] = len(content)
 
         # 4. Stream & Package Media Assets
-        render_output_asset_ids = {r.output_asset_id for r in render_jobs if r.output_asset_id}
         asset_manifest_entries: Dict[str, Any] = {}
         embedded_asset_count = 0
         total_asset_bytes = 0
 
         for asset in assets:
-            if not include_renders and asset.id in render_output_asset_ids:
-                continue
-
             _, ext = os.path.splitext(asset.original_filename)
             ext = ext.lower() if ext else ".bin"
             if ext not in ALLOWED_ASSET_EXTENSIONS:

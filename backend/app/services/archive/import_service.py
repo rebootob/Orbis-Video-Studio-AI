@@ -658,9 +658,13 @@ class ArchivePreflightValidator:
                 )
 
             actual_size = os.path.getsize(payload_path)
-            cat_size = cat_entry.get("file_size_bytes")
+            cat_size = cat_entry.get("size_bytes")
             row_size = a_raw.get("file_size_bytes")
-            if cat_size is not None and actual_size != cat_size:
+            if cat_size is None:
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' catalog entry missing size_bytes"
+                )
+            if actual_size != cat_size:
                 raise ArchivePreflightError(
                     f"Asset '{aid_str}' size mismatch: payload ({actual_size} bytes) != manifest ({cat_size} bytes)"
                 )

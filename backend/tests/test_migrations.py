@@ -958,3 +958,111 @@ def test_020_project_archive_lineage_lifecycle(tmp_path, monkeypatch):
     assert "source_project_id" not in meta3.tables["projects"].c
     assert "imported_historical" not in meta3.tables["render_jobs"].c
     engine.dispose()
+
+
+def test_020_usage_ledger_coexistence_and_fail_closed_downgrade(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+    from sqlalchemy.exc import IntegrityError
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+    url = f"sqlite:///{tmp_path / 'wp020_ledger_downgrade.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to head (020)
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+
+    projects_tbl = Table("projects", meta, autoload_with=engine)
+    projects_tbl.c.id.type = Uuid()
+    usage_ledger_tbl = Table("usage_ledger", meta, autoload_with=engine)
+    usage_ledger_tbl.c.id.type = Uuid()
+    usage_ledger_tbl.c.project_id.type = Uuid()
+
+    p_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(id=p_id, title="Ledger Downgrade Test", status="DRAFT", created_at=now, updated_at=now))
+
+    # 2. Insert imported historical ledger + live ledger with the SAME (provider, provider_event_id)
+    ul_hist_id = uuid.uuid4()
+    ul_live_id = uuid.uuid4()
+    provider_name = "vidu"
+    event_id = "shared-event-evt-999"
+
+    with engine.begin() as conn:
+        # Imported historical ledger
+        conn.execute(usage_ledger_tbl.insert().values(
+            id=ul_hist_id,
+            project_id=p_id,
+            provider=provider_name,
+            provider_event_id=event_id,
+            operation="VIDEO_GENERATION",
+            cost_status="CONFIRMED",
+            imported_historical=True,
+            created_at=now,
+            updated_at=now,
+        ))
+        # Live ledger with the SAME provider_event_id
+        conn.execute(usage_ledger_tbl.insert().values(
+            id=ul_live_id,
+            project_id=p_id,
+            provider=provider_name,
+            provider_event_id=event_id,
+            operation="VIDEO_GENERATION",
+            cost_status="CONFIRMED",
+            imported_historical=False,
+            created_at=now,
+            updated_at=now,
+        ))
+
+    # Prove that a second LIVE ledger with the same provider_event_id is rejected by unique index
+    ul_live_dup_id = uuid.uuid4()
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(usage_ledger_tbl.insert().values(
+                id=ul_live_dup_id,
+                project_id=p_id,
+                provider=provider_name,
+                provider_event_id=event_id,
+                operation="VIDEO_GENERATION",
+                cost_status="CONFIRMED",
+                imported_historical=False,
+                created_at=now,
+                updated_at=now,
+            ))
+
+    # 3. Attempt downgrade: MUST fail closed due to duplicate (provider, provider_event_id)
+    with pytest.raises(RuntimeError) as exc_info:
+        command.downgrade(cfg, "019_export_presets_and_variant_key")
+    assert "Downgrade ABORTED" in str(exc_info.value)
+    assert "(provider, provider_event_id)" in str(exc_info.value)
+
+    # 4. Verify ALL migration-020 columns/indexes remain intact (no partial downgrade occurred)
+    meta_after = MetaData()
+    meta_after.reflect(bind=engine)
+    assert "source_project_id" in meta_after.tables["projects"].c
+    assert "source_archive_checksum" in meta_after.tables["projects"].c
+    assert "imported_historical" in meta_after.tables["usage_ledger"].c
+    assert "imported_historical" in meta_after.tables["render_jobs"].c
+    assert "execution_disabled" in meta_after.tables["render_jobs"].c
+    assert "imported_historical" in meta_after.tables["generation_jobs"].c
+    assert "execution_disabled" in meta_after.tables["generation_jobs"].c
+
+    # 5. Verify records remain intact: no history deletion, no ledger mutation
+    with engine.connect() as conn:
+        hist_row = conn.execute(select(usage_ledger_tbl).where(usage_ledger_tbl.c.id == ul_hist_id)).mappings().first()
+        live_row = conn.execute(select(usage_ledger_tbl).where(usage_ledger_tbl.c.id == ul_live_id)).mappings().first()
+        assert hist_row is not None
+        assert hist_row["provider_event_id"] == event_id
+        assert hist_row["imported_historical"] is True
+        assert live_row is not None
+        assert live_row["provider_event_id"] == event_id
+        assert live_row["imported_historical"] is False
+
+    engine.dispose()

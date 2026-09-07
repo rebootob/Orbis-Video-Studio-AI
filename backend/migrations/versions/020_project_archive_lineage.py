@@ -116,6 +116,22 @@ def downgrade():
             "Downgrade aborted to prevent silent history loss."
         )
 
+    # Fail-closed check: usage_ledger
+    ledger_conflicts = bind.execute(text("""
+        SELECT provider, provider_event_id, COUNT(*)
+        FROM usage_ledger
+        WHERE provider_event_id IS NOT NULL
+        GROUP BY provider, provider_event_id
+        HAVING COUNT(*) > 1
+    """)).fetchall()
+
+    if ledger_conflicts:
+        raise RuntimeError(
+            f"Downgrade ABORTED: {len(ledger_conflicts)} (provider, provider_event_id) pair(s) have duplicate entries. "
+            "Recreating the pre-020 unique index would cause uniqueness collisions. "
+            "Downgrade aborted to prevent silent history loss."
+        )
+
     # Revert generation_jobs index and columns
     op.drop_index("uq_generation_jobs_active_shot", table_name="generation_jobs")
     op.create_index(
