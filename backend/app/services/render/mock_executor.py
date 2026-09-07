@@ -34,10 +34,19 @@ class MockRenderExecutor(RenderExecutor):
         placements = timeline_spec.get("placements", [])
         audio_clips = timeline_spec.get("audio_clips", [])
 
+        import json
+        payload_data = {
+            "total_duration": total_duration,
+            "placement_count": len(placements),
+            "placements": placements,
+            "audio_clip_count": len(audio_clips),
+            "audio_clips": audio_clips,
+            "marker": f"ORBIS_SYNTHETIC_RENDER_DURATION_{total_duration}",
+        }
+        payload = json.dumps(payload_data).encode("utf-8")
+        mdat_hdr = (len(payload) + 8).to_bytes(4, "big") + b"mdat"
+        ftyp = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00isomiso2avc1mp41"
         with open(output_file_path, "wb") as f:
-            ftyp = b"\x00\x00\x00\x1cftypisom\x00\x00\x02\x00isomiso2avc1mp41"
-            payload = f"ORBIS_SYNTHETIC_RENDER_DURATION_{total_duration}".encode("utf-8")
-            mdat_hdr = (len(payload) + 8).to_bytes(4, "big") + b"mdat"
             f.write(ftyp)
             f.write(mdat_hdr)
             f.write(payload)

@@ -70,7 +70,12 @@ class InMemoryObjectStorageProvider(ObjectStorageProvider):
         self._store[(bucket, key)] = (payload, content_type)
         return key
 
-    def download_file_object(self, bucket: str, key: str, target_file_path: str) -> None:
+    def download_file_object(
+        self,
+        bucket: str,
+        key: str,
+        file_path: str,
+    ) -> None:
         payload = self.get_object(bucket, key)
-        with open(target_file_path, "wb") as f:
+        with open(file_path, "wb") as f:
             f.write(payload)

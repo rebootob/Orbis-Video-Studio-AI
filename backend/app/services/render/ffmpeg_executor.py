@@ -44,28 +44,93 @@ class FFmpegRenderExecutor(RenderExecutor):
         if progress_callback:
             progress_callback(30.0)
 
-        # Build FFmpeg command line
-        cmd = [
-            self.ffmpeg_path,
-            "-y",
+        width = 1920
+        height = 1080
+        if render_profile == "VERTICAL_4K":
+            width, height = 2160, 3840
+        elif render_profile == "SQUARE_SD":
+            width, height = 720, 720
+
+        cmd = [self.ffmpeg_path, "-y"]
+
+        valid_placements = [
+            p for p in placements if p.get("local_asset_path") and os.path.exists(p["local_asset_path"])
+        ]
+        valid_audio_clips = [
+            ac for ac in audio_clips if ac.get("local_asset_path") and os.path.exists(ac["local_asset_path"])
         ]
 
-        # Add visual asset inputs if downloaded into scratch_dir
-        input_count = 0
-        if placements:
-            for p in placements:
-                local_asset_path = p.get("local_asset_path")
-                if local_asset_path and os.path.exists(local_asset_path):
-                    cmd.extend(["-i", local_asset_path])
-                    input_count += 1
+        for p in valid_placements:
+            cmd.extend(["-i", p["local_asset_path"]])
 
-        if input_count == 0:
-            # Fallback color source for empty placements timeline
+        for ac in valid_audio_clips:
+            cmd.extend(["-i", ac["local_asset_path"]])
+
+        filter_parts = []
+        has_video_map = False
+        has_audio_map = False
+
+        if valid_placements:
+            has_video_map = True
+            for idx, p in enumerate(valid_placements):
+                trim_in = float(p.get("trim_in", 0.0))
+                eff_dur = float(p.get("effective_duration", 4.0))
+                trim_out = trim_in + eff_dur
+                filter_parts.append(
+                    f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                    f"trim=start={trim_in}:end={trim_out},setpts=PTS-STARTPTS[v{idx}]"
+                )
+
+            if len(valid_placements) == 1:
+                filter_parts.append("[v0]copy[vout]")
+            else:
+                concat_inputs = "".join([f"[v{i}]" for i in range(len(valid_placements))])
+                filter_parts.append(f"{concat_inputs}concat=n={len(valid_placements)}:v=1:a=0[vout]")
+
+        audio_offset = len(valid_placements)
+        if valid_audio_clips:
+            has_audio_map = True
+            for a_idx, ac in enumerate(valid_audio_clips):
+                in_idx = audio_offset + a_idx
+                start_time = float(ac.get("start_time", 0.0))
+                delay_ms = int(start_time * 1000)
+                vol = float(ac.get("volume", 1.0))
+                fade_in = float(ac.get("fade_in", 0.0))
+                fade_out = float(ac.get("fade_out", 0.0))
+
+                audio_filter = f"[{in_idx}:a]volume={vol}"
+                if fade_in > 0:
+                    audio_filter += f",afade=t=in:st=0:d={fade_in}"
+                if fade_out > 0:
+                    audio_filter += f",afade=t=out:st=0:d={fade_out}"
+                if delay_ms > 0:
+                    audio_filter += f",adelay={delay_ms}|{delay_ms}"
+                audio_filter += f"[a{a_idx}]"
+                filter_parts.append(audio_filter)
+
+            if len(valid_audio_clips) == 1:
+                filter_parts.append("[a0]acopy[aout]")
+            else:
+                amix_inputs = "".join([f"[a{i}]" for i in range(len(valid_audio_clips))])
+                filter_parts.append(
+                    f"{amix_inputs}amix=inputs={len(valid_audio_clips)}:duration=longest:dropout_transition=2[aout]"
+                )
+
+        if filter_parts:
+            filter_complex_str = ";".join(filter_parts)
+            cmd.extend(["-filter_complex", filter_complex_str])
+            if has_video_map:
+                cmd.extend(["-map", "[vout]"])
+            if has_audio_map:
+                cmd.extend(["-map", "[aout]"])
+
+        if not valid_placements:
             cmd.extend([
                 "-f", "lavfi",
-                "-i", f"color=c=black:s=1920x1080:r=30:d={total_duration}",
+                "-i", f"color=c=black:s={width}x{height}:r=30:d={total_duration}",
                 "-f", "lavfi",
-                "-i", f"anullsrc=r=44100:cl=stereo",
+                "-i", "anullsrc=r=44100:cl=stereo",
             ])
 
         cmd.extend([
@@ -99,10 +164,11 @@ class FFmpegRenderExecutor(RenderExecutor):
             "file_size_bytes": file_size,
             "video_codec": "h264",
             "audio_codec": "aac",
-            "width": 1920,
-            "height": 1080,
+            "width": width,
+            "height": height,
             "frame_rate": 30.0,
             "render_profile": render_profile,
-            "placement_count": len(placements),
-            "audio_clip_count": len(audio_clips),
+            "placement_count": len(valid_placements),
+            "audio_clip_count": len(valid_audio_clips),
+            "filtergraph_used": ";".join(filter_parts) if filter_parts else None,
         }

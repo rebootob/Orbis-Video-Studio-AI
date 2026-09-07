@@ -49,7 +49,7 @@ class CloudRenderWorker:
         upload_succeeded = False
 
         try:
-            # Load exact approved timeline revision from DB
+            # Load exact approved timeline revision from DB (FAIL CLOSED if exact version is missing)
             timeline = (
                 db.query(AssemblyTimeline)
                 .filter(
@@ -58,12 +58,10 @@ class CloudRenderWorker:
                 )
                 .first()
             )
-            if not timeline:
-                timeline = db.query(AssemblyTimeline).filter(AssemblyTimeline.id == job.timeline_id).first()
 
             if not timeline:
                 raise RuntimeError(
-                    f"AssemblyTimeline {job.timeline_id} (version {job.timeline_version}) not found in DB."
+                    f"Exact AssemblyTimeline {job.timeline_id} version {job.timeline_version} not found in DB. Fail closed."
                 )
 
             # Load shot placements and download visual assets

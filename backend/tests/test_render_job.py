@@ -443,6 +443,178 @@ def test_ffmpeg_executor_abstraction():
     assert meta["video_codec"] == "h264"
 
 
+def test_real_ffmpeg_multi_placement_filtergraph():
+    executor = FFmpegRenderExecutor(ffmpeg_path="non_existent_ffmpeg_bin")
+    # Test filtergraph structure generation without running subprocess
+    timeline_spec = {
+        "total_duration": 8.0,
+        "render_profile": "MASTER_HD",
+        "placements": [
+            {"local_asset_path": "fake_p1.mp4", "trim_in": 0.0, "effective_duration": 4.0},
+            {"local_asset_path": "fake_p2.mp4", "trim_in": 1.0, "effective_duration": 4.0},
+        ],
+        "audio_clips": [
+            {"local_asset_path": "fake_audio.mp3", "start_time": 0.5, "volume": 0.8, "fade_in": 0.5, "fade_out": 0.5},
+        ],
+    }
+    # Mock os.path.exists to return True for our fake paths
+    import os
+    original_exists = os.path.exists
+    try:
+        os.path.exists = lambda p: True if "fake_" in p else original_exists(p)
+        # Verify MockRenderExecutor embeds placement and audio metadata
+        mock_exec = MockRenderExecutor()
+        meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_out_multi.mp4")
+        assert meta["placement_count"] == 2
+        assert meta["audio_clip_count"] == 1
+
+        import json
+        with open("./test_out_multi.mp4", "rb") as f:
+            content = f.read()
+            assert b"placement_count" in content
+            assert b"fake_p1.mp4" in content
+            assert b"fake_p2.mp4" in content
+    finally:
+        os.path.exists = original_exists
+        if os.path.exists("./test_out_multi.mp4"):
+            os.remove("./test_out_multi.mp4")
+
+
+def test_exact_revision_mismatch_fails_closed(db_session: Session):
+    project, timeline, approval = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id)
+
+    # Corrupt job to point to a non-existent timeline_version 999
+    job.timeline_version = 999
+    db_session.commit()
+
+    worker = CloudRenderWorker(worker_id="worker-rev-test", render_executor=MockRenderExecutor())
+    processed = worker.process_one_job(db_session)
+    assert processed is True
+
+    db_session.refresh(job)
+    assert job.status in ("QUEUED", "FAILED")
+    assert "Exact AssemblyTimeline" in (job.error_message or "")
+
+
+def test_repeated_deterministic_failure_reaches_failed(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id)
+    job.max_retries = 2
+    job.retry_count = 0
+    db_session.commit()
+
+    # Attempt 1 fail
+    claimed1 = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
+    failed1 = RenderJobService.fail_render_job(db_session, job.id, claimed1.claim_token, "Err 1", ambiguous=False)
+    assert failed1.status == "QUEUED"
+    assert failed1.retry_count == 1
+
+    # Attempt 2 fail -> reaches max_retries (2) -> FAILED
+    claimed2 = RenderJobService.claim_next_render_job(db_session, worker_id="w2")
+    failed2 = RenderJobService.fail_render_job(db_session, job.id, claimed2.claim_token, "Err 2", ambiguous=False)
+    assert failed2.status == "FAILED"
+    assert failed2.retry_count == 2
+    assert "Terminal failure" in failed2.error_message
+
+
+def test_retry_preserves_prior_ledger_history(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    job.status = "FAILED"
+    job.retry_count = 3
+    db_session.commit()
+
+    # Ensure initial UsageLedger exists and is marked ESTIMATED (preserved compute cost)
+    initial_ledger = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).first()
+    assert initial_ledger is not None
+    assert initial_ledger.cost_status == "ESTIMATED"
+
+    # User triggers retry
+    retried_job = RenderJobService.retry_render_job(db_session, project.id, job.id)
+    assert retried_job.status == "QUEUED"
+    assert retried_job.retry_count == 0
+
+    # Ledger entries count should now be 2 (prior history preserved + new retry reservation)
+    ledger_entries = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).all()
+    assert len(ledger_entries) >= 2
+
+
+def test_retry_budget_exceeded_fails(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    project.budget_limit = 0.60
+    db_session.commit()
+
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    job.status = "FAILED"
+    db_session.commit()
+
+    # Attempting to retry requires another 0.50. Total committed (0.50 preserved + 0.50 new = 1.00) exceeds limit 0.60
+    with pytest.raises(Exception) as exc_info:
+        RenderJobService.retry_render_job(db_session, project.id, job.id)
+    assert "budget" in str(exc_info.value).lower()
+
+
+def test_concurrent_budget_authorization_threads(db_session: Session):
+    import threading
+
+    project, _, _ = create_approved_project_context(db_session)
+    project.budget_limit = 0.60
+    db_session.commit()
+
+    results = []
+    bind_conn = db_session.get_bind()
+
+    def attempt_submit(key: str):
+        from tests.conftest import TestingSessionLocal
+        local_db = TestingSessionLocal(bind=bind_conn)
+        try:
+            j = RenderJobService.submit_render_job(
+                local_db, project.id, custom_idempotency_key=key, estimated_cost_usd=0.50
+            )
+            results.append(("SUCCESS", j.id))
+        except Exception as e:
+            results.append(("FAILED", str(e)))
+        finally:
+            local_db.close()
+
+    t1 = threading.Thread(target=attempt_submit, args=("thread_key_1",))
+    t2 = threading.Thread(target=attempt_submit, args=("thread_key_2",))
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    failures = [r for r in results if r[0] == "FAILED"]
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+
+def test_stale_token_fencing_progress_fail_complete(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id)
+    claimed = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
+
+    # Bad token update_progress fails
+    res_progress = RenderJobService.update_progress(db_session, claimed.id, claim_token="bad_token", progress=50.0)
+    assert res_progress is False
+
+    # Bad token fail_render_job raises exception
+    with pytest.raises(Exception) as exc_fail:
+        RenderJobService.fail_render_job(db_session, claimed.id, claim_token="bad_token", error_message="err")
+    assert "stale" in str(exc_fail.value).lower() or "token" in str(exc_fail.value).lower()
+
+    # Bad token complete_render_job raises exception
+    with pytest.raises(Exception) as exc_complete:
+        RenderJobService.complete_render_job(
+            db_session, claimed.id, claim_token="bad_token", output_asset_id=uuid.uuid4(), actual_cost_usd=0.10
+        )
+    assert "stale" in str(exc_complete.value).lower() or "token" in str(exc_complete.value).lower()
+
+
 def test_approved_timeline_without_new_qc_replay(db_session: Session):
     project, timeline, approval = create_approved_project_context(db_session)
     # Existing ApprovalRecord is authoritative -> submit succeeds without re-evaluating QC

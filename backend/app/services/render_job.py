@@ -293,12 +293,15 @@ class RenderJobService:
             job.render_metadata = meta
 
         # Reconcile UsageLedger: ESTIMATED -> CONFIRMED
-        ledger_entry = (
+        ledger_entries = (
             db.query(UsageLedger)
-            .filter(UsageLedger.render_job_id == job.id)
-            .first()
+            .filter(
+                UsageLedger.render_job_id == job.id,
+                UsageLedger.cost_status == "ESTIMATED",
+            )
+            .all()
         )
-        if ledger_entry:
+        for ledger_entry in ledger_entries:
             ledger_entry.cost_status = "CONFIRMED"
             ledger_entry.actual_cost = actual_cost_usd
             ledger_entry.updated_at = now
@@ -336,17 +339,21 @@ class RenderJobService:
             job.error_message = error_message
             # Reserved ESTIMATED cost MUST NOT be released!
         else:
+            job.retry_count += 1
             if job.retry_count < job.max_retries:
                 # Reset to QUEUED for worker retry
                 job.status = RenderJobStatus.QUEUED.value
                 job.claimed_by = None
                 job.claim_token = None
                 job.claim_expires_at = None
-                job.error_message = f"Retryable error: {error_message}"
+                job.error_message = f"Retryable error (attempt {job.retry_count}/{job.max_retries}): {error_message}"
             else:
-                # Terminal failure
+                # Terminal failure reached
                 job.status = RenderJobStatus.FAILED.value
-                job.error_message = error_message
+                job.claimed_by = None
+                job.claim_token = None
+                job.claim_expires_at = None
+                job.error_message = f"Terminal failure after {job.retry_count}/{job.max_retries} attempts: {error_message}"
 
                 ledger_entry = (
                     db.query(UsageLedger)
@@ -396,9 +403,11 @@ class RenderJobService:
             )
 
         now = utc_now()
-        was_queued = (job.status == RenderJobStatus.QUEUED.value)
-
+        was_running = job.status in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value)
         job.status = RenderJobStatus.CANCELLED.value
+        job.claimed_by = None
+        job.claim_token = None
+        job.claim_expires_at = None
         job.error_message = "Cancelled by user"
         job.updated_at = now
 
@@ -408,12 +417,12 @@ class RenderJobService:
             .first()
         )
         if ledger_entry:
-            if was_queued:
+            if not was_running:
                 # Pre-execution cancellation -> release cost to 0
                 ledger_entry.cost_status = "ADJUSTED"
                 ledger_entry.actual_cost = 0.0
             else:
-                # Compute was in progress (RUNNING / CLAIMED) -> preserve ESTIMATED cost reservation
+                # Running cancellation -> preserve ESTIMATED cost reservation
                 ledger_entry.cost_status = "ESTIMATED"
             ledger_entry.updated_at = now
 
@@ -445,7 +454,7 @@ class RenderJobService:
                 detail=f"Cannot retry render job in status {job.status}",
             )
 
-        # Concurrency-safe project budget check before re-reserving budget
+        # Concurrency-safe project budget check before authorizing new retry reservation
         BudgetService.check_budget_before_dispatch(
             db=db,
             project_id=project_id,
@@ -462,32 +471,35 @@ class RenderJobService:
         job.error_message = None
         job.updated_at = now
 
-        # Ensure active ESTIMATED reservation exists in UsageLedger
-        ledger_entry = (
+        # Preserve prior UsageLedger history entries and create distinct new retry reservation
+        existing_active_entry = (
             db.query(UsageLedger)
-            .filter(UsageLedger.render_job_id == job.id)
+            .filter(
+                UsageLedger.render_job_id == job.id,
+                UsageLedger.cost_status == "ADJUSTED",
+            )
             .first()
         )
-        if ledger_entry:
-            ledger_entry.cost_status = "ESTIMATED"
-            ledger_entry.estimated_cost = job.estimated_cost_usd
-            ledger_entry.updated_at = now
+        if existing_active_entry:
+            existing_active_entry.cost_status = "ESTIMATED"
+            existing_active_entry.estimated_cost = job.estimated_cost_usd
+            existing_active_entry.updated_at = now
         else:
-            ledger_entry = UsageLedger(
+            new_ledger_entry = UsageLedger(
                 project_id=project_id,
                 render_job_id=job.id,
                 provider="ORBIS_RENDER",
-                operation="RENDER_VIDEO",
+                operation=f"RENDER_RETRY_{int(now.timestamp())}",
                 estimated_cost=job.estimated_cost_usd,
                 actual_cost=None,
                 currency="USD",
                 cost_status="ESTIMATED",
-                idempotency_key=f"render_reserve_{job.id}",
+                idempotency_key=f"render_reserve_{job.id}_retry_{int(now.timestamp())}",
                 description=f"Pre-render compute cost reservation (retry) for timeline v{job.timeline_version}",
                 created_at=now,
                 updated_at=now,
             )
-            db.add(ledger_entry)
+            db.add(new_ledger_entry)
 
         db.commit()
         db.refresh(job)
