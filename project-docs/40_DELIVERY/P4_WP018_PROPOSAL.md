@@ -241,12 +241,34 @@ batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
 - All existing WP017 `render_jobs` rows receive `render_variant_key = "MASTER"` via `server_default="MASTER"`.
 - Legacy WP017 master render jobs map 1:1 to `render_variant_key = "MASTER"`, preserving 100% of WP017 duplicate master render protection.
 
-#### 3. Downgrade / Reversibility Plan:
-1. `op.drop_index("uq_render_jobs_active_variant", table_name="render_jobs")`
-2. `op.create_index("uq_render_jobs_active_timeline", "render_jobs", ["project_id", "timeline_id"], unique=True, postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"), sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"))`
-3. `op.drop_column("render_jobs", "batch_id")`
-4. `op.drop_column("render_jobs", "render_variant_key")`
-5. `op.drop_table("render_batches")`
+#### 3. Fail-Closed Downgrade Contract & Reversibility Semantics:
+- **Conditional Reversibility:** Downgrade is **conditionally reversible**. Active multi-variant WP018 state (`COUNT(*) > 1` active jobs on the same timeline) is unrepresentable under WP017 schema's partial unique index `uq_render_jobs_active_timeline(project_id, timeline_id)`.
+- **Precondition Conflict Check:** Before altering indexes or dropping columns, the downgrade script executes a fail-closed SQL query:
+  ```python
+  bind = op.get_bind()
+  conflicts = bind.execute(text("""
+      SELECT project_id, timeline_id, COUNT(*)
+      FROM render_jobs
+      WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')
+      GROUP BY project_id, timeline_id
+      HAVING COUNT(*) > 1
+  """)).fetchall()
+
+  if conflicts:
+      raise RuntimeError(
+          f"Downgrade ABORTED: {len(conflicts)} timeline(s) have multiple active/reconciliation export variants. "
+          "The WP017 schema permits at most ONE active render job per timeline. "
+          "An operator must resolve active variant jobs before downgrade can proceed."
+      )
+  ```
+- **Fail-Closed Guarantee (No Data Loss):** If any active conflict exists, the downgrade script **ABORTS immediately**, raising a `RuntimeError`. It MUST NOT delete variant jobs, collapse variants, silently alter job statuses, discard history, or auto-pick a winning job. All database tables, columns, rows, and history remain 100% intact.
+- **Historical Completed Rows Handling:** Rows in `COMPLETED`, `FAILED`, or `CANCELLED` statuses DO NOT block downgrade because `uq_render_jobs_active_timeline` is a partial index applying ONLY to active/reconciliation states (`status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')`). Multiple historical completed export variants remain safely preserved in the database without violating the restored WP017 index.
+- **Safe Downgrade Execution Order (When No Conflicts Exist):**
+  1. `op.drop_index("uq_render_jobs_active_variant", table_name="render_jobs")`
+  2. `op.create_index("uq_render_jobs_active_timeline", "render_jobs", ["project_id", "timeline_id"], unique=True, postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"), sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"))`
+  3. `op.drop_column("render_jobs", "batch_id")`
+  4. `op.drop_column("render_jobs", "render_variant_key")`
+  5. `op.drop_table("render_batches")`
 
 ### C. Proposed API Endpoints:
 - `POST /api/v1/projects/{project_id}/renders/export-batch` — Submit multi-variant export batch under single atomic DB transaction.
@@ -277,7 +299,9 @@ batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
 5. **Reconciliation Variant Isolation Test:** A `RECONCILIATION_REQUIRED` state on one variant blocks only new attempts of that SAME variant key, leaving sibling variants unblocked.
 6. **MASTER Protection Regression Test:** WP017 MASTER duplicate render protection remains 100% intact (`render_variant_key="MASTER"`).
 7. **Migration Upgrade Test:** Alembic migration upgrade preserves all existing WP017 `RenderJob` rows with `render_variant_key="MASTER"`.
-8. **Migration Downgrade Test:** Alembic migration downgrade restores `uq_render_jobs_active_timeline` safely and reversibly.
+8. **SAFE Migration Downgrade Test:** When only one active variant exists per timeline, Alembic migration downgrade succeeds cleanly and restores `uq_render_jobs_active_timeline`.
+9. **BLOCKED Migration Downgrade Test:** When multiple active variants exist on the same timeline (`QUEUED`/`RUNNING`), Alembic migration downgrade refuses safely before any destructive schema changes, leaving all rows, columns, and history intact.
+10. **COMPLETED Historical Variants Migration Downgrade Test:** When multiple completed historical variants exist on the same timeline, Alembic migration downgrade succeeds cleanly because `uq_render_jobs_active_timeline` is a partial index applying only to active/reconciliation states.
 
 ---
 
@@ -288,7 +312,7 @@ WP018 CONTRACT VERDICT: READY FOR OWNER AUTHORIZATION
 
 Target Work Package: P4-WP018 — Multi-Output & Platform Export Presets
 Dependencies: P3-WP017 (Cloud Render Workers) MERGED in main at 07ba0fdaf1719a7d6ed882155dfb113a4729d55a
-Scope: Multi-variant aspect/resolution export presets (16:9, 9:16, 1:1), FFmpeg scaling/cropping, render_variant_key DB uniqueness index, atomic batch export submission, Design B Asset lineage in RenderJob.render_metadata, frontend export modal.
+Scope: Multi-variant aspect/resolution export presets (16:9, 9:16, 1:1), FFmpeg scaling/cropping, render_variant_key DB uniqueness index, atomic batch export submission, Design B Asset lineage in RenderJob.render_metadata, fail-closed migration downgrade contract, frontend export modal.
 Out of Scope: Subtitles/audio stems/watermarking (FUTURE), .orbis archive (WP019), release closure (WP020), raw AI video generation, ComfyUI, social auto-posting.
 Execution Plane: Antigravity (when explicitly authorized by Owner).
 ```
