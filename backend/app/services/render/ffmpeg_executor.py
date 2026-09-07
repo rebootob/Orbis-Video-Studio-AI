@@ -39,17 +39,19 @@ class FFmpegRenderExecutor(RenderExecutor):
         placements = timeline_spec.get("placements", [])
         audio_clips = timeline_spec.get("audio_clips", [])
         total_duration = float(timeline_spec.get("total_duration", 10.0))
-        render_profile = timeline_spec.get("render_profile", "MASTER_HD")
+        render_profile = str(timeline_spec.get("render_profile", "MASTER_HD")).upper()
+
+        if render_profile not in ("MASTER", "MASTER_HD"):
+            raise ValueError(
+                f"Unsupported render_profile '{render_profile}'. WP017 supports MASTER render only. "
+                "Aspect/platform variants (VERTICAL_4K, SQUARE_SD, etc.) are deferred to WP018."
+            )
 
         if progress_callback:
             progress_callback(30.0)
 
         width = 1920
         height = 1080
-        if render_profile == "VERTICAL_4K":
-            width, height = 2160, 3840
-        elif render_profile == "SQUARE_SD":
-            width, height = 720, 720
 
         cmd = [self.ffmpeg_path, "-y"]
 

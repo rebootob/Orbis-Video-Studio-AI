@@ -33,6 +33,13 @@ class MockRenderExecutor(RenderExecutor):
         total_duration = float(timeline_spec.get("total_duration", 10.0))
         placements = timeline_spec.get("placements", [])
         audio_clips = timeline_spec.get("audio_clips", [])
+        render_profile = str(timeline_spec.get("render_profile", "MASTER_HD")).upper()
+
+        if render_profile not in ("MASTER", "MASTER_HD"):
+            raise ValueError(
+                f"Unsupported render_profile '{render_profile}'. WP017 supports MASTER render only. "
+                "Aspect/platform variants (VERTICAL_4K, SQUARE_SD, etc.) are deferred to WP018."
+            )
 
         # Compute placement transition overlaps
         total_overlap = 0.0

@@ -413,8 +413,23 @@ def test_latest_render_endpoint(client: TestClient, db_session: Session):
 
 def test_render_profile_preservation(db_session: Session):
     project, _, _ = create_approved_project_context(db_session)
-    job = RenderJobService.submit_render_job(db_session, project.id, render_profile="VERTICAL_4K")
-    assert job.render_profile == "VERTICAL_4K"
+    job = RenderJobService.submit_render_job(db_session, project.id, render_profile="MASTER_HD")
+    assert job.render_profile == "MASTER_HD"
+
+
+def test_unsupported_render_profile_fails_closed(db_session: Session):
+    from fastapi import HTTPException
+
+    project, _, _ = create_approved_project_context(db_session)
+    with pytest.raises(HTTPException) as exc:
+        RenderJobService.submit_render_job(db_session, project.id, render_profile="VERTICAL_4K")
+    assert exc.value.status_code == 400
+    assert "MASTER render only" in exc.value.detail
+
+    with pytest.raises(HTTPException) as exc_sq:
+        RenderJobService.submit_render_job(db_session, project.id, render_profile="SQUARE_SD")
+    assert exc_sq.value.status_code == 400
+    assert "MASTER render only" in exc_sq.value.detail
 
 
 def test_output_asset_locking(db_session: Session):
@@ -555,44 +570,6 @@ def test_retry_budget_exceeded_fails(db_session: Session):
     assert "budget" in str(exc_info.value).lower()
 
 
-def test_concurrent_budget_authorization_threads(db_session: Session):
-    import threading
-
-    project, _, _ = create_approved_project_context(db_session)
-    project.budget_limit = 0.60
-    db_session.commit()
-
-    results = []
-    bind_conn = db_session.get_bind()
-
-    def attempt_submit(key: str):
-        from tests.conftest import TestingSessionLocal
-        local_db = TestingSessionLocal(bind=bind_conn)
-        try:
-            j = RenderJobService.submit_render_job(
-                local_db, project.id, custom_idempotency_key=key, estimated_cost_usd=0.50
-            )
-            results.append(("SUCCESS", j.id))
-        except Exception as e:
-            results.append(("FAILED", str(e)))
-        finally:
-            local_db.close()
-
-    t1 = threading.Thread(target=attempt_submit, args=("thread_key_1",))
-    t2 = threading.Thread(target=attempt_submit, args=("thread_key_2",))
-
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    successes = [r for r in results if r[0] == "SUCCESS"]
-    failures = [r for r in results if r[0] == "FAILED"]
-
-    assert len(successes) == 1
-    assert len(failures) == 1
-
-
 def test_stale_token_fencing_progress_fail_complete(db_session: Session):
     project, _, _ = create_approved_project_context(db_session)
     job = RenderJobService.submit_render_job(db_session, project.id)
@@ -623,52 +600,120 @@ def test_approved_timeline_without_new_qc_replay(db_session: Session):
 
 
 def test_same_identity_concurrent_submit_returns_single_job_and_reservation(db_session: Session):
+    import threading
+    from tests.conftest import TestingSessionLocal
+
     project, timeline, _ = create_approved_project_context(db_session)
     project.budget_limit = 0.60
     db_session.commit()
 
-    # Submit 1
-    job1 = RenderJobService.submit_render_job(
-        db_session, project.id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
-    )
-    assert job1.status == "QUEUED"
+    proj_id = project.id
+    bind_conn = db_session.get_bind()
 
-    # Submit 2 (same render identity / active job exists)
-    job2 = RenderJobService.submit_render_job(
-        db_session, project.id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
-    )
+    barrier = threading.Barrier(2)
+    results = []
 
-    # Both return the exact same active RenderJob
-    assert job1.id == job2.id
+    def attempt_submit():
+        local_db = TestingSessionLocal(bind=bind_conn)
+        try:
+            barrier.wait()
+            j = RenderJobService.submit_render_job(
+                local_db, proj_id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
+            )
+            job_id = j.id
+            results.append(("SUCCESS", job_id))
+        except Exception as e:
+            results.append(("FAILED", str(e)))
+        finally:
+            local_db.close()
 
-    # Single UsageLedger reservation entry
-    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job1.id).all()
+    t1 = threading.Thread(target=attempt_submit)
+    t2 = threading.Thread(target=attempt_submit)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    assert len(successes) == 2, f"Expected 2 successful submissions, got: {results}"
+    assert successes[0][1] == successes[1][1]
+
+    # Verify single reservation in UsageLedger
+    db_session.expire_all()
+    job_id = successes[0][1]
+    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job_id).all()
     assert len(ledgers) == 1
     assert ledgers[0].cost_status == "ESTIMATED"
     assert ledgers[0].estimated_cost == 0.50
 
 
 def test_distinct_concurrent_submits_cannot_oversubscribe_budget(db_session: Session):
-    project, _, _ = create_approved_project_context(db_session)
+    import threading
+    from tests.conftest import TestingSessionLocal
+
+    project, timeline1, app1 = create_approved_project_context(db_session)
     project.budget_limit = 0.60
     db_session.commit()
 
-    # Job 1 succeeds (estimated cost 0.50)
-    job1 = RenderJobService.submit_render_job(
-        db_session, project.id, custom_idempotency_key="distinct_key_1", estimated_cost_usd=0.50
+    # Create timeline 2 for the same project
+    timeline2 = AssemblyTimeline(
+        id=uuid.uuid4(), project_id=project.id, version=2, status="APPROVED", is_active=False
     )
-    assert job1.status == "QUEUED"
+    db_session.add(timeline2)
+    db_session.flush()
 
-    # Mark Job 1 as COMPLETED (preserving prior reservation in usage ledger)
-    job1.status = "COMPLETED"
+    qc2 = QCRun(
+        id=uuid.uuid4(), project_id=project.id, timeline_id=timeline2.id, timeline_version=2,
+        status="PASSED", blocker_count=0, warning_count=0, actor="system",
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(qc2)
+    db_session.flush()
+
+    app2 = ApprovalRecord(
+        id=uuid.uuid4(), project_id=project.id, timeline_id=timeline2.id, timeline_version=2,
+        qc_run_id=qc2.id, status="APPROVED", actor="user", approved_at=datetime.now(timezone.utc),
+    )
+    db_session.add(app2)
     db_session.commit()
 
-    # Distinct Job 2 submit request (estimated cost 0.50) -> total committed = 1.00 > limit 0.60 -> fails budget check
-    with pytest.raises(Exception) as exc_info:
-        RenderJobService.submit_render_job(
-            db_session, project.id, custom_idempotency_key="distinct_key_2", estimated_cost_usd=0.50
-        )
-    assert "budget" in str(exc_info.value).lower()
+    proj_id = project.id
+    t1_id = timeline1.id
+    t2_id = timeline2.id
+    bind_conn = db_session.get_bind()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def attempt_submit(t_id: uuid.UUID, key: str):
+        local_db = TestingSessionLocal(bind=bind_conn)
+        try:
+            barrier.wait()
+            j = RenderJobService.submit_render_job(
+                local_db, proj_id, timeline_id=t_id, custom_idempotency_key=key, estimated_cost_usd=0.50
+            )
+            job_id = j.id
+            results.append(("SUCCESS", job_id))
+        except Exception as e:
+            results.append(("FAILED", str(e)))
+        finally:
+            local_db.close()
+
+    thread1 = threading.Thread(target=attempt_submit, args=(t1_id, "distinct_key_1"))
+    thread2 = threading.Thread(target=attempt_submit, args=(t2_id, "distinct_key_2"))
+
+    thread1.start()
+    thread2.start()
+    thread1.join()
+    thread2.join()
+
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    failures = [r for r in results if r[0] == "FAILED"]
+
+    assert len(successes) == 1, f"Expected 1 success, got: {results}"
+    assert len(failures) == 1, f"Expected 1 failure, got: {results}"
+    assert "budget" in failures[0][1].lower()
 
 
 def test_cut_assembly():
@@ -816,3 +861,82 @@ def test_audio_start_time_and_volume_preserved():
     finally:
         if os.path.exists("./test_audio_attrs.mp4"):
             os.remove("./test_audio_attrs.mp4")
+
+
+def test_real_ffmpeg_integration():
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("FFmpeg binary not installed on test host system")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        clip1_path = os.path.join(tmp_dir, "clip1.mp4")
+        clip2_path = os.path.join(tmp_dir, "clip2.mp4")
+        audio1_path = os.path.join(tmp_dir, "audio1.m4a")
+        output_mp4 = os.path.join(tmp_dir, "output_master.mp4")
+
+        # 1. Generate clip1 (2 seconds color=red)
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "color=c=red:s=320x240:r=30:d=2",
+                "-c:v", "libx264", "-preset", "ultrafast",
+                clip1_path,
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # 2. Generate clip2 (2 seconds color=blue)
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=30:d=2",
+                "-c:v", "libx264", "-preset", "ultrafast",
+                clip2_path,
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # 3. Generate audio1 (3 seconds sine wave AAC audio in m4a)
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                "-c:a", "aac",
+                audio1_path,
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        timeline_spec = {
+            "total_duration": 4.0,
+            "render_profile": "MASTER_HD",
+            "placements": [
+                {"local_asset_path": clip1_path, "trim_in": 0.0, "effective_duration": 2.0, "transition_to_next": "FADE"},
+                {"local_asset_path": clip2_path, "trim_in": 0.0, "effective_duration": 2.0, "transition_to_next": "CUT"},
+            ],
+            "audio_clips": [
+                {"local_asset_path": audio1_path, "start_time": 0.0, "duration_seconds": 3.0, "volume": 0.8, "mute": False, "fade_in": 0.5, "fade_out": 0.5},
+            ],
+        }
+
+        executor = FFmpegRenderExecutor()
+        res = executor.render_timeline(timeline_spec, scratch_dir=tmp_dir, output_file_path=output_mp4)
+
+        assert os.path.exists(output_mp4)
+        assert os.path.getsize(output_mp4) > 0
+        assert res["duration_seconds"] == 3.5  # 2.0 + 2.0 - 0.5 overlap = 3.5s
+        assert res["placement_count"] == 2
+        assert res["audio_clip_count"] == 1
+        assert res["transition_overlap_seconds"] == 0.5
+        assert "xfade=transition=fade" in res["filtergraph_used"]
+        assert "volume=0.8" in res["filtergraph_used"] or "amix" in res["filtergraph_used"]
