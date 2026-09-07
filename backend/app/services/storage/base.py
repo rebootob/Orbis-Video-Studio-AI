@@ -43,6 +43,22 @@ class ObjectStorageProvider(ABC):
         pass
 
     @abstractmethod
+    def upload_file_object(
+        self,
+        bucket: str,
+        key: str,
+        file_path: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Upload a file from disk into storage without loading the whole file into RAM."""
+        pass
+
+    @abstractmethod
+    def download_file_object(self, bucket: str, key: str, target_file_path: str) -> None:
+        """Download an object from storage directly to a file on disk."""
+        pass
+
+    @abstractmethod
     def ensure_bucket_exists(self, bucket: str) -> None:
         """Ensure target storage bucket exists."""
         pass

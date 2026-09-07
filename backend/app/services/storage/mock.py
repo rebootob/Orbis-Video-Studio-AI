@@ -56,3 +56,21 @@ class InMemoryObjectStorageProvider(ObjectStorageProvider):
         expires_in: int = 3600,
     ) -> str:
         return f"https://mock-storage.local/{bucket}/{key}?token=presigned_mock_token&expires={expires_in}"
+
+    def upload_file_object(
+        self,
+        bucket: str,
+        key: str,
+        file_path: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        self.ensure_bucket_exists(bucket)
+        with open(file_path, "rb") as f:
+            payload = f.read()
+        self._store[(bucket, key)] = (payload, content_type)
+        return key
+
+    def download_file_object(self, bucket: str, key: str, target_file_path: str) -> None:
+        payload = self.get_object(bucket, key)
+        with open(target_file_path, "wb") as f:
+            f.write(payload)

@@ -225,8 +225,12 @@ class RenderJobService:
             return False
         if job.status not in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value):
             return False
-
         now = utc_now()
+        expires_at = job.claim_expires_at.replace(tzinfo=timezone.utc) if (job.claim_expires_at and job.claim_expires_at.tzinfo is None) else job.claim_expires_at
+        if expires_at and expires_at <= now:
+            # Lease has already expired and may have been reclaimed by another worker -> Fenced out
+            return False
+
         job.claim_expires_at = now + timedelta(seconds=extend_seconds)
         job.status = RenderJobStatus.RUNNING.value
         job.updated_at = now
@@ -246,6 +250,11 @@ class RenderJobService:
             return False
 
         now = utc_now()
+        expires_at = job.claim_expires_at.replace(tzinfo=timezone.utc) if (job.claim_expires_at and job.claim_expires_at.tzinfo is None) else job.claim_expires_at
+        if expires_at and expires_at <= now:
+            # Lease expired -> Fenced out
+            return False
+
         job.progress = max(0.0, min(100.0, progress))
         job.status = RenderJobStatus.RUNNING.value
         job.updated_at = now
@@ -264,9 +273,13 @@ class RenderJobService:
     ) -> RenderJob:
         job = db.get(RenderJob, render_job_id)
         if not job or job.claim_token != claim_token:
-            raise HTTPException(status_code=400, detail="Invalid claim token or job not found")
+            raise HTTPException(status_code=400, detail="Stale worker claim token: job not found or claim token mismatched")
 
         now = utc_now()
+        expires_at = job.claim_expires_at.replace(tzinfo=timezone.utc) if (job.claim_expires_at and job.claim_expires_at.tzinfo is None) else job.claim_expires_at
+        if expires_at and expires_at <= now:
+            raise HTTPException(status_code=400, detail="Stale worker lease: claim lease has expired")
+
         job.status = RenderJobStatus.COMPLETED.value
         job.progress = 100.0
         job.output_asset_id = output_asset_id
@@ -307,7 +320,14 @@ class RenderJobService:
         if not job:
             raise HTTPException(status_code=404, detail="RenderJob not found")
 
+        # Stale worker fencing: verify token if token was supplied
         now = utc_now()
+        expires_at = job.claim_expires_at.replace(tzinfo=timezone.utc) if (job.claim_expires_at and job.claim_expires_at.tzinfo is None) else job.claim_expires_at
+        if claim_token and job.claim_token and (job.claim_token != claim_token or (expires_at and expires_at <= now)):
+            raise HTTPException(status_code=400, detail="Stale worker token: claim ownership was lost or lease expired")
+
+        now = utc_now()
+        was_running_or_claimed = job.status in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value)
         job.updated_at = now
 
         if ambiguous:
@@ -328,15 +348,19 @@ class RenderJobService:
                 job.status = RenderJobStatus.FAILED.value
                 job.error_message = error_message
 
-                # Release reserved compute cost for terminal clear failure
                 ledger_entry = (
                     db.query(UsageLedger)
                     .filter(UsageLedger.render_job_id == job.id)
                     .first()
                 )
                 if ledger_entry:
-                    ledger_entry.cost_status = "ADJUSTED"
-                    ledger_entry.actual_cost = 0.0
+                    if not was_running_or_claimed:
+                        # Proven PRE-EXECUTION failure -> release cost to 0
+                        ledger_entry.cost_status = "ADJUSTED"
+                        ledger_entry.actual_cost = 0.0
+                    else:
+                        # Execution was in progress -> preserve ESTIMATED cost reservation
+                        ledger_entry.cost_status = "ESTIMATED"
                     ledger_entry.updated_at = now
 
         db.commit()
@@ -372,20 +396,98 @@ class RenderJobService:
             )
 
         now = utc_now()
+        was_queued = (job.status == RenderJobStatus.QUEUED.value)
+
         job.status = RenderJobStatus.CANCELLED.value
         job.error_message = "Cancelled by user"
         job.updated_at = now
 
-        # Release reserved cost for pre-execution cancellation
         ledger_entry = (
             db.query(UsageLedger)
             .filter(UsageLedger.render_job_id == job.id)
             .first()
         )
         if ledger_entry:
-            ledger_entry.cost_status = "ADJUSTED"
-            ledger_entry.actual_cost = 0.0
+            if was_queued:
+                # Pre-execution cancellation -> release cost to 0
+                ledger_entry.cost_status = "ADJUSTED"
+                ledger_entry.actual_cost = 0.0
+            else:
+                # Compute was in progress (RUNNING / CLAIMED) -> preserve ESTIMATED cost reservation
+                ledger_entry.cost_status = "ESTIMATED"
             ledger_entry.updated_at = now
+
+        db.commit()
+        db.refresh(job)
+        return job
+
+    @classmethod
+    def retry_render_job(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        render_job_id: uuid.UUID,
+    ) -> RenderJob:
+        job = (
+            db.query(RenderJob)
+            .filter(
+                RenderJob.id == render_job_id,
+                RenderJob.project_id == project_id,
+            )
+            .first()
+        )
+        if not job:
+            raise HTTPException(status_code=404, detail="RenderJob not found for project")
+
+        if job.status not in (RenderJobStatus.FAILED.value, RenderJobStatus.CANCELLED.value):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot retry render job in status {job.status}",
+            )
+
+        # Concurrency-safe project budget check before re-reserving budget
+        BudgetService.check_budget_before_dispatch(
+            db=db,
+            project_id=project_id,
+            estimated_cost=job.estimated_cost_usd,
+            lock_row=True,
+        )
+
+        now = utc_now()
+        job.status = RenderJobStatus.QUEUED.value
+        job.retry_count = 0
+        job.claimed_by = None
+        job.claim_token = None
+        job.claim_expires_at = None
+        job.error_message = None
+        job.updated_at = now
+
+        # Ensure active ESTIMATED reservation exists in UsageLedger
+        ledger_entry = (
+            db.query(UsageLedger)
+            .filter(UsageLedger.render_job_id == job.id)
+            .first()
+        )
+        if ledger_entry:
+            ledger_entry.cost_status = "ESTIMATED"
+            ledger_entry.estimated_cost = job.estimated_cost_usd
+            ledger_entry.updated_at = now
+        else:
+            ledger_entry = UsageLedger(
+                project_id=project_id,
+                render_job_id=job.id,
+                provider="ORBIS_RENDER",
+                operation="RENDER_VIDEO",
+                estimated_cost=job.estimated_cost_usd,
+                actual_cost=None,
+                currency="USD",
+                cost_status="ESTIMATED",
+                idempotency_key=f"render_reserve_{job.id}",
+                description=f"Pre-render compute cost reservation (retry) for timeline v{job.timeline_version}",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(ledger_entry)
 
         db.commit()
         db.refresh(job)
@@ -447,9 +549,11 @@ class RenderJobService:
         cls,
         db: Session,
         project_id: uuid.UUID,
+        storage_bucket: str,
         storage_key: str,
         duration_seconds: float,
         file_size_bytes: int,
+        checksum_sha256: str,
     ) -> Asset:
         filename = os.path.basename(storage_key)
         asset = Asset(
@@ -458,10 +562,10 @@ class RenderJobService:
             original_filename=filename,
             asset_type="VIDEO",
             content_type="video/mp4",
-            storage_bucket="orbis-assets",
+            storage_bucket=storage_bucket,
             storage_key=storage_key,
             file_size_bytes=file_size_bytes,
-            checksum_sha256="0" * 64,
+            checksum_sha256=checksum_sha256,
             is_locked=True,
             created_at=utc_now(),
             updated_at=utc_now(),

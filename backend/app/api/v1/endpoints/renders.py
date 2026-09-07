@@ -90,16 +90,4 @@ def retry_render_job(
     db: Session = Depends(get_db),
 ):
     """Retry a failed render job."""
-    job = RenderJobService.get_render_job(db=db, project_id=project_id, render_job_id=render_id)
-    if job.status not in (RenderJobStatus.FAILED.value, RenderJobStatus.CANCELLED.value):
-        raise HTTPException(status_code=400, detail=f"Cannot retry render job in status {job.status}")
-
-    job.status = RenderJobStatus.QUEUED.value
-    job.retry_count = 0
-    job.claimed_by = None
-    job.claim_token = None
-    job.claim_expires_at = None
-    job.error_message = None
-    db.commit()
-    db.refresh(job)
-    return job
+    return RenderJobService.retry_render_job(db=db, project_id=project_id, render_job_id=render_id)

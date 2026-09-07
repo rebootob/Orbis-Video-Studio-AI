@@ -126,3 +126,31 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
             )
         except ClientError as e:
             raise RuntimeError(f"Failed to generate presigned URL: {e}")
+
+    def upload_file_object(
+        self,
+        bucket: str,
+        key: str,
+        file_path: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        self.ensure_bucket_exists(bucket)
+        try:
+            self.client.upload_file(
+                Filename=file_path,
+                Bucket=bucket,
+                Key=key,
+                ExtraArgs={"ContentType": content_type},
+            )
+            return key
+        except ClientError as e:
+            raise RuntimeError(f"Failed to upload file '{file_path}' to bucket '{bucket}/{key}': {e}")
+
+    def download_file_object(self, bucket: str, key: str, target_file_path: str) -> None:
+        try:
+            self.client.download_file(Bucket=bucket, Key=key, Filename=target_file_path)
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code in ("404", "NoSuchKey"):
+                raise KeyError(f"Object '{key}' not found in bucket '{bucket}'.")
+            raise RuntimeError(f"Failed to download object '{key}' from bucket '{bucket}': {e}")

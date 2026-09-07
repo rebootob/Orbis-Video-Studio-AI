@@ -17,6 +17,12 @@ from app.services.render import FFmpegRenderExecutor
 from app.services.render_worker import CloudRenderWorker
 
 
+from app.services.render.mock_executor import MockRenderExecutor
+from app.models.assembly import AssemblyScene, AssemblyShotPlacement
+from app.models.scene import Scene
+from app.models.shot import Shot
+
+
 def create_approved_project_context(db: Session) -> Tuple[Project, AssemblyTimeline, ApprovalRecord]:
     project = Project(
         id=uuid.uuid4(),
@@ -148,7 +154,13 @@ def test_cost_reconciliation_on_completion(db_session: Session):
     claimed = RenderJobService.claim_next_render_job(db_session, worker_id="worker-1")
 
     asset = RenderJobService.create_render_output_asset(
-        db_session, project.id, storage_key="test.mp4", duration_seconds=10.0, file_size_bytes=1024
+        db_session,
+        project.id,
+        storage_bucket="orbis-assets",
+        storage_key="test.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=1024,
+        checksum_sha256="a" * 64,
     )
     db_session.commit()
 
@@ -200,7 +212,13 @@ def test_concurrent_budget_reservation_lock(db_session: Session):
     # Complete Job 1 so it is no longer in active (QUEUED/CLAIMED/RUNNING) status, but cost remains committed (0.50)
     claimed1 = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
     asset1 = RenderJobService.create_render_output_asset(
-        db_session, project.id, storage_key="job1.mp4", duration_seconds=10.0, file_size_bytes=1024
+        db_session,
+        project.id,
+        storage_bucket="orbis-assets",
+        storage_key="job1.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=1024,
+        checksum_sha256="b" * 64,
     )
     RenderJobService.complete_render_job(db_session, claimed1.id, claimed1.claim_token, asset1.id, actual_cost_usd=0.50)
 
@@ -218,7 +236,13 @@ def test_full_history_retention_re_render(db_session: Session):
     claimed1 = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
 
     asset1 = RenderJobService.create_render_output_asset(
-        db_session, project.id, storage_key="render1.mp4", duration_seconds=10.0, file_size_bytes=1024
+        db_session,
+        project.id,
+        storage_bucket="orbis-assets",
+        storage_key="render1.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=1024,
+        checksum_sha256="c" * 64,
     )
     db_session.commit()
     RenderJobService.complete_render_job(db_session, claimed1.id, claimed1.claim_token, asset1.id, 0.10)
@@ -266,7 +290,7 @@ def test_worker_execution_flow(db_session: Session):
     project, _, _ = create_approved_project_context(db_session)
     job = RenderJobService.submit_render_job(db_session, project.id)
 
-    worker = CloudRenderWorker(worker_id="test-worker-node-1")
+    worker = CloudRenderWorker(worker_id="test-worker-node-1", render_executor=MockRenderExecutor())
     processed = worker.process_one_job(db_session)
     assert processed is True
 
@@ -276,6 +300,38 @@ def test_worker_execution_flow(db_session: Session):
     assert job.progress == 100.0
 
 
+def test_worker_missing_source_asset_fails_closed(db_session: Session):
+    project, timeline, _ = create_approved_project_context(db_session)
+    scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=1, heading="Scene 1")
+    db_session.add(scene)
+    assembly_scene = AssemblyScene(id=uuid.uuid4(), timeline_id=timeline.id, scene_id=scene.id, scene_order=0)
+    db_session.add(assembly_scene)
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=1, shot_type="WIDE")
+    db_session.add(shot)
+    placement = AssemblyShotPlacement(
+        id=uuid.uuid4(),
+        timeline_id=timeline.id,
+        assembly_scene_id=assembly_scene.id,
+        scene_id=scene.id,
+        shot_id=shot.id,
+        shot_order=0,
+        visual_asset_id=None,  # Missing source asset
+        effective_duration=4.0,
+    )
+    db_session.add(placement)
+    db_session.commit()
+
+    job = RenderJobService.submit_render_job(db_session, project.id)
+    worker = CloudRenderWorker(worker_id="test-worker-node-2", render_executor=MockRenderExecutor())
+    processed = worker.process_one_job(db_session)
+    assert processed is True
+
+    db_session.refresh(job)
+    # Should fail closed and reset to QUEUED retry (or FAILED if max retries)
+    assert job.status in ("QUEUED", "FAILED")
+    assert "Missing required visual source asset" in (job.error_message or "")
+
+
 def test_worker_retry_mechanics(db_session: Session):
     project, _, _ = create_approved_project_context(db_session)
     job = RenderJobService.submit_render_job(db_session, project.id)
@@ -283,9 +339,22 @@ def test_worker_retry_mechanics(db_session: Session):
     job.max_retries = 3
     db_session.commit()
 
-    failed = RenderJobService.fail_render_job(db_session, job.id, "token", "Transient failure", ambiguous=False)
+    failed = RenderJobService.fail_render_job(db_session, job.id, job.claim_token, "Transient failure", ambiguous=False)
     assert failed.status == "QUEUED"
     assert failed.claimed_by is None
+
+
+def test_stale_worker_token_fencing(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id)
+    claimed = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
+
+    # Call complete_render_job with bad token
+    with pytest.raises(Exception) as exc_info:
+        RenderJobService.complete_render_job(
+            db_session, claimed.id, claim_token="invalid_token", output_asset_id=uuid.uuid4(), actual_cost_usd=0.10
+        )
+    assert "stale" in str(exc_info.value).lower() or "mismatched" in str(exc_info.value).lower()
 
 
 def test_user_cancellation(client: TestClient, db_session: Session):
@@ -351,14 +420,20 @@ def test_render_profile_preservation(db_session: Session):
 def test_output_asset_locking(db_session: Session):
     project, _, _ = create_approved_project_context(db_session)
     asset = RenderJobService.create_render_output_asset(
-        db_session, project.id, storage_key="test_master.mp4", duration_seconds=15.0, file_size_bytes=2048
+        db_session,
+        project.id,
+        storage_bucket="orbis-assets",
+        storage_key="test_master.mp4",
+        duration_seconds=15.0,
+        file_size_bytes=2048,
+        checksum_sha256="d" * 64,
     )
     assert asset.is_locked is True
     assert asset.asset_type == "VIDEO"
 
 
 def test_ffmpeg_executor_abstraction():
-    executor = FFmpegRenderExecutor()
+    executor = MockRenderExecutor()
     meta = executor.render_timeline(
         timeline_spec={"total_duration": 5.0},
         scratch_dir=".",
