@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 from enum import Enum
-from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, Index, text
+from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, Index, text, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -38,14 +38,15 @@ class RenderJob(Base):
         Index("ix_render_jobs_timeline_id", "timeline_id"),
         Index("ix_render_jobs_render_variant_key", "render_variant_key"),
         Index("ix_render_jobs_batch_id", "batch_id"),
+        Index("ix_render_jobs_imported_historical", "imported_historical"),
         Index(
             "uq_render_jobs_active_variant",
             "project_id",
             "timeline_id",
             "render_variant_key",
             unique=True,
-            sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
-            postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
+            sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+            postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
         ),
     )
 
@@ -105,6 +106,12 @@ class RenderJob(Base):
         nullable=True,
     )
     render_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
+    imported_historical: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
+    execution_disabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False

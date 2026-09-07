@@ -184,6 +184,7 @@ class RenderJobService:
                     RenderJob.project_id == project_id,
                     RenderJob.timeline_id == timeline.id,
                     RenderJob.render_variant_key == "MASTER",
+                    RenderJob.imported_historical.isnot(True),
                     RenderJob.status.in_([
                         RenderJobStatus.QUEUED.value,
                         RenderJobStatus.CLAIMED.value,
@@ -219,6 +220,7 @@ class RenderJobService:
         )
         db.add(ledger_entry)
         db.flush()
+
         render_job.current_usage_ledger_id = ledger_entry.id
         db.commit()
         db.refresh(render_job)
@@ -237,11 +239,15 @@ class RenderJobService:
         query = (
             db.query(RenderJob)
             .filter(
-                (RenderJob.status == RenderJobStatus.QUEUED.value)
-                | (
-                    (RenderJob.status.in_([RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value]))
-                    & (RenderJob.claim_expires_at <= now)
-                    & (RenderJob.retry_count < RenderJob.max_retries)
+                RenderJob.imported_historical.isnot(True),
+                RenderJob.execution_disabled.isnot(True),
+                (
+                    (RenderJob.status == RenderJobStatus.QUEUED.value)
+                    | (
+                        (RenderJob.status.in_([RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value]))
+                        & (RenderJob.claim_expires_at <= now)
+                        & (RenderJob.retry_count < RenderJob.max_retries)
+                    )
                 )
             )
             .order_by(RenderJob.created_at.asc())
@@ -709,6 +715,7 @@ class RenderJobService:
             .filter(
                 RenderJob.project_id == project_id,
                 RenderJob.timeline_id == job.timeline_id,
+                RenderJob.imported_historical.isnot(True),
                 RenderJob.status == RenderJobStatus.RECONCILIATION_REQUIRED.value,
             )
             .first()
@@ -931,6 +938,8 @@ class RenderJobService:
             active_jobs = db.query(RenderJob).filter(
                 RenderJob.project_id == project_id,
                 RenderJob.timeline_id == timeline.id,
+                RenderJob.imported_historical.isnot(True),
+                RenderJob.execution_disabled.isnot(True),
                 RenderJob.status.in_([
                     RenderJobStatus.QUEUED.value,
                     RenderJobStatus.CLAIMED.value,

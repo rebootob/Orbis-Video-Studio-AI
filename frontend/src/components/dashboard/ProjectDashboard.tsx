@@ -16,7 +16,11 @@ import {
   ArrowUpDown,
   Filter,
   Clapperboard,
+  Package,
+  Upload,
 } from 'lucide-react';
+import { ExportProjectModal } from './ExportProjectModal';
+import { ImportProjectModal } from './ImportProjectModal';
 
 interface ProjectDashboardProps {
   projects: Project[];
@@ -28,6 +32,8 @@ interface ProjectDashboardProps {
   onUnarchiveProject?: (projectId: string) => void;
   onDuplicateProject?: (projectId: string) => void;
   onRenameProject?: (projectId: string, newTitle: string) => void;
+  onRefreshProjects?: () => Promise<void>;
+  onImportSuccess?: (projectId: string) => void;
 }
 
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
@@ -40,6 +46,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   onUnarchiveProject,
   onDuplicateProject,
   onRenameProject,
+  onRefreshProjects,
+  onImportSuccess,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMode, setSelectedMode] = useState<string>('ALL');
@@ -47,6 +55,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   const [sortBy, setSortBy] = useState<string>('UPDATED_DESC');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [exportModalProject, setExportModalProject] = useState<Project | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Filtering
   const filteredProjects = projects.filter((p) => {
@@ -231,13 +241,23 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             Multi-project workspace with full-history retention, auditability, and mode-aware planning
           </p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={onOpenNewProjectModal}
-          data-testid="create-project-btn"
-        >
-          <Plus size={16} /> New Project
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-outline"
+            onClick={() => setIsImportModalOpen(true)}
+            data-testid="import-project-btn"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Upload size={16} /> Import .orbis
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={onOpenNewProjectModal}
+            data-testid="create-project-btn"
+          >
+            <Plus size={16} /> New Project
+          </button>
+        </div>
       </div>
 
       {/* Recent Projects Highlight */}
@@ -709,6 +729,19 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                           <Archive size={12} /> Archive
                         </button>
                       )}
+
+                      {/* Export .orbis */}
+                      <button
+                        className="btn btn-xs btn-outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExportModalProject(project);
+                        }}
+                        title="Export self-contained .orbis package"
+                        data-testid={`export-project-${project.id}`}
+                      >
+                        <Package size={12} /> Export (.orbis)
+                      </button>
                     </div>
 
                     <button
@@ -726,6 +759,32 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             );
           })}
         </div>
+      )}
+
+      {/* Export Archive Modal */}
+      {exportModalProject && (
+        <ExportProjectModal
+          isOpen={!!exportModalProject}
+          onClose={() => setExportModalProject(null)}
+          project={exportModalProject}
+        />
+      )}
+
+      {/* Import Archive Modal */}
+      {isImportModalOpen && (
+        <ImportProjectModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onImportSuccess={async (projectId) => {
+            setIsImportModalOpen(false);
+            if (onRefreshProjects) {
+              await onRefreshProjects();
+            }
+            if (onImportSuccess) {
+              onImportSuccess(projectId);
+            }
+          }}
+        />
       )}
     </div>
   );

@@ -42,6 +42,9 @@ import type {
   ExportPreset,
   ExportBatchSubmitPayload,
   RenderBatch,
+  ProjectExportOptions,
+  ProjectValidationResult,
+  ProjectImportResult,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -846,6 +849,78 @@ export const api = {
     return request<RenderJob>(`/projects/${projectId}/renders/${renderId}/retry`, {
       method: 'POST',
     });
+  },
+
+  async exportProjectArchive(projectId: string, options: ProjectExportOptions = {}): Promise<Blob> {
+    const url = `${BASE_URL}/projects/${projectId}/export`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(options),
+    });
+    if (!response.ok) {
+      let errorMsg = `HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.detail || errorMsg;
+      } catch {
+        // use fallback errorMsg
+      }
+      throw new Error(errorMsg);
+    }
+    return response.blob();
+  },
+
+  async validateProjectArchive(file: File): Promise<ProjectValidationResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = `${BASE_URL}/projects/import/validate`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      let errorMsg = `HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.detail || errorMsg;
+      } catch {
+        // use fallback errorMsg
+      }
+      throw new Error(errorMsg);
+    }
+    return response.json();
+  },
+
+  async executeProjectImport(
+    file: File,
+    importMode: 'CLONE' | 'RESTORE' = 'CLONE',
+    overrideTitle?: string
+  ): Promise<ProjectImportResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('import_mode', importMode);
+    if (overrideTitle) {
+      formData.append('override_title', overrideTitle);
+    }
+    const url = `${BASE_URL}/projects/import/execute`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      let errorMsg = `HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.detail || errorMsg;
+      } catch {
+        // use fallback errorMsg
+      }
+      throw new Error(errorMsg);
+    }
+    return response.json();
   },
 };
 

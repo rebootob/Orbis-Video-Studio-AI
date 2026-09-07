@@ -87,5 +87,8 @@ class ProjectResponse(BaseModel):
     scene_count: int = 0
     shot_count: int = 0
     thumbnail_url: Optional[str] = None
+    source_project_id: Optional[uuid.UUID] = None
+    source_archive_checksum: Optional[str] = None
+    imported_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

@@ -696,8 +696,8 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
             updated_at=now,
         ))
 
-    # 2. A. UPGRADE to head (019)
-    command.upgrade(cfg, "head")
+    # 2. A. UPGRADE to 019
+    command.upgrade(cfg, "019_export_presets_and_variant_key")
     meta2 = MetaData()
     meta2.reflect(bind=engine)
     assert "render_batches" in meta2.tables
@@ -785,9 +785,176 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
     assert active_idx["column_names"] == ["project_id", "timeline_id"]
 
     # 5. B. SAFE DOWNGRADE & RE-UPGRADE
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "019_export_presets_and_variant_key")
     meta4 = MetaData()
     meta4.reflect(bind=engine)
     assert "render_batches" in meta4.tables
     assert "render_variant_key" in meta4.tables["render_jobs"].c
+    engine.dispose()
+
+
+def test_020_project_archive_lineage_lifecycle(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, text, Uuid
+    from sqlalchemy.exc import IntegrityError
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+
+    url = f"sqlite:///{tmp_path / 'wp020_migration_test.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to 019
+    command.upgrade(cfg, "019_export_presets_and_variant_key")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "source_project_id" not in meta.tables["projects"].c
+    assert "imported_historical" not in meta.tables["render_jobs"].c
+
+    # 2. Upgrade to 020
+    command.upgrade(cfg, "020_project_archive_lineage")
+    meta2 = MetaData()
+    meta2.reflect(bind=engine)
+    assert "source_project_id" in meta2.tables["projects"].c
+    assert "source_archive_checksum" in meta2.tables["projects"].c
+    assert "imported_at" in meta2.tables["projects"].c
+    assert "imported_historical" in meta2.tables["render_jobs"].c
+    assert "execution_disabled" in meta2.tables["render_jobs"].c
+    assert "imported_historical" in meta2.tables["generation_jobs"].c
+    assert "execution_disabled" in meta2.tables["generation_jobs"].c
+    assert "imported_historical" in meta2.tables["usage_ledger"].c
+
+    # Set up tables
+    now = datetime.now(timezone.utc)
+    p_id = uuid.uuid4()
+    t_id = uuid.uuid4()
+    s_id = uuid.uuid4()
+    shot_id = uuid.uuid4()
+    qc_id = uuid.uuid4()
+    app_id = uuid.uuid4()
+
+    projects_tbl = meta2.tables["projects"]
+    projects_tbl.c.id.type = Uuid()
+    timelines_tbl = meta2.tables["assembly_timelines"]
+    timelines_tbl.c.id.type = Uuid()
+    timelines_tbl.c.project_id.type = Uuid()
+    scenes_tbl = meta2.tables["scenes"]
+    scenes_tbl.c.id.type = Uuid()
+    scenes_tbl.c.project_id.type = Uuid()
+    shots_tbl = meta2.tables["shots"]
+    shots_tbl.c.id.type = Uuid()
+    shots_tbl.c.scene_id.type = Uuid()
+    qc_runs_tbl = meta2.tables["qc_runs"]
+    qc_runs_tbl.c.id.type = Uuid()
+    qc_runs_tbl.c.project_id.type = Uuid()
+    qc_runs_tbl.c.timeline_id.type = Uuid()
+    approvals_tbl = meta2.tables["production_approvals"]
+    approvals_tbl.c.id.type = Uuid()
+    approvals_tbl.c.project_id.type = Uuid()
+    approvals_tbl.c.timeline_id.type = Uuid()
+    approvals_tbl.c.qc_run_id.type = Uuid()
+    render_jobs_tbl = meta2.tables["render_jobs"]
+    render_jobs_tbl.c.id.type = Uuid()
+    render_jobs_tbl.c.project_id.type = Uuid()
+    render_jobs_tbl.c.timeline_id.type = Uuid()
+    render_jobs_tbl.c.approval_id.type = Uuid()
+    generation_jobs_tbl = meta2.tables["generation_jobs"]
+    generation_jobs_tbl.c.id.type = Uuid()
+    generation_jobs_tbl.c.shot_id.type = Uuid()
+
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(id=p_id, title="P20", status="DRAFT", created_at=now, updated_at=now))
+        conn.execute(timelines_tbl.insert().values(id=t_id, project_id=p_id, version=1, status="APPROVED", created_at=now, updated_at=now))
+        conn.execute(scenes_tbl.insert().values(id=s_id, project_id=p_id, scene_number=1, created_at=now, updated_at=now))
+        conn.execute(shots_tbl.insert().values(id=shot_id, scene_id=s_id, shot_number=1, shot_type="AI_GENERATED", status="DRAFT", created_at=now, updated_at=now))
+        conn.execute(qc_runs_tbl.insert().values(id=qc_id, project_id=p_id, timeline_id=t_id, timeline_version=1, status="PASSED", created_at=now, updated_at=now))
+        conn.execute(approvals_tbl.insert().values(id=app_id, project_id=p_id, timeline_id=t_id, timeline_version=1, qc_run_id=qc_id, status="APPROVED", approved_at=now))
+
+    # 3. Test active uniqueness:
+    # A historical active render job and a live active render job for the same variant can coexist!
+    rj_hist = uuid.uuid4()
+    rj_live = uuid.uuid4()
+    with engine.begin() as conn:
+        conn.execute(render_jobs_tbl.insert().values(
+            id=rj_hist,
+            project_id=p_id,
+            timeline_id=t_id,
+            timeline_version=1,
+            approval_id=app_id,
+            render_profile="MASTER_HD",
+            render_variant_key="MASTER",
+            status="QUEUED",
+            imported_historical=True,
+            execution_disabled=True,
+            idempotency_key=f"hist_{rj_hist}",
+            progress=0.0,
+            retry_count=0,
+            max_retries=3,
+            estimated_cost_usd=0.50,
+            created_at=now,
+            updated_at=now,
+        ))
+        conn.execute(render_jobs_tbl.insert().values(
+            id=rj_live,
+            project_id=p_id,
+            timeline_id=t_id,
+            timeline_version=1,
+            approval_id=app_id,
+            render_profile="MASTER_HD",
+            render_variant_key="MASTER",
+            status="QUEUED",
+            imported_historical=False,
+            execution_disabled=False,
+            idempotency_key=f"live_{rj_live}",
+            progress=0.0,
+            retry_count=0,
+            max_retries=3,
+            estimated_cost_usd=0.50,
+            created_at=now,
+            updated_at=now,
+        ))
+
+    # A second LIVE active render job for the SAME variant must be rejected
+    rj_live_dup = uuid.uuid4()
+    with pytest.raises(IntegrityError):
+        with engine.begin() as conn:
+            conn.execute(render_jobs_tbl.insert().values(
+                id=rj_live_dup,
+                project_id=p_id,
+                timeline_id=t_id,
+                timeline_version=1,
+                approval_id=app_id,
+                render_profile="MASTER_HD",
+                render_variant_key="MASTER",
+                status="QUEUED",
+                imported_historical=False,
+                execution_disabled=False,
+                idempotency_key=f"live_{rj_live_dup}",
+                progress=0.0,
+                retry_count=0,
+                max_retries=3,
+                estimated_cost_usd=0.50,
+                created_at=now,
+                updated_at=now,
+            ))
+
+    # 4. Fail-closed downgrade check:
+    # Because rj_hist and rj_live coexist with active status on the same variant, downgrade MUST FAIL CLOSED
+    with pytest.raises(RuntimeError) as exc_info:
+        command.downgrade(cfg, "019_export_presets_and_variant_key")
+    assert "Downgrade ABORTED" in str(exc_info.value)
+    assert "active-status render jobs" in str(exc_info.value)
+
+    # 5. Safe downgrade when duplicate live job is completed
+    with engine.begin() as conn:
+        conn.execute(render_jobs_tbl.update().where(render_jobs_tbl.c.id == rj_live).values(status="COMPLETED"))
+
+    command.downgrade(cfg, "019_export_presets_and_variant_key")
+    meta3 = MetaData()
+    meta3.reflect(bind=engine)
+    assert "source_project_id" not in meta3.tables["projects"].c
+    assert "imported_historical" not in meta3.tables["render_jobs"].c
     engine.dispose()

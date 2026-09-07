@@ -111,21 +111,21 @@ WP018 Status: PASS / CLOSED / MERGED
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = NONE
-STATUS = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
-BRANCH = main
-MAIN_HEAD = 09e62876543ee7990919beb43600a1c748be545d
-ANTIGRAVITY = STOP / NONE (bounded low-credit Execution Plane when authorized)
+ACTIVE WORK PACKAGE = P4-WP019
+STATUS = IN_PROGRESS / IMPLEMENTATION
+BRANCH = ai/p4-wp019-orbis-archive
+MAIN_HEAD = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+ANTIGRAVITY = bounded low-credit Execution Plane
 CODEX = STOP
 CLAUDE_CODE = STOP
-P4-WP019 = PROPOSED / NOT AUTHORIZED
+P4-WP019 = IN_PROGRESS / IMPLEMENTATION
 P4-WP020 = PROPOSED / NOT AUTHORIZED
 ```
 
-P4-WP018 is merged and closed.
-No active Work Package implementation. Await explicit Owner authorization before starting WP019 PRE1 or any implementation work.
+P4-WP019 implementation authorized by Owner.
+Implementing locked .orbis archive export/import scope.
 Do NOT merge without Owner approval.
-Do NOT start WP019.
+Do NOT start WP020.
 
 ### Performance & Scalability Guardrails Delivered in WP011
 
@@ -289,12 +289,12 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD (`09e62876543ee7990919beb43600a1c748be545d`).
+1. Fresh-fetch current `main` HEAD (`5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5`).
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
 5. Read `DOCUMENT_INDEX.md`.
 6. Read this handoff.
-7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for explicit Owner authorization before starting implementation.
+7. Active Work Package: `P4-WP019` implementation on branch `ai/p4-wp019-orbis-archive`.
 8. Do not repeat closed work.
-9. Do not start WP019 automatically. P4-WP019 remains PROPOSED / NOT AUTHORIZED.
+9. Do not start WP020.

@@ -7,23 +7,23 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP019-PRE1
+ACTIVE_WORK_PACKAGE = P4-WP019
 ```
 
 Status:
 
 ```text
-P4-WP019 PRE1 PROPOSAL SUBMITTED / IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
+P4-WP019 IMPLEMENTATION IN PROGRESS
 ```
 
 Current Work Tracking:
 
 ```text
-Active Package: P4-WP019-PRE1
-Status: PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
-Canonical main HEAD: 351fc5088cf3ce8251d9ee896f44f1996897b608
-Branch: docs/p4-wp019-pre1-proposal
-Gate: P4-WP019-PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
+Active Package: P4-WP019
+Status: IN_PROGRESS / IMPLEMENTATION
+Canonical main HEAD: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+Branch: ai/p4-wp019-orbis-archive
+Gate: P4-WP019 / IMPLEMENTATION
 ```
 
 Execution Roles:
@@ -31,7 +31,7 @@ Execution Roles:
 ```text
 Owner = final human authority / authorization
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE
+Antigravity = bounded low-credit Execution Plane
 Codex = STOP
 Claude Code = STOP
 ```
@@ -91,12 +91,12 @@ Claude Code = STOP
 
 ## Next Allowed Action
 
-1. `ACTIVE_WORK_PACKAGE = P4-WP019-PRE1`.
-2. `P4-WP019: PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)`.
+1. `ACTIVE_WORK_PACKAGE = P4-WP019`.
+2. `P4-WP019: IN_PROGRESS / IMPLEMENTATION`.
 3. `P4-WP020: PROPOSED / NOT AUTHORIZED`.
-4. Await ChatGPT independent review of P4-WP019 proposal and Owner decision.
-5. Do NOT implement WP019 without explicit Owner implementation authorization.
-6. Antigravity: STOP / NONE.
+4. Implement locked P4-WP019 scope per PRE1 specification.
+5. Deliver full test suite and validation.
+6. Antigravity: bounded low-credit Execution Plane.
 7. Codex: STOP.
 8. Claude Code: STOP.
 9. Do NOT start WP020.

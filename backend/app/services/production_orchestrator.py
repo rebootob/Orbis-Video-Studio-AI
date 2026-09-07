@@ -217,7 +217,10 @@ class ProductionOrchestrator:
         if active_shot_ids:
             job_rows = (
                 db.query(GenerationJob.job_type, GenerationJob.status, func.count(GenerationJob.id))
-                .filter(GenerationJob.shot_id.in_(active_shot_ids))
+                .filter(
+                    GenerationJob.shot_id.in_(active_shot_ids),
+                    GenerationJob.imported_historical.isnot(True),
+                )
                 .group_by(GenerationJob.job_type, GenerationJob.status)
                 .all()
             )
@@ -237,6 +240,7 @@ class ProductionOrchestrator:
                     db.query(GenerationJob.shot_id)
                     .filter(
                         GenerationJob.shot_id.in_(active_shot_ids),
+                        GenerationJob.imported_historical.isnot(True),
                         func.coalesce(GenerationJob.job_type, "VIDEO") == "VIDEO",
                         GenerationJob.status == "COMPLETED",
                     )
@@ -1891,6 +1895,7 @@ class ProductionOrchestrator:
                 .filter(
                     (Scene.project_id == project_id)
                     | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status == "RECONCILIATION_REQUIRED",
                 )
                 .scalar()
@@ -2103,6 +2108,7 @@ class ProductionOrchestrator:
                 .filter(
                     (Scene.project_id == project_id)
                     | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status == "RECONCILIATION_REQUIRED",
                 )
                 .scalar()
@@ -2232,6 +2238,7 @@ class ProductionOrchestrator:
                 .filter(
                     (Scene.project_id == project_id)
                     | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status == "RECONCILIATION_REQUIRED",
                 )
                 .scalar()
@@ -2361,6 +2368,7 @@ class ProductionOrchestrator:
                 .filter(
                     (Scene.project_id == project_id)
                     | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status == "RECONCILIATION_REQUIRED",
                 )
                 .scalar()
@@ -2478,6 +2486,7 @@ class ProductionOrchestrator:
                 .filter(
                     (Scene.project_id == project_id)
                     | (Scene.story_id == (story.id if story else uuid.uuid4())),
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status == "RECONCILIATION_REQUIRED",
                 )
                 .scalar()
@@ -2576,7 +2585,10 @@ class ProductionOrchestrator:
             if active_shot_ids:
                 job_counts_query = (
                     db.query(GenerationJob.status, func.count(GenerationJob.id))
-                    .filter(GenerationJob.shot_id.in_(active_shot_ids))
+                    .filter(
+                        GenerationJob.shot_id.in_(active_shot_ids),
+                        GenerationJob.imported_historical.isnot(True),
+                    )
                     .group_by(GenerationJob.status)
                     .all()
                 )
@@ -2586,6 +2598,7 @@ class ProductionOrchestrator:
                         db.query(GenerationJob.shot_id)
                         .filter(
                             GenerationJob.shot_id.in_(active_shot_ids),
+                            GenerationJob.imported_historical.isnot(True),
                             GenerationJob.status == "COMPLETED",
                         )
                         .distinct()

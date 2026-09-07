@@ -872,6 +872,19 @@ export const App: React.FC = () => {
             onUnarchiveProject={handleUnarchiveProject}
             onDuplicateProject={handleDuplicateProject}
             onRenameProject={handleRenameProject}
+            onRefreshProjects={loadProjects}
+            onImportSuccess={async (projectId) => {
+              await loadProjects();
+              try {
+                const p = await api.getProject(projectId);
+                if (p) {
+                  setSelectedProject(p);
+                  setActiveTab('storyboard');
+                }
+              } catch (e) {
+                console.error('Failed to open imported project', e);
+              }
+            }}
           />
         </main>
       )}

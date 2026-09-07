@@ -182,4 +182,44 @@ describe('ProjectDashboard', () => {
     expect(screen.queryByTitle('Stage: Story')).not.toBeInTheDocument();
     expect(screen.getByTitle('Stage: Images')).toBeInTheDocument();
   });
+
+  it('renders Import .orbis button and opens ImportProjectModal on click', () => {
+    render(
+      <ProjectDashboard
+        projects={mockProjects}
+        loading={false}
+        onSelectProject={vi.fn()}
+        onOpenNewProjectModal={vi.fn()}
+        onDeleteProject={vi.fn()}
+      />
+    );
+
+    const importBtn = screen.getByTestId('import-project-btn');
+    expect(importBtn).toBeInTheDocument();
+    expect(screen.queryByTestId('import-project-modal')).not.toBeInTheDocument();
+
+    fireEvent.click(importBtn);
+    expect(screen.getByTestId('import-project-modal')).toBeInTheDocument();
+    expect(screen.getByText('Import Project Archive (.orbis)')).toBeInTheDocument();
+  });
+
+  it('renders Export (.orbis) card action and opens ExportProjectModal on click', () => {
+    render(
+      <ProjectDashboard
+        projects={mockProjects}
+        loading={false}
+        onSelectProject={vi.fn()}
+        onOpenNewProjectModal={vi.fn()}
+        onDeleteProject={vi.fn()}
+      />
+    );
+
+    const exportBtn = screen.getByTestId('export-project-proj-1');
+    expect(exportBtn).toBeInTheDocument();
+    expect(screen.queryByTestId('export-project-modal')).not.toBeInTheDocument();
+
+    fireEvent.click(exportBtn);
+    expect(screen.getByTestId('export-project-modal')).toBeInTheDocument();
+    expect(screen.getByText('Export Project Archive (.orbis)')).toBeInTheDocument();
+  });
 });

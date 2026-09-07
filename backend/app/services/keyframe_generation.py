@@ -217,6 +217,7 @@ class KeyframeGenerationService:
             db.query(GenerationJob)
             .filter(
                 GenerationJob.shot_id == shot_id,
+                GenerationJob.imported_historical.isnot(True),
                 GenerationJob.status.in_(ACTIVE_JOB_STATUSES),
             )
             .first()
@@ -362,6 +363,7 @@ class KeyframeGenerationService:
                 db.query(GenerationJob)
                 .filter(
                     GenerationJob.shot_id == shot.id,
+                    GenerationJob.imported_historical.isnot(True),
                     GenerationJob.status.in_(ACTIVE_JOB_STATUSES),
                 )
                 .first()
@@ -774,7 +776,10 @@ class KeyframeGenerationService:
             found_ids = list(shots_by_id.keys())
             job_rows = (
                 db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
-                .filter(GenerationJob.shot_id.in_(found_ids))
+                .filter(
+                    GenerationJob.shot_id.in_(found_ids),
+                    GenerationJob.imported_historical.isnot(True),
+                )
                 .all()
             ) if found_ids else []
 
@@ -939,7 +944,10 @@ class KeyframeGenerationService:
             found_ids = list(shots_by_id.keys())
             job_rows = (
                 db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
-                .filter(GenerationJob.shot_id.in_(found_ids))
+                .filter(
+                    GenerationJob.shot_id.in_(found_ids),
+                    GenerationJob.imported_historical.isnot(True),
+                )
                 .all()
             ) if found_ids else []
 

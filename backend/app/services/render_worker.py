@@ -36,7 +36,7 @@ class CloudRenderWorker:
 
     def process_one_job(self, db: Session) -> bool:
         job = RenderJobService.claim_next_render_job(db, self.worker_id)
-        if not job:
+        if not job or getattr(job, "imported_historical", False) or getattr(job, "execution_disabled", False):
             return False
 
         logger.info(

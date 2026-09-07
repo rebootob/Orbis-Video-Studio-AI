@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Any, TYPE_CHECKING
-from sqlalchemy import String, Text, Float, JSON, DateTime, ForeignKey, Index, text
+from sqlalchemy import String, Text, Float, JSON, DateTime, ForeignKey, Index, text, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -21,6 +21,7 @@ class UsageLedger(Base):
     __tablename__ = "usage_ledger"
     __table_args__ = (
         Index("ix_usage_ledger_project_status", "project_id", "cost_status"),
+        Index("ix_usage_ledger_imported_historical", "imported_historical"),
         Index(
             "uq_usage_ledger_project_idempotency_key",
             "project_id",
@@ -100,6 +101,9 @@ class UsageLedger(Base):
         String(255), nullable=True, index=True
     )
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    imported_historical: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
