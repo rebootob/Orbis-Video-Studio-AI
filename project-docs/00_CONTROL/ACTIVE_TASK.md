@@ -7,23 +7,23 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP018
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
 Status:
 
 ```text
-P4-WP018 — MULTI-OUTPUT & PLATFORM EXPORT PRESETS IMPLEMENTATION IN PROGRESS
+POST-WP018 SYNCHRONIZATION COMPLETE / READY FOR OWNER NEXT-WP AUTHORIZATION
 ```
 
 Current Work Tracking:
 
 ```text
-Active Package: P4-WP018 (Multi-Output & Platform Export Presets)
-Status: IMPLEMENTATION_COMPLETE
-Canonical main HEAD: 96d53c30f0344dc84bb3d9205e5b7bbbde94885b
-Branch: ai/p4-wp018-multi-output-export-presets
-Gate: P4-WP018 / READY FOR CHATGPT REVIEW
+Active Package: NONE
+Status: POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
+Canonical main HEAD: 09e62876543ee7990919beb43600a1c748be545d
+Branch: main
+Gate: POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
 ```
 
 Execution Roles:
@@ -38,7 +38,17 @@ Claude Code = STOP
 
 ---
 
-## Prior Deliveries: WP017, WP016, WP015 & WP014 Closure Truth
+## Prior Deliveries: WP018, WP017, WP016, WP015 & WP014 Closure Truth
+
+- **P4-WP018**: PASS / CLOSED / MERGED
+  - PR: #47
+  - Branch: `ai/p4-wp018-multi-output-export-presets`
+  - PRE1 Reviewed HEAD: `f51694643596acba54447cc0ab36bc8cbfd8dfd5`
+  - PRE1 Merge commit: `96d53c30f0344dc84bb3d9205e5b7bbbde94885b`
+  - Implementation Reviewed HEAD: `fd745def2235fdaa6accf82ea2cb037a4fa42390`
+  - Merge commit: `09e62876543ee7990919beb43600a1c748be545d`
+  - Final Independent Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
+  - Delivered Scope: Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention.
 
 - **P3-WP017**: PASS / CLOSED / MERGED
   - PR: #44
@@ -82,9 +92,11 @@ Claude Code = STOP
 ## Next Allowed Action
 
 1. `ACTIVE_WORK_PACKAGE = NONE`.
-2. `CURRENT_GATE = POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-3. Wait for explicit Owner authorization before starting P4-WP018 or any implementation work.
-4. Antigravity: STOP / NONE.
-5. Codex: STOP.
-6. Claude Code: STOP.
-7. Do NOT start WP018.
+2. `CURRENT_GATE = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+3. `P4-WP019: PROPOSED / NOT AUTHORIZED`.
+4. `P4-WP020: PROPOSED / NOT AUTHORIZED`.
+5. Wait for explicit Owner authorization before starting P4-WP019 PRE1 or any implementation work.
+6. Antigravity: STOP / NONE.
+7. Codex: STOP.
+8. Claude Code: STOP.
+9. Do NOT start WP019.

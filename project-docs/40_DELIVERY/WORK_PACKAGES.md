@@ -222,8 +222,15 @@ Important product locks:
 ### Phase 4 — Multi-Output, Export & Core V1 Release
 
 - **P4-WP018 — Multi-Output & Platform Export Presets**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-  - 16:9 / 9:16 / 1:1 and platform-specific output variants from one master project.
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #47 (Merged into `main` at `09e62876543ee7990919beb43600a1c748be545d`)
+  - **Branch:** `ai/p4-wp018-multi-output-export-presets`
+  - **PRE1 Reviewed HEAD:** `f51694643596acba54447cc0ab36bc8cbfd8dfd5`
+  - **PRE1 Merge Commit:** `96d53c30f0344dc84bb3d9205e5b7bbbde94885b`
+  - **Implementation Reviewed HEAD:** `fd745def2235fdaa6accf82ea2cb037a4fa42390`
+  - **Merge Commit:** `09e62876543ee7990919beb43600a1c748be545d`
+  - **Final Independent Review:** PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
+  - Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention.
 
 - **P4-WP019 — Project Export/Import Archive Package (.orbis)**
   - **Status:** PROPOSED / NOT AUTHORIZED

@@ -7,9 +7,9 @@
 ## State Flags
 
 ```yaml
-PHASE: P3 — Audio, Assembly, QC & Cloud Render
+PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-MAIN_HEAD: 72065b9c29350e54dd7811a00d7198c6765004d1
+MAIN_HEAD: 09e62876543ee7990919beb43600a1c748be545d
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -93,12 +93,21 @@ P3-WP017_REVIEWED_HEAD: 72d842936a7812aabec8df6b948930a0e296a553
 P3-WP017_MERGE_COMMIT: 72065b9c29350e54dd7811a00d7198c6765004d1
 P3-WP017_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
 
-P4-WP018: IMPLEMENTATION_COMPLETE
+P4-WP018: PASS / CLOSED / MERGED
+P4-WP018_PR: "#47"
 P4-WP018_BRANCH: ai/p4-wp018-multi-output-export-presets
+P4-WP018_PRE1_REVIEWED_HEAD: f51694643596acba54447cc0ab36bc8cbfd8dfd5
+P4-WP018_PRE1_MERGE_COMMIT: 96d53c30f0344dc84bb3d9205e5b7bbbde94885b
+P4-WP018_IMPLEMENTATION_REVIEWED_HEAD: fd745def2235fdaa6accf82ea2cb037a4fa42390
+P4-WP018_MERGE_COMMIT: 09e62876543ee7990919beb43600a1c748be545d
+P4-WP018_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
 P4-WP018_PROPOSAL: project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md
 
-ACTIVE_WORK_PACKAGE: P4-WP018
-CURRENT_GATE: P4-WP018 / READY FOR CHATGPT REVIEW
+P4-WP019: PROPOSED / NOT AUTHORIZED
+P4-WP020: PROPOSED / NOT AUTHORIZED
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -158,6 +167,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
 | Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
 | Cloud Render Workers (P3-WP017) | PASS / CLOSED / MERGED | RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering. PR #44 merged into main at 72065b9c29350e54dd7811a00d7198c6765004d1. |
+| Multi-Output & Platform Export Presets (P4-WP018) | PASS / CLOSED / MERGED | Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention. PR #47 merged into main at 09e62876543ee7990919beb43600a1c748be545d. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -205,14 +215,16 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP017 closed unless a proven regression exists.
+1. Keep WP001-WP018 closed unless a proven regression exists.
 2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-4. Await explicit Owner authorization before starting P4-WP018 (Multi-Output & Platform Export Presets) or any future Work Package.
-5. Antigravity = STOP / NONE until next WP authorization.
-6. Codex = STOP.
-7. Claude Code = STOP.
-8. Do NOT merge without Owner approval.
-9. Do NOT start WP018.
+3. `CURRENT_GATE = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+4. `P4-WP019 = PROPOSED / NOT AUTHORIZED`.
+5. `P4-WP020 = PROPOSED / NOT AUTHORIZED`.
+6. Await explicit Owner authorization before starting P4-WP019 PRE1 or any implementation work.
+7. Antigravity = STOP / NONE until next WP authorization.
+8. Codex = STOP.
+9. Claude Code = STOP.
+10. Do NOT merge without Owner approval.
+11. Do NOT start WP019.
 
 Live GitHub/repository truth newer than this document is authoritative.
