@@ -626,6 +626,7 @@ def test_012_production_orchestrator_and_staged_approvals_lifecycle(tmp_path, mo
 
 
 def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
+    """Test 019 migration lifecycle: upgrade, blocked downgrade on active variants, historical completed downgrade, and safe downgrade."""
     import uuid
     from datetime import datetime, timezone
     from sqlalchemy import create_engine, MetaData, Table, select, text, Uuid
