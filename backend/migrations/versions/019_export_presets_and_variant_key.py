@@ -77,6 +77,8 @@ def downgrade():
 
     # Revert index swap if safe
     op.drop_index("uq_render_jobs_active_variant", table_name="render_jobs")
+    op.drop_index("ix_render_jobs_batch_id", table_name="render_jobs")
+    op.drop_index("ix_render_jobs_render_variant_key", table_name="render_jobs")
     op.create_index(
         "uq_render_jobs_active_timeline",
         "render_jobs",
@@ -87,8 +89,6 @@ def downgrade():
     )
 
     with op.batch_alter_table("render_jobs") as batch_op:
-        batch_op.drop_index("ix_render_jobs_batch_id")
-        batch_op.drop_index("ix_render_jobs_render_variant_key")
         batch_op.drop_column("batch_id")
         batch_op.drop_column("render_variant_key")
 

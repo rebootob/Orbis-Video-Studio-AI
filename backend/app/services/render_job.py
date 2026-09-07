@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Tuple, Dict, Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, update
 
 from app.models.project import Project
 from app.models.assembly import AssemblyTimeline
@@ -256,8 +256,11 @@ class RenderJobService:
         if not job:
             return None
 
+        candidate_status = job.status
+        candidate_token = job.claim_token
+
         # Handle expired lease transition if candidate was previously CLAIMED/RUNNING under the exact same row lock
-        if job.status in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value):
+        if candidate_status in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value):
             if not job.current_usage_ledger_id:
                 job.status = RenderJobStatus.RECONCILIATION_REQUIRED.value
                 job.error_message = "Expired lease missing current_usage_ledger_id reference"
@@ -332,15 +335,43 @@ class RenderJobService:
                 db.rollback()
                 return None
 
-        # Lock candidate and update claim token
+        # Lock candidate and update claim token atomically
         token = secrets.token_hex(16)
-        job.status = RenderJobStatus.CLAIMED.value
-        job.claimed_by = worker_id
-        job.claim_token = token
-        job.claim_expires_at = now + timedelta(seconds=lease_duration_seconds)
-        if not job.started_at:
-            job.started_at = now
-        job.updated_at = now
+        new_expires_at = now + timedelta(seconds=lease_duration_seconds)
+        new_started_at = job.started_at or now
+
+        if candidate_status == RenderJobStatus.QUEUED.value:
+            res = db.execute(
+                update(RenderJob)
+                .where(RenderJob.id == job.id, RenderJob.status == RenderJobStatus.QUEUED.value)
+                .values(
+                    status=RenderJobStatus.CLAIMED.value,
+                    claimed_by=worker_id,
+                    claim_token=token,
+                    claim_expires_at=new_expires_at,
+                    started_at=new_started_at,
+                    updated_at=now,
+                )
+            )
+        else:
+            res = db.execute(
+                update(RenderJob)
+                .where(RenderJob.id == job.id, RenderJob.claim_token == candidate_token)
+                .values(
+                    status=RenderJobStatus.CLAIMED.value,
+                    claimed_by=worker_id,
+                    claim_token=token,
+                    claim_expires_at=new_expires_at,
+                    started_at=new_started_at,
+                    current_usage_ledger_id=job.current_usage_ledger_id,
+                    retry_count=job.retry_count,
+                    updated_at=now,
+                )
+            )
+
+        if res.rowcount == 0:
+            db.rollback()
+            return None
 
         db.commit()
         db.refresh(job)

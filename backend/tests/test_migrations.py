@@ -654,21 +654,21 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
     rj_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
 
-    projects_tbl = Table("projects", meta, autoload_with=engine)
+    projects_tbl = meta.tables["projects"]
     projects_tbl.c.id.type = Uuid()
-    timelines_tbl = Table("assembly_timelines", meta, autoload_with=engine)
+    timelines_tbl = meta.tables["assembly_timelines"]
     timelines_tbl.c.id.type = Uuid()
     timelines_tbl.c.project_id.type = Uuid()
-    qc_runs_tbl = Table("qc_runs", meta, autoload_with=engine)
+    qc_runs_tbl = meta.tables["qc_runs"]
     qc_runs_tbl.c.id.type = Uuid()
     qc_runs_tbl.c.project_id.type = Uuid()
     qc_runs_tbl.c.timeline_id.type = Uuid()
-    approvals_tbl = Table("production_approvals", meta, autoload_with=engine)
+    approvals_tbl = meta.tables["production_approvals"]
     approvals_tbl.c.id.type = Uuid()
     approvals_tbl.c.project_id.type = Uuid()
     approvals_tbl.c.timeline_id.type = Uuid()
     approvals_tbl.c.qc_run_id.type = Uuid()
-    render_jobs_tbl = Table("render_jobs", meta, autoload_with=engine)
+    render_jobs_tbl = meta.tables["render_jobs"]
     render_jobs_tbl.c.id.type = Uuid()
     render_jobs_tbl.c.project_id.type = Uuid()
     render_jobs_tbl.c.timeline_id.type = Uuid()
@@ -678,7 +678,7 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
         conn.execute(projects_tbl.insert().values(id=p_id, title="P19", status="FINAL_REVIEW", created_at=now, updated_at=now))
         conn.execute(timelines_tbl.insert().values(id=t_id, project_id=p_id, version=1, status="APPROVED", created_at=now, updated_at=now))
         conn.execute(qc_runs_tbl.insert().values(id=qc_id, project_id=p_id, timeline_id=t_id, timeline_version=1, status="PASSED", created_at=now, updated_at=now))
-        conn.execute(approvals_tbl.insert().values(id=app_id, project_id=p_id, timeline_id=t_id, timeline_version=1, qc_run_id=qc_id, status="APPROVED", created_at=now, approved_at=now))
+        conn.execute(approvals_tbl.insert().values(id=app_id, project_id=p_id, timeline_id=t_id, timeline_version=1, qc_run_id=qc_id, status="APPROVED", approved_at=now))
         conn.execute(render_jobs_tbl.insert().values(
             id=rj_id,
             project_id=p_id,
