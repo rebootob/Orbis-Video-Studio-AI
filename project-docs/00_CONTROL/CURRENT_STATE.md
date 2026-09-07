@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P3 — Audio, Assembly, QC & Cloud Render
 CANONICAL_BRANCH: main
-MAIN_HEAD: 556ca1c2566c154e5f10559e74907896bbf3b797
+MAIN_HEAD: 72065b9c29350e54dd7811a00d7198c6765004d1
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -85,12 +85,18 @@ P3-WP016_REVIEWED_HEAD: 5def41c8bba9b3004b7007f671899e045438a8c4
 P3-WP016_MERGE_COMMIT: 43e5221e7f39a19e8c6fde54c450324aa8333059
 P3-WP016_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127769635)
 
-P3-WP017: IN_PROGRESS
+P3-WP017: PASS / CLOSED / MERGED
+P3-WP017_PR: "#44"
 P3-WP017_BRANCH: ai/p3-wp017-cloud-render-workers
 P3-WP017_STARTING_HEAD: 556ca1c2566c154e5f10559e74907896bbf3b797
+P3-WP017_REVIEWED_HEAD: 72d842936a7812aabec8df6b948930a0e296a553
+P3-WP017_MERGE_COMMIT: 72065b9c29350e54dd7811a00d7198c6765004d1
+P3-WP017_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
 
-ACTIVE_WORK_PACKAGE: P3-WP017
-CURRENT_GATE: P3-WP017 / IMPLEMENTATION IN PROGRESS
+P4-WP018: PROPOSED / NOT AUTHORIZED
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -149,6 +155,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Core V1 Audio Production Automation (P3-WP014) | PASS / CLOSED / MERGED | Provider-neutral AudioProvider boundary, 3D audio taxonomy, AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration. PR #36 merged at f50e2568d197b3c4bab5e4303f31af817db6e1bf. |
 | Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
 | Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
+| Cloud Render Workers (P3-WP017) | PASS / CLOSED / MERGED | RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering. PR #44 merged into main at 72065b9c29350e54dd7811a00d7198c6765004d1. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -196,14 +203,14 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP016 closed unless a proven regression exists.
+1. Keep WP001-WP017 closed unless a proven regression exists.
 2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-4. Await explicit Owner authorization before starting P3-WP017 (Cloud Render Workers) or any future Work Package.
-5. Antigravity = bounded low-credit Execution Plane when authorized.
+3. `CURRENT_GATE = POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+4. Await explicit Owner authorization before starting P4-WP018 (Production Export & Deliverables Engine) or any future Work Package.
+5. Antigravity = STOP / NONE until next WP authorization.
 6. Codex = STOP.
 7. Claude Code = STOP.
 8. Do NOT merge without Owner approval.
-9. Do NOT start WP017.
+9. Do NOT start WP018.
 
 Live GitHub/repository truth newer than this document is authoritative.
