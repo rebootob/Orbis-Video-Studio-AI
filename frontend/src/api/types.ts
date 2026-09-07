@@ -514,3 +514,87 @@ export interface TimelineCheckpoint {
   actor: string;
   created_at: string;
 }
+
+export type QCSeverity = 'BLOCKER' | 'WARNING' | 'INFO';
+export type WarningDecisionType = 'UNDECIDED' | 'FIX_REQUIRED' | 'ACCEPTED_WITH_REASON';
+
+export interface WarningDecision {
+  id: string;
+  project_id: string;
+  qc_run_id: string;
+  timeline_id: string;
+  finding_id: string;
+  decision: WarningDecisionType;
+  reason?: string | null;
+  actor: string;
+  decided_at: string;
+}
+
+export interface QCFinding {
+  id: string;
+  project_id: string;
+  qc_run_id: string;
+  timeline_id: string;
+  rule_code: string;
+  severity: QCSeverity;
+  message: string;
+  why_it_matters?: string | null;
+  recommended_fix?: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
+  target_label?: string | null;
+  action_type?: string | null;
+  current_decision?: WarningDecision | null;
+  decision_count?: number;
+  created_at: string;
+}
+
+export interface QCRun {
+  id: string;
+  project_id: string;
+  timeline_id: string;
+  timeline_version: number;
+  status: 'PENDING' | 'RUNNING' | 'PASSED' | 'BLOCKED' | 'ERROR';
+  blocker_count: number;
+  warning_count: number;
+  info_count: number;
+  actor: string;
+  created_at: string;
+  findings: QCFinding[];
+  decisions: WarningDecision[];
+}
+
+export interface QCSimpleSummary {
+  project_id: string;
+  active_timeline_id?: string | null;
+  active_timeline_version?: number | null;
+  active_timeline_status?: string | null;
+  latest_qc_run?: QCRun | null;
+  has_active_qc: boolean;
+  can_approve: boolean;
+  blocker_count: number;
+  pending_warning_count: number;
+  accepted_warning_count: number;
+  summary_message: string;
+}
+
+export interface ApprovalRecord {
+  id: string;
+  project_id: string;
+  timeline_id: string;
+  qc_run_id: string;
+  timeline_version: number;
+  status: string;
+  approved_by: string;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface QCHistoryResponse {
+  project_id: string;
+  total_count: number;
+  offset: number;
+  limit: number;
+  qc_runs: QCRun[];
+  approvals: ApprovalRecord[];
+}

@@ -36,6 +36,12 @@ from app.models.assembly import (
     TimelineCheckpoint,
     TimelineAudit,
 )
+from app.models.qc import (
+    QCRun,
+    QCFinding,
+    WarningDecision,
+    ApprovalRecord,
+)
 
 __all__ = [
     "Base",
@@ -73,5 +79,9 @@ __all__ = [
     "AssemblyShotPlacement",
     "TimelineCheckpoint",
     "TimelineAudit",
+    "QCRun",
+    "QCFinding",
+    "WarningDecision",
+    "ApprovalRecord",
 ]
 
