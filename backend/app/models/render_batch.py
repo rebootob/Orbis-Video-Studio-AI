@@ -57,5 +57,5 @@ class RenderBatch(Base):
     project: Mapped["Project"] = relationship("Project")
     timeline: Mapped["AssemblyTimeline"] = relationship("AssemblyTimeline")
     child_jobs: Mapped[List["RenderJob"]] = relationship(
-        "RenderJob", back_populates="batch", cascade="all, delete-orphan"
+        "RenderJob", back_populates="batch"
     )

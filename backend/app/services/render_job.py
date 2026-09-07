@@ -20,7 +20,7 @@ from app.services.budget import BudgetService
 from app.services.export_preset import ExportPresetService
 
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm.attributes import flag_modified
 
 ALLOWED_WP017_RENDER_PROFILES = ("MASTER", "MASTER_HD")
@@ -1059,6 +1059,37 @@ class RenderJobService:
             db.refresh(batch)
             return batch
 
+        except IntegrityError as ie:
+            sp.rollback()
+            active_jobs = db.query(RenderJob).filter(
+                RenderJob.project_id == project_id,
+                RenderJob.timeline_id == timeline.id,
+                RenderJob.status.in_([
+                    RenderJobStatus.QUEUED.value,
+                    RenderJobStatus.CLAIMED.value,
+                    RenderJobStatus.RUNNING.value,
+                    RenderJobStatus.RECONCILIATION_REQUIRED.value,
+                ]),
+            ).all()
+            active_variant_map = {j.render_variant_key: j for j in active_jobs}
+            active_conflicts = [v_key for v_key in preset_variant_keys if v_key in active_variant_map]
+            if active_conflicts:
+                matching_batch_ids = {active_variant_map[vk].batch_id for vk in active_conflicts if active_variant_map[vk].batch_id}
+                if len(matching_batch_ids) == 1:
+                    target_batch_id = list(matching_batch_ids)[0]
+                    existing_batch = db.get(RenderBatch, target_batch_id)
+                    if existing_batch:
+                        return existing_batch
+                first_conflict = active_conflicts[0]
+                status_str = active_variant_map[first_conflict].status
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Active render job for variant '{first_conflict}' already exists in state '{status_str}'. Cannot create duplicate batch while variant is active.",
+                )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Concurrent export batch submission conflict on active variant.",
+            )
         except Exception:
             sp.rollback()
             raise

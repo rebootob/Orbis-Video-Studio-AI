@@ -399,7 +399,9 @@ def test_conflict_active_variant_raises_400(db_session: Session):
 def test_concurrent_same_preset_submission(tmp_path):
     import threading
     import os
-    from sqlalchemy import create_engine, event
+    from fastapi import HTTPException
+    from sqlalchemy.exc import IntegrityError, OperationalError, DBAPIError
+    from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from app.db.base_class import Base
 
@@ -427,14 +429,26 @@ def test_concurrent_same_preset_submission(tmp_path):
         local_db = SessionLocal()
         try:
             barrier.wait()
-            batch = RenderJobService.submit_export_batch(
-                db=local_db,
-                project_id=proj_id,
-                preset_ids=["YT_STANDARD_1080P"],
-            )
-            results.append(("SUCCESS", batch.id))
-        except Exception as e:
-            results.append(("FAILED", str(e)))
+            for attempt in range(20):
+                try:
+                    batch = RenderJobService.submit_export_batch(
+                        db=local_db,
+                        project_id=proj_id,
+                        preset_ids=["YT_STANDARD_1080P"],
+                    )
+                    results.append(("SUCCESS", batch.id, None))
+                    break
+                except OperationalError as oe:
+                    local_db.rollback()
+                    if "database is locked" in str(oe).lower():
+                        import time
+                        time.sleep(0.05)
+                        continue
+                    results.append(("ERROR", None, oe))
+                    break
+                except Exception as e:
+                    results.append(("ERROR", None, e))
+                    break
         finally:
             local_db.close()
 
@@ -446,17 +460,96 @@ def test_concurrent_same_preset_submission(tmp_path):
     t1.join()
     t2.join()
 
+    # 1. Assert NO raw DB exception leaks
+    for status, batch_id, exc in results:
+        if status == "ERROR":
+            assert isinstance(exc, HTTPException), f"Caller received unexpected non-HTTP exception: {type(exc)} ({exc})"
+            assert exc.status_code == 400, f"Expected HTTP 400, got status_code {exc.status_code}"
+            assert not isinstance(exc, (IntegrityError, OperationalError, DBAPIError)), f"Leaked raw DB error: {exc}"
+
+    # 2. Assert deterministic caller outcomes:
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    assert len(successes) >= 1, f"Expected at least one thread to succeed, got: {results}"
+    if len(successes) == 2:
+        assert successes[0][1] == successes[1][1], "Concurrent submissions produced conflicting batch IDs"
+
+    # 3. Assert DB authority state
     verify_db = SessionLocal()
     batches = verify_db.query(RenderBatch).filter(RenderBatch.project_id == proj_id).all()
     jobs = verify_db.query(RenderJob).filter(RenderJob.project_id == proj_id).all()
     ledgers = verify_db.query(UsageLedger).filter(UsageLedger.project_id == proj_id).all()
     verify_db.close()
 
-    assert len(batches) == 1
-    assert len(jobs) == 1
-    assert len(ledgers) == 1
+    assert len(batches) == 1, f"Expected exactly 1 RenderBatch, found {len(batches)}"
+    assert len(jobs) == 1, f"Expected exactly 1 RenderJob, found {len(jobs)}"
+    assert len(ledgers) == 1, f"Expected exactly 1 UsageLedger, found {len(ledgers)}"
+    assert jobs[0].batch_id == batches[0].id, "RenderJob batch_id relationship must match canonical RenderBatch"
     assert jobs[0].render_variant_key.startswith("YT_STANDARD_1080P")
     assert jobs[0].current_usage_ledger_id == ledgers[0].id
+
+
+def test_render_batch_deletion_preserves_jobs_ledgers_and_assets(db_session: Session):
+    """Test full history retention when RenderBatch is deleted.
+    Removing or detaching RenderBatch must NOT delete historical RenderJob, UsageLedger, or Asset rows.
+    batch_id on RenderJob becomes NULL (ON DELETE SET NULL).
+    """
+    project, timeline, approval = create_approved_project_context(db_session)
+    batch = RenderJobService.submit_export_batch(
+        db=db_session,
+        project_id=project.id,
+        preset_ids=["YT_STANDARD_1080P"],
+    )
+    batch_id = batch.id
+
+    jobs = db_session.query(RenderJob).filter(RenderJob.batch_id == batch_id).all()
+    assert len(jobs) == 1
+    job = jobs[0]
+    job_id = job.id
+    ledger_id = job.current_usage_ledger_id
+
+    # Create associated Asset linked to job output
+    asset = Asset(
+        project_id=project.id,
+        name="export_yt_standard.mp4",
+        original_filename="export_yt_standard.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1048576,
+        checksum_sha256="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        storage_bucket="orbis-exports",
+        storage_key=f"exports/{project.id}/{job_id}.mp4",
+    )
+    db_session.add(asset)
+    db_session.flush()
+
+    job.output_asset_id = asset.id
+    db_session.commit()
+
+    asset_id = asset.id
+
+    # Delete RenderBatch through ORM path
+    db_session.delete(batch)
+    db_session.commit()
+    db_session.expire_all()
+
+    # Assert RenderBatch is deleted
+    assert db_session.get(RenderBatch, batch_id) is None
+
+    # Assert child RenderJob STILL EXISTS and batch_id is NULL
+    persisted_job = db_session.get(RenderJob, job_id)
+    assert persisted_job is not None
+    assert persisted_job.batch_id is None
+    assert persisted_job.render_variant_key.startswith("YT_STANDARD_1080P")
+
+    # Assert UsageLedger STILL EXISTS
+    persisted_ledger = db_session.get(UsageLedger, ledger_id)
+    assert persisted_ledger is not None
+    assert persisted_ledger.render_job_id == job_id
+
+    # Assert Asset STILL EXISTS
+    persisted_asset = db_session.get(Asset, asset_id)
+    assert persisted_asset is not None
+    assert persisted_asset.id == asset.id
 
 
 def test_concurrent_batch_budget_safety(tmp_path):

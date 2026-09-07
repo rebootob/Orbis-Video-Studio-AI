@@ -777,6 +777,12 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
     meta3.reflect(bind=engine)
     assert "render_batches" not in meta3.tables
     assert "render_variant_key" not in meta3.tables["render_jobs"].c
+    from sqlalchemy import inspect
+    insp = inspect(engine)
+    indexes = insp.get_indexes("render_jobs")
+    active_idx = next((idx for idx in indexes if idx["name"] == "uq_render_jobs_active_timeline"), None)
+    assert active_idx is not None, "uq_render_jobs_active_timeline index must be restored on downgrade"
+    assert active_idx["column_names"] == ["project_id", "timeline_id"]
 
     # 5. B. SAFE DOWNGRADE & RE-UPGRADE
     command.upgrade(cfg, "head")
