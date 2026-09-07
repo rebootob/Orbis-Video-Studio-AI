@@ -1,5 +1,6 @@
 import uuid
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -628,3 +629,131 @@ def test_21_bounded_approval_history(db_session: Session, test_project_context):
     # Enforces max limit cap at 100
     response_cap = client.get(f"/api/v1/projects/{project.id}/qc/approvals?limit=150")
     assert response_cap.status_code == 422 or len(response_cap.json()) <= 100
+
+
+def test_22_qc_service_validation_does_not_mutate_project_status(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    # Call validation alone
+    timeline, run = QCService.validate_final_approval(db_session, project.id)
+    assert timeline.id == ctx["timeline"].id
+    assert run.id == qc_run.id
+
+    # Verify project status was NOT mutated by validation alone
+    db_session.refresh(project)
+    assert project.status == "FINAL_REVIEW"
+
+
+def test_23_invalid_from_state_fails_closed_in_orchestrator(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "DRAFT"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    # Attempt final approval from DRAFT status
+    with pytest.raises(HTTPException) as exc_info:
+        ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert exc_info.value.status_code == 400
+    assert "final review stage" in exc_info.value.detail.lower() or "cannot approve" in exc_info.value.detail.lower()
+
+    # Verify project status remains DRAFT
+    db_session.refresh(project)
+    assert project.status == "DRAFT"
+
+
+def test_24_undecided_warnings_evaluates_to_running_not_warnings_pending(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    warning_finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_UNDECIDED_WARNING",
+        severity="WARNING",
+        message="Undecided warning.",
+    )
+    db_session.add(warning_finding)
+    qc_run.warning_count += 1
+    qc_run.status = "RUNNING"
+    db_session.commit()
+
+    db_session.refresh(qc_run)
+    assert qc_run.status == "RUNNING"
+    assert qc_run.status != "WARNINGS_PENDING"
+
+
+def test_25_qc_history_summary_does_not_return_all_findings(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for i in range(10):
+        db_session.add(
+            QCFinding(
+                id=uuid.uuid4(),
+                project_id=project.id,
+                qc_run_id=qc_run.id,
+                timeline_id=qc_run.timeline_id,
+                rule_code=f"RULE_{i}",
+                severity="WARNING",
+                message=f"Finding message {i}",
+            )
+        )
+    db_session.commit()
+
+    history = QCService.get_qc_history(db_session, project.id)
+    assert history.total_count >= 1
+    latest_history_run = [r for r in history.qc_runs if r.id == qc_run.id][0]
+    # Findings list in history summary must be empty to avoid N+1 and heavy payloads
+    assert len(latest_history_run.findings) == 0
+
+
+def test_26_paginated_findings_endpoint_and_security_check(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding_ids = []
+    for i in range(15):
+        fid = uuid.uuid4()
+        finding_ids.append(fid)
+        db_session.add(
+            QCFinding(
+                id=fid,
+                project_id=project.id,
+                qc_run_id=qc_run.id,
+                timeline_id=qc_run.timeline_id,
+                rule_code=f"FINDING_RULE_{i:02d}",
+                severity="WARNING",
+                message=f"Test finding {i}",
+            )
+        )
+    db_session.commit()
+
+    # Query findings endpoint via API client
+    res = client.get(f"/api/v1/projects/{project.id}/qc/runs/{qc_run.id}/findings?limit=5")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["findings"]) == 5
+    assert data["total_count"] >= 15
+
+    # Cross-project security check: wrong project ID fails 404
+    wrong_project_id = uuid.uuid4()
+    res_sec = client.get(f"/api/v1/projects/{wrong_project_id}/qc/runs/{qc_run.id}/findings")
+    assert res_sec.status_code == 404

@@ -552,7 +552,7 @@ export interface QCRun {
   project_id: string;
   timeline_id: string;
   timeline_version: number;
-  status: 'RUNNING' | 'PASSED' | 'WARNINGS_PENDING' | 'BLOCKED';
+  status: 'PENDING' | 'RUNNING' | 'PASSED' | 'BLOCKED' | 'ERROR';
   blocker_count: number;
   warning_count: number;
   info_count: number;

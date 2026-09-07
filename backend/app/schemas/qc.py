@@ -129,3 +129,10 @@ class QCHistoryPagination(BaseModel):
     total_count: int
     offset: int
     limit: int
+
+
+class QCFindingPagination(BaseModel):
+    findings: List[QCFindingRead]
+    total_count: int
+    offset: int
+    limit: int

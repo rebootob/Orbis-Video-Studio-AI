@@ -26,6 +26,9 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
   const [qcOffset, setQcOffset] = useState<number>(0);
   const qcLimit = 10;
   const [loadingQcHistory, setLoadingQcHistory] = useState<boolean>(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [runFindings, setRunFindings] = useState<Record<string, any[]>>({});
+  const [loadingFindings, setLoadingFindings] = useState<boolean>(false);
 
   const fetchQCHistory = async () => {
     setLoadingQcHistory(true);
@@ -40,6 +43,27 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
       console.error('Failed to fetch QC history:', err);
     } finally {
       setLoadingQcHistory(false);
+    }
+  };
+
+  const toggleRunFindings = async (runId: string) => {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null);
+      return;
+    }
+    setExpandedRunId(runId);
+    if (!runFindings[runId]) {
+      setLoadingFindings(true);
+      try {
+        if (apiClient && typeof apiClient.getQCRunFindings === 'function') {
+          const res = await apiClient.getQCRunFindings(project.id, runId, 0, 50);
+          setRunFindings((prev) => ({ ...prev, [runId]: res?.findings || [] }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch run findings:', err);
+      } finally {
+        setLoadingFindings(false);
+      }
     }
   };
 
@@ -346,29 +370,49 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
                   </div>
                 </div>
 
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '12px', marginBottom: '8px' }}>
-                  <span>Blockers: {run.blocker_count}</span>
-                  <span>Warnings: {run.warning_count}</span>
-                  <span>Decisions: {run.decisions?.length || 0}</span>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <span>Blockers: {run.blocker_count}</span>
+                    <span>Warnings: {run.warning_count}</span>
+                  </div>
+                  <button
+                    onClick={() => toggleRunFindings(run.id)}
+                    style={{ fontSize: '0.7rem', color: '#818cf8', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                    data-testid={`toggle-run-findings-${run.id}`}
+                  >
+                    {expandedRunId === run.id ? 'Hide Details' : 'View Details & Findings'}
+                  </button>
                 </div>
 
-                {/* Warning Decisions */}
-                {run.decisions && run.decisions.length > 0 && (
+                {/* Expanded Findings & Decisions */}
+                {expandedRunId === run.id && (
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-tertiary)' }}>Recorded Warning Decisions:</div>
-                    {run.decisions.map((dec) => (
-                      <div key={dec.id} style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: '4px', backgroundColor: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                        <div>
-                          <span style={{ fontWeight: 600, color: dec.decision === 'ACCEPTED_WITH_REASON' ? '#22c55e' : '#ef4444' }}>
-                            {dec.decision}:
-                          </span>{' '}
-                          {dec.reason || 'No reason provided'}
+                    {loadingFindings ? (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading findings...</div>
+                    ) : (runFindings[run.id] || []).length === 0 ? (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No detailed findings for this run.</div>
+                    ) : (
+                      (runFindings[run.id] || []).map((f: any) => (
+                        <div key={f.id} style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: '4px', backgroundColor: 'var(--bg-subtle)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, color: f.severity === 'BLOCKER' ? '#ef4444' : '#eab308' }}>
+                              [{f.severity}] {f.rule_code}
+                            </span>
+                            {f.current_decision && (
+                              <span style={{ fontSize: '0.7rem', fontWeight: 600, color: f.current_decision.decision === 'ACCEPTED_WITH_REASON' ? '#22c55e' : '#ef4444' }}>
+                                {f.current_decision.decision}
+                              </span>
+                            )}
+                          </div>
+                          <div>{f.message}</div>
+                          {f.current_decision?.reason && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                              Reason: {f.current_decision.reason} (by {f.current_decision.actor})
+                            </div>
+                          )}
                         </div>
-                        <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                          by {dec.actor} at {new Date(dec.decided_at).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </div>

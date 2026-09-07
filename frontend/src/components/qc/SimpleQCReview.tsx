@@ -156,7 +156,7 @@ export const SimpleQCReview: React.FC<SimpleQCReviewProps> = ({
         </span>
       );
     }
-    if (status === 'WARNINGS_PENDING') {
+    if (status === 'RUNNING') {
       return (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: 600, backgroundColor: 'rgba(234, 179, 8, 0.15)', color: '#eab308' }}>
           <AlertTriangle size={14} /> Warnings Pending Review

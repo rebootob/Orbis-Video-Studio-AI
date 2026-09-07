@@ -738,6 +738,10 @@ export const api = {
     return request<QCHistoryResponse>(`/projects/${projectId}/qc/history?offset=${offset}&limit=${limit}`);
   },
 
+  async getQCRunFindings(projectId: string, runId: string, offset: number = 0, limit: number = 50): Promise<any> {
+    return request<any>(`/projects/${projectId}/qc/runs/${runId}/findings?offset=${offset}&limit=${limit}`);
+  },
+
   async recordWarningDecision(
     projectId: string,
     findingId: string,

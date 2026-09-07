@@ -96,7 +96,7 @@ describe('SimpleQCReview Component', () => {
       project_id: 'proj-1',
       timeline_id: 'tl-1',
       timeline_version: 1,
-      status: 'WARNINGS_PENDING',
+      status: 'RUNNING',
       blocker_count: 0,
       warning_count: 1,
       info_count: 0,

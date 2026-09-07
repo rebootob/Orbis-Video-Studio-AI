@@ -13,6 +13,7 @@ from app.schemas.qc import (
     FinalApprovalCreate,
     ApprovalRecordRead,
     QCHistoryPagination,
+    QCFindingPagination,
 )
 from app.services.qc import QCService
 
@@ -47,6 +48,20 @@ def get_qc_history(
 ):
     """Get bounded, paginated list of historical QC runs and warning decisions."""
     return QCService.get_qc_history(db=db, project_id=project_id, offset=offset, limit=limit)
+
+
+@router.get("/runs/{run_id}/findings", response_model=QCFindingPagination)
+def get_qc_run_findings(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Get bounded, paginated list of findings for a specific QC run with set-based decision mapping."""
+    return QCService.get_qc_run_findings(
+        db=db, project_id=project_id, run_id=run_id, offset=offset, limit=limit
+    )
 
 
 @router.post("/findings/{finding_id}/decision", response_model=WarningDecisionRead)

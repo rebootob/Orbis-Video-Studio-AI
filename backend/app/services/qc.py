@@ -22,6 +22,7 @@ from app.schemas.qc import (
     QCRunSummaryRead,
     ApprovalRecordRead,
     QCHistoryPagination,
+    QCFindingPagination,
 )
 from app.services.assembly import AssemblyService
 from app.services.production_orchestrator import ProductionOrchestrator, OrchestrationActionResult
@@ -457,22 +458,21 @@ class QCService:
             elif all_accepted:
                 qc_run.status = "PASSED"
             else:
-                qc_run.status = "WARNINGS_PENDING"
+                qc_run.status = "RUNNING"
 
         db.commit()
         db.refresh(target_dec)
         return target_dec
 
     @classmethod
-    def approve_production(
+    def validate_final_approval(
         cls,
         db: Session,
         project_id: uuid.UUID,
         timeline_id: Optional[uuid.UUID] = None,
         qc_run_id: Optional[uuid.UUID] = None,
-        notes: Optional[str] = None,
-        actor: str = "USER",
-    ) -> ApprovalRecord:
+    ) -> Tuple[AssemblyTimeline, QCRun]:
+        """Validate eligibility for final production approval without mutating project status."""
         project = db.get(Project, project_id)
         if not project:
             raise HTTPException(
@@ -523,7 +523,7 @@ class QCService:
                 detail=f"Cannot approve production while {latest_qc.blocker_count} BLOCKER finding(s) exist: {'; '.join(blocker_messages[:3])}",
             )
 
-        # 2. Check Warning Decisions: EVERY_WARNING_REQUIRES_USER_DECISION and FIX_REQUIRED BLOCKS APPROVAL!
+        # 2. Check Warning Decisions: EVERY WARNING REQUIRES USER DECISION and FIX_REQUIRED BLOCKS APPROVAL!
         warning_findings = [f for f in latest_qc.findings if f.severity == "WARNING"]
         decided_map = {wd.finding_id: wd for wd in latest_qc.decisions}
 
@@ -541,43 +541,27 @@ class QCService:
                 detail=f"Cannot approve production: {len(fix_required)} warning(s) are marked FIX_REQUIRED. Resolve these issues and re-evaluate QC before attempting approval.",
             )
 
-        # Capture actual from_state BEFORE any status mutation
-        from_state = project.status or "FINAL_REVIEW"
+        return active_timeline, latest_qc
 
-        # Create Approval Record
-        approval = ApprovalRecord(
-            id=uuid.uuid4(),
-            project_id=project_id,
-            timeline_id=active_timeline.id,
-            timeline_version=active_timeline.version,
-            qc_run_id=latest_qc.id,
-            status="APPROVED",
-            actor=actor,
-            notes=notes,
-            approved_at=utc_now(),
-        )
-        db.add(approval)
-
-        active_timeline.status = "APPROVED"
-
-        # Transition project state via Canonical Production Orchestrator
-        target_state = "COMPLETED"
-        ProductionOrchestrator.record_audit(
+    @classmethod
+    def approve_production(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        timeline_id: Optional[uuid.UUID] = None,
+        qc_run_id: Optional[uuid.UUID] = None,
+        notes: Optional[str] = None,
+        actor: str = "USER",
+    ) -> ApprovalRecord:
+        """Forward final production approval to canonical ProductionOrchestrator workflow owner."""
+        return ProductionOrchestrator.approve_final_production(
             db=db,
             project_id=project_id,
-            from_state=from_state,
-            to_state=target_state,
-            action="APPROVE_FINAL",
+            timeline_id=timeline_id,
+            qc_run_id=qc_run_id,
+            notes=notes,
             actor=actor,
-            result=OrchestrationActionResult.APPLIED,
-            reason_code="QC_PASSED_AND_APPROVED",
-            detail=notes or f"Production approved for timeline revision v{active_timeline.version} with QC Run {latest_qc.id}",
         )
-        project.status = target_state
-
-        db.commit()
-        db.refresh(approval)
-        return approval
 
     @classmethod
     def get_simple_summary(cls, db: Session, project_id: uuid.UUID) -> QCRunSummaryRead:
@@ -679,37 +663,14 @@ class QCService:
         query = (
             db.query(QCRun)
             .filter(QCRun.project_id == project_id)
-            .order_by(QCRun.created_at.desc())
+            .order_by(QCRun.created_at.desc(), QCRun.id.desc())
         )
         total_count = query.count()
         runs = query.offset(offset).limit(eff_limit).all()
 
         runs_read: List[QCRunRead] = []
         for r in runs:
-            decisions_map = {wd.finding_id: wd for wd in r.decisions}
-            findings_read: List[QCFindingRead] = []
-            for f in r.findings:
-                dec = decisions_map.get(f.id)
-                findings_read.append(
-                    QCFindingRead(
-                        id=f.id,
-                        project_id=f.project_id,
-                        qc_run_id=f.qc_run_id,
-                        timeline_id=f.timeline_id,
-                        rule_code=f.rule_code,
-                        severity=f.severity,
-                        message=f.message,
-                        why_it_matters=f.why_it_matters,
-                        recommended_fix=f.recommended_fix,
-                        target_type=f.target_type,
-                        target_id=f.target_id,
-                        target_label=f.target_label,
-                        action_type=f.action_type,
-                        created_at=f.created_at,
-                        current_decision=WarningDecisionRead.model_validate(dec) if dec else None,
-                    )
-                )
-
+            # Summary mode: findings list is empty to prevent N+1 loading and heavy payload in history list
             runs_read.append(
                 QCRunRead(
                     id=r.id,
@@ -722,7 +683,7 @@ class QCService:
                     actor=r.actor,
                     created_at=r.created_at,
                     updated_at=r.updated_at,
-                    findings=findings_read,
+                    findings=[],
                 )
             )
 
@@ -733,51 +694,73 @@ class QCService:
             limit=eff_limit,
         )
 
-        runs_read: List[QCRunRead] = []
-        for r in runs:
-            decisions_map = {wd.finding_id: wd for wd in r.decisions}
-            findings_read: List[QCFindingRead] = []
-            for f in r.findings:
-                dec = decisions_map.get(f.id)
-                findings_read.append(
-                    QCFindingRead(
-                        id=f.id,
-                        project_id=f.project_id,
-                        qc_run_id=f.qc_run_id,
-                        timeline_id=f.timeline_id,
-                        rule_code=f.rule_code,
-                        severity=f.severity,
-                        message=f.message,
-                        why_it_matters=f.why_it_matters,
-                        recommended_fix=f.recommended_fix,
-                        target_type=f.target_type,
-                        target_id=f.target_id,
-                        target_label=f.target_label,
-                        action_type=f.action_type,
-                        created_at=f.created_at,
-                        current_decision=WarningDecisionRead.model_validate(dec) if dec else None,
-                    )
-                )
+    @classmethod
+    def get_qc_run_findings(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        run_id: uuid.UUID,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> QCFindingPagination:
+        """Get bounded, paginated list of findings for a specific QC run with set-based decision mapping."""
+        project = db.get(Project, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project '{project_id}' not found",
+            )
 
-            runs_read.append(
-                QCRunRead(
-                    id=r.id,
-                    project_id=r.project_id,
-                    timeline_id=r.timeline_id,
-                    timeline_version=r.timeline_version,
-                    status=r.status,
-                    blocker_count=r.blocker_count,
-                    warning_count=r.warning_count,
-                    actor=r.actor,
-                    created_at=r.created_at,
-                    updated_at=r.updated_at,
-                    findings=findings_read,
+        qc_run = db.get(QCRun, run_id)
+        if not qc_run or qc_run.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"QC run '{run_id}' not found for project '{project_id}'",
+            )
+
+        eff_limit = min(max(limit, 1), 100)
+        query = (
+            db.query(QCFinding)
+            .filter(QCFinding.qc_run_id == run_id)
+            .order_by(QCFinding.created_at.asc(), QCFinding.id.asc())
+        )
+        total_count = query.count()
+        findings = query.offset(offset).limit(eff_limit).all()
+
+        finding_ids = [f.id for f in findings]
+        decisions = (
+            db.query(WarningDecision)
+            .filter(WarningDecision.finding_id.in_(finding_ids))
+            .all()
+        ) if finding_ids else []
+        dec_map = {d.finding_id: d for d in decisions}
+
+        findings_read: List[QCFindingRead] = []
+        for f in findings:
+            dec = dec_map.get(f.id)
+            findings_read.append(
+                QCFindingRead(
+                    id=f.id,
+                    project_id=f.project_id,
+                    qc_run_id=f.qc_run_id,
+                    timeline_id=f.timeline_id,
+                    rule_code=f.rule_code,
+                    severity=f.severity,
+                    message=f.message,
+                    why_it_matters=f.why_it_matters,
+                    recommended_fix=f.recommended_fix,
+                    target_type=f.target_type,
+                    target_id=f.target_id,
+                    target_label=f.target_label,
+                    action_type=f.action_type,
+                    created_at=f.created_at,
+                    current_decision=WarningDecisionRead.model_validate(dec) if dec else None,
                 )
             )
 
-        return QCHistoryPagination(
-            qc_runs=runs_read,
+        return QCFindingPagination(
+            findings=findings_read,
             total_count=total_count,
             offset=offset,
-            limit=limit,
+            limit=eff_limit,
         )
