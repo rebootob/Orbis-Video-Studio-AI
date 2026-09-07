@@ -102,16 +102,17 @@ WP017 Status: PASS / CLOSED / MERGED
 
 ```text
 ACTIVE WORK PACKAGE = NONE
-STATUS = POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION
-BRANCH = main
+STATUS = POST-WP017 / P4-WP018 PRE1 PROPOSAL IN REVIEW
+BRANCH = docs/p4-wp018-pre1-proposal
 ANTIGRAVITY = STOP / NONE (bounded low-credit Execution Plane when authorized)
 CODEX = STOP
 CLAUDE_CODE = STOP
 ```
 
-No active Work Package implementation. Await explicit Owner authorization before starting WP018.
+P4-WP018 PRE1 proposal is submitted and in review (`project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md`).
+No active Work Package implementation. Await explicit Owner authorization before starting WP018 implementation.
 Do NOT merge without Owner approval.
-Do NOT start or implement WP018.
+Do NOT start or implement WP018 source code.
 
 ### Performance & Scalability Guardrails Delivered in WP011
 
