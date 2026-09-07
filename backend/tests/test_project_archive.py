@@ -322,6 +322,27 @@ def test_project_export_missing_asset_fails_closed(db_session: Session, mock_sto
         export_service.export_project(db=db_session, project_id=proj.id)
 
 
+def test_project_export_rejects_unsupported_options_service(db_session: Session, mock_storage: InMemoryObjectStorageProvider):
+    """Export service must fail closed on package_type != FULL_SELF_CONTAINED, include_history=False, or include_renders=False."""
+    proj = Project(title="Rejection Test Proj", video_mode="STORY")
+    db_session.add(proj)
+    db_session.commit()
+
+    export_service = ProjectExportService(storage_provider=mock_storage)
+
+    # 1. Reject unsupported package_type
+    with pytest.raises(ArchiveExportError, match="is not supported in Core V1"):
+        export_service.export_project(db=db_session, project_id=proj.id, package_type="REFERENCE_ONLY")
+
+    # 2. Reject include_history=False
+    with pytest.raises(ArchiveExportError, match="include_history=False is not supported"):
+        export_service.export_project(db=db_session, project_id=proj.id, include_history=False)
+
+    # 3. Reject include_renders=False
+    with pytest.raises(ArchiveExportError, match="include_renders=False is not supported"):
+        export_service.export_project(db=db_session, project_id=proj.id, include_renders=False)
+
+
 # ==========================================
 # 4. Import CLONE & RESTORE Mode Tests
 # ==========================================
@@ -591,7 +612,19 @@ def test_api_archive_export_and_import_round_trip(client: TestClient, db_session
     assert create_resp.status_code == 201
     proj_id = create_resp.json()["id"]
 
-    # 2. Test API rejection of include_renders=False
+    # 2. Test API rejection of unsupported options
+    resp_bad_pkg = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"package_type": "REFERENCE_ONLY", "include_history": True, "include_renders": True},
+    )
+    assert resp_bad_pkg.status_code == 422
+
+    resp_bad_hist = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"package_type": "FULL_SELF_CONTAINED", "include_history": False, "include_renders": True},
+    )
+    assert resp_bad_hist.status_code == 422
+
     bad_export_resp = client.post(
         f"/api/v1/projects/{proj_id}/export",
         json={"package_type": "FULL_SELF_CONTAINED", "include_history": True, "include_renders": False},
@@ -632,6 +665,42 @@ def test_api_archive_export_and_import_round_trip(client: TestClient, db_session
     assert exec_data["project_id"] != proj_id
     assert exec_data["source_project_id"] == proj_id
 
+
+def test_project_export_api_validation(client: TestClient, db_session: Session):
+    """Export API endpoint must return HTTP 422 for unsupported options and 200 for canonical default."""
+    proj = Project(title="API Validation Proj", video_mode="STORY")
+    db_session.add(proj)
+    db_session.commit()
+    proj_id = str(proj.id)
+
+    # 1. Reject package_type != "FULL_SELF_CONTAINED"
+    resp = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"package_type": "REFERENCE_ONLY"},
+    )
+    assert resp.status_code == 422
+
+    # 2. Reject include_history=False
+    resp = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"include_history": False},
+    )
+    assert resp.status_code == 422
+
+    # 3. Reject include_renders=False
+    resp = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={"include_renders": False},
+    )
+    assert resp.status_code == 422
+
+    # 4. Default / empty payload succeeds with 200
+    resp = client.post(
+        f"/api/v1/projects/{proj_id}/export",
+        json={},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
 
 
 # ==========================================

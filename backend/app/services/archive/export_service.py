@@ -154,6 +154,18 @@ class ProjectExportService:
         if not project:
             raise ArchiveExportError(f"Project '{project_id}' not found")
 
+        if package_type != "FULL_SELF_CONTAINED":
+            raise ArchiveExportError(
+                f"Package type '{package_type}' is not supported in Core V1. "
+                "Only 'FULL_SELF_CONTAINED' archives are supported."
+            )
+
+        if not include_history:
+            raise ArchiveExportError(
+                "include_history=False is not supported in Core V1 FULL_SELF_CONTAINED archives. "
+                "Full historical lineage must be included."
+            )
+
         if not include_renders:
             raise ArchiveExportError(
                 "include_renders=False is not supported for FULL_SELF_CONTAINED archives in V1. "

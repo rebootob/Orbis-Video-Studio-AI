@@ -963,7 +963,7 @@ def test_020_project_archive_lineage_lifecycle(tmp_path, monkeypatch):
 def test_020_usage_ledger_coexistence_and_fail_closed_downgrade(tmp_path, monkeypatch):
     import uuid
     from datetime import datetime, timezone
-    from sqlalchemy import create_engine, MetaData, Table, select, Uuid
+    from sqlalchemy import create_engine, MetaData, Table, select, Uuid, inspect
     from sqlalchemy.exc import IntegrityError
 
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1053,6 +1053,27 @@ def test_020_usage_ledger_coexistence_and_fail_closed_downgrade(tmp_path, monkey
     assert "execution_disabled" in meta_after.tables["render_jobs"].c
     assert "imported_historical" in meta_after.tables["generation_jobs"].c
     assert "execution_disabled" in meta_after.tables["generation_jobs"].c
+
+    # Verify runtime DB indexes remain intact via direct engine inspection
+    inspector = inspect(engine)
+
+    rj_indexes = {idx["name"]: idx for idx in inspector.get_indexes("render_jobs")}
+    assert "uq_render_jobs_active_variant" in rj_indexes
+    assert bool(rj_indexes["uq_render_jobs_active_variant"]["unique"]) is True
+    assert "ix_render_jobs_imported_historical" in rj_indexes
+    assert bool(rj_indexes["ix_render_jobs_imported_historical"]["unique"]) is False
+
+    gj_indexes = {idx["name"]: idx for idx in inspector.get_indexes("generation_jobs")}
+    assert "uq_generation_jobs_active_shot" in gj_indexes
+    assert bool(gj_indexes["uq_generation_jobs_active_shot"]["unique"]) is True
+    assert "ix_generation_jobs_imported_historical" in gj_indexes
+    assert bool(gj_indexes["ix_generation_jobs_imported_historical"]["unique"]) is False
+
+    ul_indexes = {idx["name"]: idx for idx in inspector.get_indexes("usage_ledger")}
+    assert "uq_usage_ledger_provider_event" in ul_indexes
+    assert bool(ul_indexes["uq_usage_ledger_provider_event"]["unique"]) is True
+    assert "ix_usage_ledger_imported_historical" in ul_indexes
+    assert bool(ul_indexes["ix_usage_ledger_imported_historical"]["unique"]) is False
 
     # 5. Verify records remain intact: no history deletion, no ledger mutation
     with engine.connect() as conn:

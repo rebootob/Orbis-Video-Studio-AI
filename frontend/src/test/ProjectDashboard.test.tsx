@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ProjectDashboard } from '../components/dashboard/ProjectDashboard';
 import type { Project } from '../api/types';
+import { apiClient } from '../api/client';
 
 const mockProjects: Project[] = [
   {
@@ -203,7 +204,11 @@ describe('ProjectDashboard', () => {
     expect(screen.getByText('Import Project Archive (.orbis)')).toBeInTheDocument();
   });
 
-  it('renders Export (.orbis) card action and opens ExportProjectModal on click', () => {
+  it('renders Export (.orbis) card action and opens ExportProjectModal with fixed canonical contents and no checkboxes', async () => {
+    window.URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url');
+    window.URL.revokeObjectURL = vi.fn();
+    const exportSpy = vi.spyOn(apiClient, 'exportProjectArchive').mockResolvedValue(new Blob(['fake-orbis']));
+
     render(
       <ProjectDashboard
         projects={mockProjects}
@@ -221,5 +226,23 @@ describe('ProjectDashboard', () => {
     fireEvent.click(exportBtn);
     expect(screen.getByTestId('export-project-modal')).toBeInTheDocument();
     expect(screen.getByText('Export Project Archive (.orbis)')).toBeInTheDocument();
+
+    // Verify fixed informational package contents and NO interactive checkboxes
+    expect(screen.getByTestId('package-content-history')).toBeInTheDocument();
+    expect(screen.getByTestId('package-content-renders')).toBeInTheDocument();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    // Click Export (.orbis) button and assert canonical payload
+    const submitBtn = screen.getByTestId('export-submit-btn');
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(exportSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(exportSpy).toHaveBeenCalledWith('proj-1', {
+      package_type: 'FULL_SELF_CONTAINED',
+      include_history: true,
+      include_renders: true,
+    });
   });
 });

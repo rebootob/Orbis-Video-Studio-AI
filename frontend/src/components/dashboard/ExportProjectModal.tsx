@@ -14,8 +14,6 @@ export const ExportProjectModal: React.FC<ExportProjectModalProps> = ({
   onClose,
   project,
 }) => {
-  const [includeHistory, setIncludeHistory] = useState(true);
-  const [includeRenders, setIncludeRenders] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -30,8 +28,8 @@ export const ExportProjectModal: React.FC<ExportProjectModalProps> = ({
     try {
       const blob = await apiClient.exportProjectArchive(project.id, {
         package_type: 'FULL_SELF_CONTAINED',
-        include_history: includeHistory,
-        include_renders: includeRenders,
+        include_history: true,
+        include_renders: true,
       });
 
       // Trigger browser download
@@ -99,39 +97,33 @@ export const ExportProjectModal: React.FC<ExportProjectModalProps> = ({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#e2e8f0' }}>Package Content Options</div>
+            <div style={{ fontSize: '0.875rem', fontWeight: '500', color: '#e2e8f0' }}>Package Contents (Core V1 FULL_SELF_CONTAINED)</div>
 
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '0.8125rem', color: '#cbd5e1' }}>
-              <input
-                type="checkbox"
-                checked={includeHistory}
-                onChange={(e) => setIncludeHistory(e.target.checked)}
-                disabled={exporting}
-                style={{ marginTop: '3px' }}
-              />
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '0.8125rem', color: '#cbd5e1' }} data-testid="package-content-history">
+              <CheckCircle2 size={16} color="#34d399" style={{ marginTop: '2px', flexShrink: 0 }} />
               <div>
-                <div style={{ fontWeight: '500', color: '#f1f5f9' }}>Include Historical Revisions & Audits</div>
-                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
+                <div style={{ fontWeight: '500', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Historical Revisions & Audits</span>
+                  <span style={{ fontSize: '0.6875rem', padding: '1px 6px', background: '#064e3b', color: '#6ee7b7', borderRadius: '4px' }}>Included</span>
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: '2px' }}>
                   Preserves audit trails, story versions, generation and render history, and usage ledgers bit-for-bit.
                 </div>
               </div>
-            </label>
+            </div>
 
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', fontSize: '0.8125rem', color: '#cbd5e1' }}>
-              <input
-                type="checkbox"
-                checked={includeRenders}
-                onChange={(e) => setIncludeRenders(e.target.checked)}
-                disabled={exporting}
-                style={{ marginTop: '3px' }}
-              />
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '0.8125rem', color: '#cbd5e1' }} data-testid="package-content-renders">
+              <CheckCircle2 size={16} color="#34d399" style={{ marginTop: '2px', flexShrink: 0 }} />
               <div>
-                <div style={{ fontWeight: '500', color: '#f1f5f9' }}>Include Rendered Outputs</div>
-                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
-                  Includes rendered video files and multi-platform preset export outputs.
+                <div style={{ fontWeight: '500', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Rendered Outputs & Media Binaries</span>
+                  <span style={{ fontSize: '0.6875rem', padding: '1px 6px', background: '#064e3b', color: '#6ee7b7', borderRadius: '4px' }}>Included</span>
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginTop: '2px' }}>
+                  Includes rendered video files, audio tracks, keyframes, and asset binaries from storage.
                 </div>
               </div>
-            </label>
+            </div>
           </div>
 
           <div style={{ fontSize: '0.75rem', color: '#64748b', borderTop: '1px solid #334155', paddingTop: '10px' }}>
@@ -145,6 +137,7 @@ export const ExportProjectModal: React.FC<ExportProjectModalProps> = ({
           </button>
           <button
             className="btn btn-primary"
+            data-testid="export-submit-btn"
             onClick={handleExport}
             disabled={exporting || success}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}

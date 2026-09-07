@@ -1,19 +1,36 @@
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProjectExportRequest(BaseModel):
-    package_type: str = Field(default="FULL_SELF_CONTAINED", description="FULL_SELF_CONTAINED or REFERENCE_ONLY")
+    package_type: Literal["FULL_SELF_CONTAINED"] = Field(
+        default="FULL_SELF_CONTAINED",
+        description="Canonical archive package type (FULL_SELF_CONTAINED only in Core V1)",
+    )
     include_history: bool = Field(default=True, description="Whether to include historical jobs, audits, and ledgers")
     include_renders: bool = Field(default=True, description="Whether to include rendered video/audio binaries")
+
+    @field_validator("package_type")
+    @classmethod
+    def validate_package_type(cls, v: str) -> str:
+        if v != "FULL_SELF_CONTAINED":
+            raise ValueError("Only 'FULL_SELF_CONTAINED' package type is supported in Core V1.")
+        return v
+
+    @field_validator("include_history")
+    @classmethod
+    def validate_include_history(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("include_history=False is not supported in Core V1 FULL_SELF_CONTAINED archives. Full historical lineage must be included.")
+        return v
 
     @field_validator("include_renders")
     @classmethod
     def validate_include_renders(cls, v: bool) -> bool:
         if not v:
-            raise ValueError("include_renders=False is not supported in V1 FULL_SELF_CONTAINED archives. All assets must be included.")
+            raise ValueError("include_renders=False is not supported in Core V1 FULL_SELF_CONTAINED archives. All assets must be included.")
         return v
 
 
