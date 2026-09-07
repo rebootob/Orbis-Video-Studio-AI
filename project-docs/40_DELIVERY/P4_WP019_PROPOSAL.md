@@ -74,7 +74,9 @@ WP019 delivers the following bounded capabilities:
    - Atomic database rollback and automated storage cleanup on any failure.
 8. **Security Hardening**: Protection against ZIP Slip (path traversal), decompression bombs, excessive file counts, duplicate file headers, corrupted checksums, and secret leakage. Strict path validation allows only normalized relative POSIX-style paths (`entities/story.json`, `assets/data/file.mp4`) and rejects absolute, leading-slash, Windows drive, UNC, backslash, traversal (`..`), and non-regular entries.
 9. **Sanitized Configuration (No Secret Leakage)**: Strict redaction/exclusion of provider API keys, authorization tokens, presigned URLs, and machine-local credential paths.
-10. **Preservation of Historical Execution Truth**: Historical `RenderJob` and `GenerationJob` records preserve their original execution status, attempts, errors, and timestamps exactly as historical truth (no rewriting of status to `CANCELLED`). Non-resumption is guaranteed via explicit import-safety metadata: `imported_historical = True` and `execution_disabled = True`. Background workers and dispatch queues strictly fence out jobs where `imported_historical IS TRUE`.
+10. **Preservation of Historical Execution Truth & Dual Authority Exclusion**: Historical `RenderJob` and `GenerationJob` records preserve their original execution status, attempts, errors, and timestamps exactly as historical truth (no rewriting of status to `CANCELLED`). Imported historical rows are strictly excluded from BOTH:
+    - **Live Execution Authority**: Background workers, queue dispatchers, and polling services strictly filter out jobs where `imported_historical IS TRUE` or `execution_disabled IS TRUE`.
+    - **Live Active Uniqueness Authority**: Database partial unique indexes (`uq_render_jobs_active_variant` and `uq_generation_jobs_active_shot`) and application active-check queries are updated to apply only when `imported_historical IS NOT TRUE`. Imported historical rows never block the submission or execution of legitimate new live jobs for the same timeline variant or shot.
 11. **Preservation of Historical Financial Truth**: Historical `UsageLedger` and `LedgerAdjustment` entries preserve their original `cost_status`, `estimated_cost`, `actual_cost`, currency, and timestamps bit-for-bit (no rewriting of status to `ARCHIVED_IMPORT`). Rows are tagged with `imported_historical = True`. Live budget calculations strictly exclude rows where `imported_historical IS TRUE`, preventing double-counting or re-charging without altering historical financial truth.
 12. **Minimal V1 UI / API**:
     - Backend endpoints for export generation and streaming download, and import upload, pre-flight validation, and execution.
@@ -254,8 +256,8 @@ my-project.orbis (ZIP)
 | **Warning Dec.** | `WarningDecision` | REQUIRED | Remap to Finding & QCRun | Audit trail of accepted warnings with reasons. |
 | **Approval** | `ApprovalRecord` | REQUIRED | Remap to Timeline & QCRun | Production sign-off records (`APPROVED`). |
 | **Render Batch** | `RenderBatch` | REQUIRED | Remap to Timeline | Multi-output batch groupings. |
-| **Render Job** | `RenderJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Workers strictly fence out imported jobs. |
-| **Generation Job**| `GenerationJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Workers strictly fence out imported jobs. |
+| **Render Job** | `RenderJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Excluded from workers and from active partial unique index `uq_render_jobs_active_variant`. Never blocks new live jobs. |
+| **Generation Job**| `GenerationJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Excluded from workers and from active partial unique index `uq_generation_jobs_active_shot`. Never blocks new live jobs. |
 | **Batch Run** | `BatchRun`, `BatchRunItem`| REQUIRED | Remap to Project & Shot | History of batch generation resume dispatches. |
 | **Audit Logs** | `GenerationAuditLog`| OPTIONAL/REQ | Remap to Project | Telemetry history (token counts, latency). |
 | **Orchestration** | `OrchestrationAudit`| REQUIRED | Remap to Project | State machine transitions and actor audits. |
@@ -610,20 +612,60 @@ In `frontend/src/components/dashboard/ProjectDashboard.tsx`:
 
 ## 20. History & Financial Safety
 
-### 20.1 Preservation of Historical Execution Truth & Worker Fencing
+### 20.1 Preservation of Historical Execution Truth, Dual Authority Exclusion & Index Fencing
 Orbis strictly prohibits silent mutation or falsification of historical records.
-- **No Status Rewriting**:
-  - Historical `RenderJob` and `GenerationJob` records preserve their original execution status (`QUEUED`, `CLAIMED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`), original error messages, attempt counts, retry timestamps, payloads, and results bit-for-bit as recorded in the archive.
-  - Jobs are **NOT** mutated to `CANCELLED`.
-- **Import-Safety Metadata**:
-  - During import, all imported `RenderJob` and `GenerationJob` rows are flagged with:
-    `imported_historical = True`
-    `execution_disabled = True`
-- **Worker Fencing Contract**:
-  - Background workers (`RenderJobWorker`, `GenerationWorker`, `BatchResumeService`, queue pollers) query active jobs using strict fencing:
-    `WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING') AND imported_historical IS NOT TRUE`
-  - No background worker or dispatcher will ever claim, execute, poll, or reconcile an imported historical job, even if its original status was active at export time.
-  - Source worker lease tokens (`claim_token`, `claimed_by`, `claim_expires_at`) are cleared on import to prevent local lease collisions while preserving all other audit fields.
+
+#### 1. No Status Rewriting
+- Historical `RenderJob` and `GenerationJob` records preserve their original execution status (`QUEUED`, `CLAIMED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`), original error messages, attempt counts, retry timestamps, payloads, and results bit-for-bit as recorded in the archive.
+- Jobs are **NOT** mutated to `CANCELLED`.
+
+#### 2. Dual Authority Exclusion Contract
+Imported historical rows must be excluded from **BOTH**:
+1. **Worker/Dispatcher Execution Authority** (cannot be claimed, dispatched, polled, or reconciled).
+2. **Active Uniqueness Authority** (cannot occupy active unique slots or block new live jobs).
+
+**Canonical Semantics**:
+```text
+LIVE EXECUTION AUTHORITY =
+    imported_historical IS NOT TRUE
+    AND execution_disabled IS NOT TRUE
+    AND status IS active/pending
+```
+
+#### 3. Active Partial Unique Index Adjustments
+Current database partial unique indexes enforce at most one active job:
+- `RenderJob`: `uq_render_jobs_active_variant` on `(project_id, timeline_id, render_variant_key)` for statuses `QUEUED`, `CLAIMED`, `RUNNING`, `RECONCILIATION_REQUIRED`.
+- `GenerationJob`: `uq_generation_jobs_active_shot` on `(shot_id)` for active/pending statuses.
+
+If imported historical jobs with active statuses occupied these indexes, users would be blocked from submitting or executing legitimate new live jobs for that timeline variant or shot.
+
+**The Solution**: Migration replaces both partial unique indexes so they apply strictly to live jobs:
+- **`uq_render_jobs_active_variant`**:
+  `UNIQUE (project_id, timeline_id, render_variant_key)`
+  `WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE`
+- **`uq_generation_jobs_active_shot`**:
+  `UNIQUE (shot_id)`
+  `WHERE status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE`
+
+**Impact**:
+- Real live jobs continue to enjoy 100% duplicate protection.
+- Historical imported jobs never occupy live variant or shot slots.
+- Historical imported jobs and new live jobs can coexist safely in the same project, timeline, and shot.
+
+#### 4. Service Authority Contract
+Every application service query that determines:
+- Active job existence (`get_active_render_job`, `has_active_generation_job`)
+- Duplicate active variant submission rejection (`submit_export_batch`, `submit_render_job`)
+- Replay / idempotency matching
+- Claim eligibility (`claim_next_job`, `claim_next_render_job`)
+- Reconciliation blocking (`RECONCILIATION_REQUIRED`)
+- Batch resume eligibility candidate selection (`BatchResumeService`)
+- Polling / provider submission authority
+
+**MUST consistently filter**:
+`WHERE ... AND imported_historical IS NOT TRUE` (and `execution_disabled IS NOT TRUE`).
+Services must never rely solely on worker claim loops; the entire application control plane respects this boundary.
+Source worker lease tokens (`claim_token`, `claimed_by`, `claim_expires_at`) are cleared on import to prevent local lease collisions while preserving all other audit fields.
 
 ### 20.2 Preservation of Historical Financial Truth & Budget Safety
 Orbis strictly prohibits silent alteration of financial audit records.
@@ -644,7 +686,7 @@ Orbis strictly prohibits silent alteration of financial audit records.
 
 ## 21. Migration & Database Schema Impact
 
-WP019 requires explicit schema support to record import lineage and fence historical records safely without mutating status values:
+WP019 requires explicit schema and index adjustments to support archive lineage and fence historical records safely without mutating status values:
 
 ### Proposed Alembic Migration (`020_project_archive_lineage.py`):
 1. **`projects` table**:
@@ -654,14 +696,46 @@ WP019 requires explicit schema support to record import lineage and fence histor
 2. **`render_jobs` table**:
    - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
    - Add `execution_disabled` (`Boolean`, default=False, nullable=False, server_default=text("false")).
+   - **Drop and recreate partial unique index `uq_render_jobs_active_variant`**:
+     ```python
+     op.drop_index("uq_render_jobs_active_variant", table_name="render_jobs")
+     op.create_index(
+         "uq_render_jobs_active_variant",
+         "render_jobs",
+         ["project_id", "timeline_id", "render_variant_key"],
+         unique=True,
+         postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+         sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+     )
+     ```
 3. **`generation_jobs` table**:
    - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
    - Add `execution_disabled` (`Boolean`, default=False, nullable=False, server_default=text("false")).
+   - **Drop and recreate partial unique index `uq_generation_jobs_active_shot`**:
+     ```python
+     op.drop_index("uq_generation_jobs_active_shot", table_name="generation_jobs")
+     op.create_index(
+         "uq_generation_jobs_active_shot",
+         "generation_jobs",
+         ["shot_id"],
+         unique=True,
+         postgresql_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+         sqlite_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+     )
+     ```
 4. **`usage_ledger` table**:
    - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
 
-### Downgrade Safety:
-- Clean drop of added columns and indexes. Existing projects, jobs, and ledgers remain unaffected.
+### Downgrade Safety Contract:
+- **Universal Reversibility Guard**:
+  - Recreating the old indexes (`uq_render_jobs_active_variant` and `uq_generation_jobs_active_shot` without `imported_historical IS NOT TRUE`) requires that NO duplicate active-status jobs exist for the same timeline variant or shot.
+  - If imported historical rows with active statuses coexist with live active jobs, attempting to recreate the old unique index will cause uniqueness collisions.
+  - **Contract**: The downgrade script inspects the database. If multiple active-status rows exist for any timeline variant or shot, **downgrade FAILS CLOSED** with an explicit diagnostic error:
+    ```text
+    "Cannot downgrade migration 020: multiple active-status jobs exist for the same timeline variant or shot due to imported historical records. Downgrade aborted to prevent silent history loss."
+    ```
+  - **NEVER** silently delete, truncate, or rewrite historical jobs merely to make downgrade succeed.
+  - If no duplicate active rows exist, downgrade drops the columns and safely restores the previous indexes.
 
 ---
 
@@ -688,17 +762,27 @@ Implementation of WP019 will require comprehensive automated testing across all 
    - `test_workers_fence_out_imported_historical_jobs`: `RenderJobWorker` and `GenerationWorker` claim queries never pick up jobs with `imported_historical = True`.
    - `test_import_preserves_original_usage_ledger_cost_and_status`: Original ledger `cost_status` and amounts preserved bit-for-bit with `imported_historical = True`.
    - `test_budget_service_excludes_imported_historical_ledger_rows`: `BudgetService` live spend query ignores `imported_historical = True` rows.
-4. **Referential Integrity & Remapping**:
+4. **Execution Authority & Active Uniqueness Index Contract**:
+   - `test_imported_active_render_job_does_not_occupy_live_variant_slot`: Imported historical RenderJob with QUEUED/RUNNING status does not occupy the active variant slot.
+   - `test_can_create_new_live_render_job_after_importing_active_historical_job`: After import, a new live RenderJob for the same (project_id, timeline_id, render_variant_key) can be created successfully.
+   - `test_imported_active_generation_job_does_not_occupy_live_shot_slot`: Imported historical GenerationJob with active status does not occupy the live shot slot.
+   - `test_can_create_new_live_generation_job_after_importing_active_historical_job`: After import, a new live GenerationJob for the same remapped shot can be created successfully.
+   - `test_two_live_render_jobs_for_same_variant_still_rejected`: Live duplicate protection remains 100% enforced for real active jobs.
+   - `test_two_live_generation_jobs_for_same_shot_still_rejected`: Live duplicate protection remains 100% enforced for real active generation jobs.
+   - `test_historical_imported_and_live_active_jobs_coexist_safely`: Historical imported active job and live active job safely coexist on the same timeline/shot without index violation.
+   - `test_migration_upgrade_preserves_live_duplicate_protection`: Migration 020 maintains live uniqueness semantics.
+   - `test_migration_downgrade_fails_closed_on_coexisting_active_jobs`: Downgrade safely detects colliding active statuses and aborts rather than deleting/mutating historical records.
+5. **Referential Integrity & Remapping**:
    - `test_clone_mode_generates_new_unique_ids`: All entity UUIDs in destination DB are distinct from source.
    - `test_clone_mode_maintains_all_foreign_keys`: Scene, shot, audio, timeline, and asset FKs remain referentially intact.
    - `test_asset_lock_polymorphic_remapping`: `AssetLock` rows point accurately to remapped entities.
-5. **Restore Mode & Collision Safety**:
+6. **Restore Mode & Collision Safety**:
    - `test_restore_mode_preserves_original_ids`: Restore on clean DB retains exact source UUIDs.
    - `test_restore_mode_collision_fails_closed`: Attempting restore when Project ID already exists returns `409 Conflict`.
-6. **Transaction Rollback & Storage Cleanup**:
+7. **Transaction Rollback & Storage Cleanup**:
    - `test_mid_import_failure_rolls_back_db_completely`: Simulated DB failure leaves zero orphan rows.
    - `test_mid_import_failure_cleans_up_uploaded_s3_objects`: Uploaded files in S3 are deleted upon rollback.
-7. **Round-Trip Fidelity**:
+8. **Round-Trip Fidelity**:
    - `test_full_project_export_import_roundtrip`: Export complex project (Story + Scenes + Shots + Audio + Timeline + QC + Render) -> Import as Clone -> verify total entity count and content parity.
 
 ---
@@ -714,6 +798,9 @@ P4-WP019 will be considered complete when:
 - [ ] All security threats (ZIP slip, decompression bombs, tampering) are intercepted and rejected fail-closed.
 - [ ] Complete atomic rollback and storage cleanup are proven on simulated import failure.
 - [ ] Original historical execution status and timestamps are preserved bit-for-bit, and workers are proven to fence out imported jobs.
+- [ ] Active partial unique indexes (`uq_render_jobs_active_variant`, `uq_generation_jobs_active_shot`) strictly exclude `imported_historical IS TRUE`, allowing new live jobs to be created successfully without slot blocking.
+- [ ] Duplicate protection for real live jobs remains 100% intact.
+- [ ] Migration downgrade is proven to fail closed when historical and live active jobs coexist, preventing silent history loss.
 - [ ] Original usage ledger rows are preserved bit-for-bit, and live budget calculations are proven never to double-count spend.
 - [ ] Full automated test suite passes with zero regressions.
 - [ ] Frontend modals provide clear, accessible, and truthful export and import workflows.
