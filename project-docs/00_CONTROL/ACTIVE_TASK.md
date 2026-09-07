@@ -7,22 +7,23 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P3-WP017
 ```
 
 Status:
 
 ```text
-POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
+P3-WP017 — CLOUD RENDER WORKERS IMPLEMENTATION IN PROGRESS
 ```
 
 Current Work Tracking:
 
 ```text
-Active Package: NONE
-Next Candidate: P3-WP017 (Cloud Render Workers) — PROPOSED / NOT AUTHORIZED
-Canonical main HEAD: 43e5221e7f39a19e8c6fde54c450324aa8333059
-Gate: POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
+Active Package: P3-WP017 (Cloud Render Workers)
+Status: IN_PROGRESS
+Canonical main HEAD: 556ca1c2566c154e5f10559e74907896bbf3b797
+Branch: ai/p3-wp017-cloud-render-workers
+Gate: P3-WP017 / IMPLEMENTATION IN PROGRESS
 ```
 
 Execution Roles:
@@ -30,7 +31,7 @@ Execution Roles:
 ```text
 Owner = final human authority / authorization
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE (bounded low-credit Execution Plane when authorized)
+Antigravity = bounded low-credit Execution Plane
 Codex = STOP
 Claude Code = STOP
 ```

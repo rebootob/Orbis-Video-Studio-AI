@@ -23,6 +23,7 @@ import type {
   AssemblyScene,
   AssemblyShotPlacement,
   TimelineCheckpoint,
+  RenderJob,
 } from '../../api/types';
 import { AdvancedTimelinePanel } from './AdvancedTimelinePanel';
 
@@ -37,8 +38,10 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
 }) => {
   const [timeline, setTimeline] = useState<AssemblyTimeline | null>(null);
   const [checkpoints, setCheckpoints] = useState<TimelineCheckpoint[]>([]);
+  const [activeRenderJob, setActiveRenderJob] = useState<RenderJob | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [submittingRender, setSubmittingRender] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'SIMPLE' | 'ADVANCED'>('SIMPLE');
 
@@ -55,6 +58,15 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
   const [moveShotTarget, setMoveShotTarget] = useState<AssemblyShotPlacement | null>(null);
   const [targetSceneId, setTargetSceneId] = useState<string>('');
 
+  const fetchRenderJob = useCallback(async () => {
+    try {
+      const job = await api.getLatestRenderJob(projectId);
+      setActiveRenderJob(job);
+    } catch (_err) {
+      // Optional if no renders exist yet
+    }
+  }, [projectId]);
+
   const loadTimeline = useCallback(async () => {
     try {
       setLoading(true);
@@ -64,17 +76,31 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
 
       const ckpts = await api.listTimelineCheckpoints(projectId);
       setCheckpoints(ckpts);
+      await fetchRenderJob();
     } catch (err: any) {
       console.error('Failed to load assembly timeline', err);
       setError(err.message || 'Failed to load timeline assembly');
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, fetchRenderJob]);
 
   useEffect(() => {
     loadTimeline();
   }, [loadTimeline]);
+
+  const handleSubmitRender = async () => {
+    try {
+      setSubmittingRender(true);
+      setError(null);
+      const job = await api.submitRenderJob(projectId);
+      setActiveRenderJob(job);
+    } catch (err: any) {
+      setError(err.message || 'Render submission failed. Ensure timeline version is approved.');
+    } finally {
+      setSubmittingRender(false);
+    }
+  };
 
   // Preview player loop effect
   useEffect(() => {
@@ -295,6 +321,16 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
           >
             <Wand2 className="w-4 h-4" />
             {actionLoading === 'auto_assemble' ? 'Assembling...' : 'Auto Assemble'}
+          </button>
+
+          <button
+            onClick={handleSubmitRender}
+            disabled={submittingRender || timeline?.status !== 'APPROVED'}
+            title={timeline?.status !== 'APPROVED' ? 'Timeline approval is required before rendering' : 'Render master output MP4'}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-medium rounded-xl shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
+          >
+            <Sparkles className="w-4 h-4 text-emerald-200" />
+            {submittingRender ? 'Submitting Render...' : activeRenderJob ? `Render (${activeRenderJob.status})` : 'Render Master Video'}
           </button>
 
           <button

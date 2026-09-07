@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.shot import Shot
     from app.models.generation_job import GenerationJob
+    from app.models.render_job import RenderJob
 
 
 def utc_now() -> datetime:
@@ -35,6 +36,14 @@ class UsageLedger(Base):
             unique=True,
             postgresql_where=text("job_id IS NOT NULL"),
             sqlite_where=text("job_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_usage_ledger_render_job_operation",
+            "render_job_id",
+            "operation",
+            unique=True,
+            postgresql_where=text("render_job_id IS NOT NULL"),
+            sqlite_where=text("render_job_id IS NOT NULL"),
         ),
         Index(
             "uq_usage_ledger_provider_event",
@@ -64,6 +73,12 @@ class UsageLedger(Base):
     job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("generation_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    render_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("render_jobs.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -97,6 +112,7 @@ class UsageLedger(Base):
     project: Mapped["Project"] = relationship("Project", back_populates="usage_ledger_entries")
     shot: Mapped[Optional["Shot"]] = relationship("Shot")
     job: Mapped[Optional["GenerationJob"]] = relationship("GenerationJob")
+    render_job: Mapped[Optional["RenderJob"]] = relationship("RenderJob")
     adjustments: Mapped[List["LedgerAdjustment"]] = relationship(
         "LedgerAdjustment",
         back_populates="ledger_entry",

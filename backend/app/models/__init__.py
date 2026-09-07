@@ -42,6 +42,7 @@ from app.models.qc import (
     WarningDecision,
     ApprovalRecord,
 )
+from app.models.render_job import RenderJob, RenderJobStatus
 
 __all__ = [
     "Base",
@@ -83,5 +84,7 @@ __all__ = [
     "QCFinding",
     "WarningDecision",
     "ApprovalRecord",
+    "RenderJob",
+    "RenderJobStatus",
 ]
 

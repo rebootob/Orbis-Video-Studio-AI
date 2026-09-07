@@ -36,6 +36,9 @@ import type {
   WarningDecision,
   WarningDecisionType,
   ApprovalRecord,
+  RenderJob,
+  RenderJobSubmitPayload,
+  RenderJobListResponse,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -781,6 +784,47 @@ export const api = {
         body: JSON.stringify(payload),
       }
     );
+  },
+
+  // Render Jobs
+  async submitRenderJob(
+    projectId: string,
+    payload: RenderJobSubmitPayload = {}
+  ): Promise<RenderJob> {
+    return request<RenderJob>(`/projects/${projectId}/renders/submit`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getLatestRenderJob(projectId: string): Promise<RenderJob> {
+    return request<RenderJob>(`/projects/${projectId}/renders/latest`);
+  },
+
+  async getRenderJob(projectId: string, renderId: string): Promise<RenderJob> {
+    return request<RenderJob>(`/projects/${projectId}/renders/${renderId}`);
+  },
+
+  async listRenderJobs(
+    projectId: string,
+    offset: number = 0,
+    limit: number = 50
+  ): Promise<RenderJobListResponse> {
+    return request<RenderJobListResponse>(
+      `/projects/${projectId}/renders?offset=${offset}&limit=${limit}`
+    );
+  },
+
+  async cancelRenderJob(projectId: string, renderId: string): Promise<RenderJob> {
+    return request<RenderJob>(`/projects/${projectId}/renders/${renderId}/cancel`, {
+      method: 'POST',
+    });
+  },
+
+  async retryRenderJob(projectId: string, renderId: string): Promise<RenderJob> {
+    return request<RenderJob>(`/projects/${projectId}/renders/${renderId}/retry`, {
+      method: 'POST',
+    });
   },
 };
 

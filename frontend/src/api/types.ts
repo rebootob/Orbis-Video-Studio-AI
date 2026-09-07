@@ -598,3 +598,50 @@ export interface QCHistoryResponse {
   qc_runs: QCRun[];
   approvals: ApprovalRecord[];
 }
+
+export type RenderJobStatus =
+  | 'QUEUED'
+  | 'CLAIMED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'RECONCILIATION_REQUIRED';
+
+export interface RenderJob {
+  id: string;
+  project_id: string;
+  timeline_id: string;
+  timeline_version: number;
+  approval_id: string;
+  render_profile: string;
+  status: RenderJobStatus;
+  idempotency_key: string;
+  output_asset_id?: string | null;
+  progress: number;
+  claimed_by?: string | null;
+  claim_expires_at?: string | null;
+  retry_count: number;
+  max_retries: number;
+  estimated_cost_usd: number;
+  actual_cost_usd?: number | null;
+  error_message?: string | null;
+  render_metadata?: Record<string, any> | null;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at: string;
+}
+
+export interface RenderJobSubmitPayload {
+  timeline_id?: string;
+  render_profile?: string;
+  idempotency_key?: string;
+}
+
+export interface RenderJobListResponse {
+  renders: RenderJob[];
+  total_count: number;
+  offset: number;
+  limit: number;
+}
