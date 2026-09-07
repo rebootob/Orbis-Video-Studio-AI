@@ -185,7 +185,7 @@ Do not depend on it.
 
 FIRST ACTION:
 1. Fresh-fetch live origin/main and report exact live main HEAD SHA.
-2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = OWNER DECISION FOR NEXT WORK PACKAGE.
+2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION.
 3. Await explicit Owner authorization before starting or implementing any new Work Package (including P3-WP017).
 4. Do not start WP017 or any later WP automatically.
 ```

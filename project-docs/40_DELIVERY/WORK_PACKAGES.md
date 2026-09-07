@@ -132,7 +132,7 @@ graph TD
   - **Reviewed Head:** `5def41c8bba9b3004b7007f671899e045438a8c4`
   - **Merge Commit:** `43e5221e7f39a19e8c6fde54c450324aa8333059`
   - **Final Review:** PASS / READY TO MERGE (Review ID 5127769635)
-  - **Scope Delivered:** Provider/revision-bound QC engine, structured findings (BLOCKER / WARNING / INFO), warning decision audit history (ACCEPTED_WITH_REASON / FIX_REQUIRED), 1-shot approval per timeline revision, production orchestrator workflow integration.
+  - **Scope Delivered:** Provider/revision-bound QC engine, structured findings (BLOCKER / WARNING), warning decision audit history (ACCEPTED_WITH_REASON / FIX_REQUIRED), 1-shot approval per timeline revision, production orchestrator workflow integration.
 
 ---
 
