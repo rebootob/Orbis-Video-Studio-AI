@@ -71,6 +71,8 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | :--- | :--- |
 | Work Package Roadmap / Current WP Status | [`../40_DELIVERY/WORK_PACKAGES.md`](../40_DELIVERY/WORK_PACKAGES.md) |
 | Historical P2-WP008 Proposal | [`../40_DELIVERY/P2_WP008_PROPOSAL.md`](../40_DELIVERY/P2_WP008_PROPOSAL.md) |
+| Historical P3-WP017 Proposal | [`../40_DELIVERY/P3_WP017_PROPOSAL.md`](../40_DELIVERY/P3_WP017_PROPOSAL.md) |
+| P4-WP018 PRE1 Proposal | [`../40_DELIVERY/P4_WP018_PROPOSAL.md`](../40_DELIVERY/P4_WP018_PROPOSAL.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |

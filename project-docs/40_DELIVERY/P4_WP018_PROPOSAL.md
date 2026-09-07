@@ -1,0 +1,215 @@
+# P4-WP018 Proposal — Multi-Output & Platform Export Presets Architecture & Evidence Review
+
+> **Status:** PRE1 ARCHITECTURE & EVIDENCE REVIEW / PROPOSED / NOT AUTHORIZED  
+> **Reviewed Main HEAD:** `07ba0fdaf1719a7d6ed882155dfb113a4729d55a`  
+> **Repository:** `rebootob/Orbis-Video-Studio-AI`  
+> **PRE1 Verdict:** `READY_FOR_OWNER_SCOPE_LOCK`
+
+---
+
+## 1. Executive Summary
+
+This proposal establishes the technical architecture, data contracts, reuse opportunities, and acceptance criteria for **P4-WP018 — Multi-Output & Platform Export Presets** without modifying production source code or executing database migrations.
+
+By inspecting live repository truth (including WP015 timeline assembly, WP016 QC/approval, and WP017 cloud render workers), we confirmed that Orbis possesses:
+1. **Master Production Approval Gates:** Gated timeline revision approval truth in `ApprovalRecord` ([`models/qc.py`](../../backend/app/models/qc.py)).
+2. **Durable Cloud Render Infrastructure:** `RenderJob` entity, stateless `CloudRenderWorker`, worker lease/claim fencing, attempt-specific `UsageLedger` accounting, and `FFmpegRenderExecutor` process execution ([`models/render_job.py`](../../backend/app/models/render_job.py), [`services/render_job.py`](../../backend/app/services/render_job.py), [`services/render_worker.py`](../../backend/app/services/render_worker.py)).
+3. **Provider-Neutral Storage & Asset Lineage:** `ObjectStorageProvider` and immutable `Asset` registration ([`models/asset.py`](../../backend/app/models/asset.py), [`services/storage/`](../../backend/app/services/storage/)).
+4. **Concurrency-Safe Cost Ledger & Budget Service:** Pre-execution budget validation and attempt cost reservation ([`services/budget.py`](../../backend/app/services/budget.py)).
+
+WP018 extends this foundation to support **multi-output aspect ratio, resolution, and platform export presets** (such as 16:9 YouTube Master 4K/1080p, 9:16 TikTok/Reels/Shorts, 1:1 Instagram Square, and 720p LMS/Web variants) from ONE approved master project timeline.
+
+---
+
+## 2. Evidence of Existing WP017 Infrastructure & Reuse Strategy
+
+WP018 is designed to maximize technical reuse of WP017 infrastructure. Rather than creating duplicate worker queues or re-implementing job fencing, WP018 reuses the WP017 cloud render worker machinery.
+
+```mermaid
+graph TD
+    Project[Approved Project & Timeline vN] --> ExportUI[Frontend Export Preset Workspace]
+    ExportUI --> BatchSubmit["POST /api/v1/projects/{id}/renders/export-batch"]
+    
+    BatchSubmit --> BudgetGate[BudgetService.check_budget_before_dispatch for Total Batch Cost]
+    BudgetGate --> BatchRecord[Create RenderBatch Audit Record]
+    
+    BatchRecord --> Job1["RenderJob 1: YT_MASTER_1080P (16:9)"]
+    BatchRecord --> Job2["RenderJob 2: TIKTOK_REELS_9X16 (9:16)"]
+    BatchRecord --> Job3["RenderJob 3: INSTAGRAM_SQUARE (1:1)"]
+    
+    Job1 --> WorkerQueue[Stateless CloudRenderWorker Pool]
+    Job2 --> WorkerQueue
+    Job3 --> WorkerQueue
+    
+    WorkerQueue --> FFmpegEngine[FFmpegRenderExecutor with Aspect/Preset Filtergraph]
+    FFmpegEngine --> S3Storage[Object Storage: projects/{id}/exports/vN/{preset}_{job_id}.mp4]
+    S3Storage --> AssetEntry[Immutable Asset Creation: asset_type=EXPORT_VIDEO]
+    AssetEntry --> SettledLedger[UsageLedger Cost Reconciliation: CONFIRMED]
+```
+
+### Infrastructure Reused from WP017:
+- **`RenderJob` Table & State Machine:** States (`QUEUED`, `CLAIMED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `RECONCILIATION_REQUIRED`) remain identical.
+- **Worker Claim & Lease Fencing:** `claim_next_render_job()`, worker heartbeat, lease expiration reclaims, and `max_retries = 3` policy are 100% reused.
+- **`CloudRenderWorker` Lifecycle:** Scratch disk creation, S3 asset downloads, streaming uploads, error handling, and cleanup logic are 100% reused.
+- **`FFmpegRenderExecutor` Process Boundary:** Core process execution model is reused; filtergraph generation is extended to support target aspect ratios, scaling/cropping/padding, audio stem routing, and subtitle overlays.
+- **Budget & Usage Ledger:** `BudgetService` pre-execution check and attempt-specific `UsageLedger` reservations (`cost_status="ESTIMATED"` -> `cost_status="CONFIRMED"`) are 100% reused.
+
+---
+
+## 3. Detailed Answers to Key PRE1 Questions (A through I)
+
+### Question A: Render Source — Timeline vs Master Asset
+- **Decision:** Render directly from **Approved Assembly Timeline & raw shot assets** via single-pass FFmpeg filtergraphs (with optional master asset fallback if raw assets are purged).
+- **Rationale:** 
+  1. **Visual Quality & Single-Pass Encoding:** Re-encoding an already H.264 compressed master MP4 file introduces severe macroblocking, color space degradation, and generation loss. Single-pass encoding directly from raw shot assets yields pristine 4K/1080p outputs.
+  2. **Audio Track & Subtitle Precision:** Exporting multi-language audio stems (e.g. Thai VO vs English VO) or burned-in subtitles requires access to the raw timeline placement specifications and audio stem files.
+  3. **Cropping & Aspect Adjustments:** Pan-and-scan or subject-center cropping operates cleanly when scaling raw clip streams directly in FFmpeg.
+
+### Question B: Preset Identity Model
+- **Decision:** Dual-level preset identity with **immutable submission snapshots**.
+  1. **System Presets:** Built-in standard profiles (`YT_MASTER_4K`, `YT_STANDARD_1080P`, `TIKTOK_REELS_9X16`, `INSTAGRAM_SQUARE_1X1`, `LMS_WEB_720P`).
+  2. **Custom Preset Overrides:** User-defined parameters (custom resolution, target bitrate, audio language stem, subtitle mode, watermarking).
+  3. **Immutable Snapshot on Submission:** When a job is submitted, the full resolved preset specification is serialized into `RenderJob.render_metadata["preset_snapshot"]`. Future updates to system preset definitions will never alter historical render execution behavior.
+
+### Question C: Idempotency Identity
+- **Decision:** Deterministic idempotency key format:
+  `idempotency_key = f"{project_id}:{timeline_id}:{timeline_version}:{preset_id}:{preset_snapshot_hash}"`
+- **Replay Behavior:** Submitting an export request with an active (`QUEUED`, `CLAIMED`, `RUNNING`) job matching the idempotency key returns the existing job. Submitting a new export for a `COMPLETED` target creates a new timestamped idempotency key (`FULL_HISTORY_RETENTION`).
+
+### Question D: History & Re-render Semantics
+- **Decision:** Strict adherence to `FULL_HISTORY_RETENTION` and `NO_SILENT_HISTORY_LOSS`.
+- **Behavior:** Prior export files, failed attempts, and historical `RenderJob` records are NEVER overwritten or deleted. Every export run generates a distinct `RenderJob` record, distinct `UsageLedger` entry, and distinct `Asset` row.
+
+### Question E: Multiple Variants Submission Model
+- **Decision:** Parent **`RenderBatch`** grouping with independent **`RenderJob`** worker execution.
+- **API Endpoint:** `POST /api/v1/projects/{project_id}/renders/export-batch`
+- **Payload:** Accepts an array of target preset IDs / custom specs.
+- **Execution:** Spawns one `RenderBatch` audit row for UI tracking, plus N individual `RenderJob` rows in `QUEUED` status.
+
+### Question F: Partial Failure Isolation
+- **Decision:** 100% isolation between variant jobs.
+- **Behavior:** Each variant `RenderJob` executes independently. If `TIKTOK_REELS_9X16` fails due to a missing font file for burned-in subtitles, `YT_MASTER_1080P` and `INSTAGRAM_SQUARE_1X1` continue executing and completing normally. The parent batch reflects a partial success state (`COMPLETED_WITH_ERRORS`).
+
+### Question G: Cost Accounting & Budget Safety
+- **Decision:** Pre-execution batch validation + attempt-specific reservations per variant.
+- **Behavior:**
+  1. `BudgetService.check_budget_before_dispatch()` verifies that project remaining budget covers the sum of estimated costs for ALL requested variants in the batch before any job is created.
+  2. Each variant `RenderJob` creates its own `UsageLedger` reservation entry (`idempotency_key="export_reserve_{job_id}_attempt_{attempt_num}"`).
+  3. Final actual compute cost is reconciled upon job completion.
+
+### Question H: Storage Key Naming & Output Asset Model
+- **Decision:** Stable, unique S3 storage key hierarchy and immutable asset type `EXPORT_VIDEO`.
+- **Storage Key Pattern:** `projects/{project_id}/exports/v{timeline_version}/{preset_id}_{job_id}.mp4`
+- **Asset Registration:** Completed exports are registered in `assets` table with:
+  - `asset_type = "EXPORT_VIDEO"`
+  - `is_locked = True`
+  - `metadata = {"preset_id": preset_id, "aspect_ratio": aspect_ratio, "resolution": "1080x1920", "timeline_version": timeline_version}`
+
+### Question I: User Experience (UX) Flow
+- **Decision:** Integrated **Export Workspace Modal** on top of Simple and Advanced Timeline views.
+  1. User clicks **"Export & Platform Presets"** on an approved timeline.
+  2. Modal presents preset options:
+     - [x] YouTube Master 1080p (16:9) — Est. $0.50
+     - [x] TikTok / Reels (9:16) — Est. $0.50
+     - [ ] Instagram Square (1:1) — Est. $0.50
+  3. Displays Total Estimated Cost ($1.00) and Project Remaining Budget.
+  4. Single click on **"Confirm & Export (2 Variants)"** triggers batch submission.
+  5. Modal switches to real-time progress view displaying progress bars and download buttons for completed variants.
+
+---
+
+## 4. Platform Presets & Parameter Specifications
+
+| Preset ID | Target Platform | Aspect Ratio | Dimensions | Video Codec | Audio Codec | Bitrate Profile | Framing Strategy | Subtitle Mode |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `YT_MASTER_4K` | YouTube Master | `16:9` | 3840x2160 | H.264 (High) | AAC 320k | 25 Mbps | Native 16:9 | Optional Soft-Sub (.srt) |
+| `YT_STANDARD_1080P`| YouTube Standard | `16:9` | 1920x1080 | H.264 (Main) | AAC 192k | 10 Mbps | Native 16:9 | Optional Soft-Sub (.srt) |
+| `TIKTOK_REELS_9X16`| TikTok / Shorts / Reels | `9:16` | 1080x1920 | H.264 (Main) | AAC 192k | 8 Mbps | Center-Crop / Padding | Burned-in Subtitles |
+| `INSTAGRAM_SQUARE` | Instagram Feed | `1:1` | 1080x1080 | H.264 (Main) | AAC 160k | 6 Mbps | Pillarbox / Center-Crop | Burned-in Subtitles |
+| `LMS_WEB_720P` | Corporate LMS / Web | `16:9` | 1280x720 | H.264 (Baseline)| AAC 128k | 3 Mbps | Native 16:9 | Dual Language Soft-Sub |
+
+---
+
+## 5. Scope Boundaries
+
+### What WP018 MUST Deliver:
+1. Preset definitions registry (`RenderPreset` model or static preset specification dictionary).
+2. `RenderJob` extension or `RenderBatch` entity for multi-variant batch management.
+3. Aspect ratio scaling, padding, and cropping filtergraphs in `FFmpegRenderExecutor` (`16:9`, `9:16`, `1:1`).
+4. Audio stem track selection and subtitle burning / sidecar attachment in `FFmpegRenderExecutor`.
+5. Batch export submission endpoint (`POST /projects/{id}/renders/export-batch`).
+6. Export status tracking endpoints (`GET /projects/{id}/renders/batches/{batch_id}`).
+7. Immutable `Asset` creation with `asset_type="EXPORT_VIDEO"`.
+8. Frontend **Export & Platform Presets** UI modal with cost estimate, preset checkboxes, and progress tracking.
+9. Unit and integration test suite verifying multi-variant rendering, aspect ratio compliance, and budget protection.
+
+### What WP018 MUST NOT Deliver (Hard Blocks / Out of Scope):
+- **`.orbis` Archive Package:** Exporting/importing project archives is deferred to **P4-WP019**.
+- **System Release Closure / UAT:** Full release verification and deployment gates are deferred to **P4-WP020**.
+- **Raw AI Video Generation:** Re-generating AI video shots via Vidu/ImageProvider is DISALLOWED. Raw shot clips are reused.
+- **ComfyUI Integration:** ComfyUI worker execution is FUTURE / OUT OF SCOPE.
+- **External Automation Gateway:** n8n / Hermes integration is POST-CORE V1.
+- **Social Auto-Posting / Publishing APIs:** Direct uploading to YouTube/TikTok APIs is POST-CORE V1.
+- **Social Analytics:** Views, likes, and engagement tracking is POST-CORE V1.
+- **Full NLE Timeline Editor:** Complex multi-track DAW editing is OUT OF SCOPE.
+
+---
+
+## 6. Data Model & API Changes
+
+### Proposed Database Additions (WP018 Migration):
+```python
+# app/models/render_batch.py
+class RenderBatch(Base):
+    __tablename__ = "render_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    timeline_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("assembly_timelines.id", ondelete="CASCADE"), nullable=False)
+    timeline_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="PROCESSING", nullable=False)  # PROCESSING, COMPLETED, COMPLETED_WITH_ERRORS, FAILED
+    total_variants: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_variants: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_variants: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    estimated_total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+```
+
+`RenderJob` table will receive a new nullable foreign key `batch_id`:
+```python
+batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    PG_UUID(as_uuid=True), ForeignKey("render_batches.id", ondelete="SET NULL"), nullable=True
+)
+```
+
+### Proposed API Endpoints:
+- `POST /api/v1/projects/{project_id}/renders/export-batch` — Submit multi-variant export batch.
+- `GET /api/v1/projects/{project_id}/renders/batches/{batch_id}` — Get batch status summary and variant job list.
+- `GET /api/v1/renders/presets` — List available system export presets and target specifications.
+
+---
+
+## 7. Explicit Acceptance Criteria for WP018
+
+1. **Preset Accuracy:** Generating outputs for `YT_MASTER_1080P`, `TIKTOK_REELS_9X16`, and `INSTAGRAM_SQUARE` produces valid MP4 video files matching exact target dimensions (`1920x1080`, `1080x1920`, `1080x1080`).
+2. **Approval Gate Enforcement:** Attempting to submit an export batch for an unapproved timeline revision fails closed with `400 Bad Request`.
+3. **Budget Safety:** Submitting an export batch whose combined estimated cost exceeds project budget fails closed with `400 Bad Request` prior to creating any `RenderJob` rows.
+4. **Partial Failure Resilience:** If one variant fails during worker rendering, remaining sibling variants in the batch complete successfully and enter `COMPLETED` status.
+5. **Full History Retention:** Multiple exports of the same timeline revision create distinct `RenderJob` and `Asset` rows without overwriting prior outputs.
+6. **Worker Fencing & Lease Recovery:** Stale export worker claims expire safely and are reclaimed by available workers without losing attempt ledger tracking.
+7. **Frontend Usability:** The Export & Platform Presets UI modal displays accurate cost estimates, allows selecting target presets, and updates variant progress live.
+
+---
+
+## 8. Recommended WP018 Implementation Contract
+
+```text
+WP018 CONTRACT VERDICT: READY FOR OWNER AUTHORIZATION
+
+Target Work Package: P4-WP018 — Multi-Output & Platform Export Presets
+Dependencies: P3-WP017 (Cloud Render Workers) MERGED in main at 07ba0fdaf1719a7d6ed882155dfb113a4729d55a
+Scope: Multi-variant aspect/resolution export presets, FFmpeg scaling/cropping, batch export submission, frontend export modal.
+Out of Scope: .orbis archive (WP019), release closure (WP020), raw AI video generation, ComfyUI, social auto-posting.
+Execution Plane: Antigravity (when explicitly authorized by Owner).
+```
