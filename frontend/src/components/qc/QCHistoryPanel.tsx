@@ -1,6 +1,7 @@
-import React from 'react';
-import type { Project, ApprovalStatus, GenerationJob, BudgetSummary, OrchestrationAuditResponse } from '../../api/types';
-import { CheckSquare, History, ShieldCheck, FileCheck, GitCommit } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import type { Project, ApprovalStatus, GenerationJob, BudgetSummary, OrchestrationAuditResponse, QCRun, ApprovalRecord } from '../../api/types';
+import { apiClient } from '../../api/client';
+import { CheckSquare, History, ShieldCheck, FileCheck, GitCommit, ChevronLeft, ChevronRight, Award, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
 interface QCHistoryPanelProps {
   project: Project;
@@ -19,6 +20,33 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
   onUpdateStatus,
   onApproveStage,
 }) => {
+  const [qcRuns, setQcRuns] = useState<QCRun[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [qcTotal, setQcTotal] = useState<number>(0);
+  const [qcOffset, setQcOffset] = useState<number>(0);
+  const qcLimit = 10;
+  const [loadingQcHistory, setLoadingQcHistory] = useState<boolean>(false);
+
+  const fetchQCHistory = async () => {
+    setLoadingQcHistory(true);
+    try {
+      if (apiClient && typeof apiClient.getQCHistory === 'function') {
+        const res = await apiClient.getQCHistory(project.id, qcOffset, qcLimit);
+        setQcRuns(res?.qc_runs || []);
+        setApprovals(res?.approvals || []);
+        setQcTotal(res?.total_count || 0);
+      }
+    } catch (err) {
+      console.error('Failed to fetch QC history:', err);
+    } finally {
+      setLoadingQcHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQCHistory();
+  }, [project.id, qcOffset]);
+
   const completedJobs = jobs.filter((j) => j.status === 'COMPLETED');
   const failedJobs = jobs.filter((j) => j.status === 'FAILED');
 
@@ -202,6 +230,151 @@ export const QCHistoryPanel: React.FC<QCHistoryPanelProps> = ({
             </div>
           ))}
         </div>
+      </div>
+
+      {/* QC Audit & Warning Decision Log */}
+      <div
+        style={{
+          backgroundColor: 'var(--bg-panel)',
+          borderRadius: '10px',
+          border: '1px solid var(--border-subtle)',
+          padding: '20px',
+        }}
+        data-testid="qc-runs-history-card"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Award size={20} color="#818cf8" />
+            <div>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
+                QC Evaluations & Warning Decisions History
+              </h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                Historical audit trail of auto QC runs, warning decisions with actor reasons, and release approvals.
+              </p>
+            </div>
+          </div>
+
+          {/* Pagination Controls */}
+          {qcTotal > qcLimit && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={() => setQcOffset(Math.max(0, qcOffset - qcLimit))}
+                disabled={qcOffset === 0 || loadingQcHistory}
+                style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-button)', color: 'var(--text-primary)', cursor: qcOffset === 0 ? 'not-allowed' : 'pointer' }}
+                data-testid="qc-history-prev-page"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                {qcOffset + 1}-{Math.min(qcOffset + qcLimit, qcTotal)} of {qcTotal}
+              </span>
+              <button
+                onClick={() => setQcOffset(qcOffset + qcLimit)}
+                disabled={qcOffset + qcLimit >= qcTotal || loadingQcHistory}
+                style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-subtle)', backgroundColor: 'var(--bg-button)', color: 'var(--text-primary)', cursor: qcOffset + qcLimit >= qcTotal ? 'not-allowed' : 'pointer' }}
+                data-testid="qc-history-next-page"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Approvals Summary */}
+        {approvals.length > 0 && (
+          <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <h4 style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#22c55e', margin: 0 }}>
+              Release Approvals ({approvals.length})
+            </h4>
+            {approvals.map((appr) => (
+              <div key={appr.id} style={{ padding: '10px 14px', borderRadius: '6px', backgroundColor: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.2)', fontSize: '0.8125rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>Approved Cut v{appr.timeline_version} by {appr.approved_by}</strong>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    {new Date(appr.created_at).toLocaleString()}
+                  </span>
+                </div>
+                {appr.notes && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                    Notes: {appr.notes}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Past QC Runs */}
+        {loadingQcHistory ? (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+            Loading QC audit log...
+          </div>
+        ) : qcRuns.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+            No past QC runs recorded for this project.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="qc-runs-list">
+            {qcRuns.map((run) => (
+              <div
+                key={run.id}
+                style={{
+                  padding: '14px',
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {run.status === 'PASSED' ? (
+                      <CheckCircle2 size={16} color="#22c55e" />
+                    ) : run.status === 'BLOCKED' ? (
+                      <XCircle size={16} color="#ef4444" />
+                    ) : (
+                      <AlertTriangle size={16} color="#eab308" />
+                    )}
+                    <strong>QC Run (Revision v{run.timeline_version})</strong>
+                    <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, backgroundColor: run.status === 'PASSED' ? 'rgba(34, 197, 94, 0.15)' : run.status === 'BLOCKED' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(234, 179, 8, 0.15)', color: run.status === 'PASSED' ? '#22c55e' : run.status === 'BLOCKED' ? '#ef4444' : '#eab308' }}>
+                      {run.status}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    Actor: {run.actor} • {new Date(run.created_at).toLocaleString()}
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                  <span>Blockers: {run.blocker_count}</span>
+                  <span>Warnings: {run.warning_count}</span>
+                  <span>Decisions: {run.decisions?.length || 0}</span>
+                </div>
+
+                {/* Warning Decisions */}
+                {run.decisions && run.decisions.length > 0 && (
+                  <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-tertiary)' }}>Recorded Warning Decisions:</div>
+                    {run.decisions.map((dec) => (
+                      <div key={dec.id} style={{ fontSize: '0.75rem', padding: '6px 10px', borderRadius: '4px', backgroundColor: 'var(--bg-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <div>
+                          <span style={{ fontWeight: 600, color: dec.decision === 'ACCEPTED_WITH_REASON' ? '#22c55e' : '#ef4444' }}>
+                            {dec.decision}:
+                          </span>{' '}
+                          {dec.reason || 'No reason provided'}
+                        </div>
+                        <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          by {dec.actor} at {new Date(dec.decided_at).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Generation History & Discoverability */}

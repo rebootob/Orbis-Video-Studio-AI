@@ -1133,19 +1133,28 @@ class ProductionOrchestrator:
             )
 
         # Apply approval
-        project.status = target_stage
-        cls.record_audit(
-            db=db,
-            project_id=project_id,
-            from_state=current,
-            to_state=target_stage,
-            action=f"APPROVE_{target_stage}",
-            actor=actor,
-            result=OrchestrationActionResult.APPLIED,
-            reason_code="APPROVAL_GRANTED",
-            detail=notes,
-        )
-        db.commit()
+        if current in ("FINAL_REVIEW", "READY_FOR_REVIEW") or target_stage in ("COMPLETED", "APPROVED"):
+            from app.services.qc import QCService
+            QCService.approve_production(
+                db=db,
+                project_id=project_id,
+                notes=notes,
+                actor=actor,
+            )
+        else:
+            project.status = target_stage
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state=target_stage,
+                action=f"APPROVE_{target_stage}",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                reason_code="APPROVAL_GRANTED",
+                detail=notes,
+            )
+            db.commit()
 
         # Real AUTO mode behavior:
         # GENERATE_STORY / GENERATE_STORYBOARD / GENERATE_SHOT_PLAN are chargeable provider actions.

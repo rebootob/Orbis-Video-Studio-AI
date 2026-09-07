@@ -309,6 +309,67 @@ class AssemblyService:
         return timeline
 
     @classmethod
+    def _ensure_unapproved_active_timeline(cls, db: Session, timeline: AssemblyTimeline, actor: str = "system") -> AssemblyTimeline:
+        """If the current active timeline is APPROVED, preserve it as immutable history
+        and spawn a new active timeline revision (vN+1, status='DRAFT') for edits."""
+        if timeline.status != "APPROVED":
+            return timeline
+
+        timeline.is_active = False
+
+        new_timeline = AssemblyTimeline(
+            id=uuid.uuid4(),
+            project_id=timeline.project_id,
+            version=timeline.version + 1,
+            status="DRAFT",
+            is_active=True,
+        )
+        db.add(new_timeline)
+        db.flush()
+
+        for scene in timeline.scenes:
+            new_scene = AssemblyScene(
+                id=uuid.uuid4(),
+                timeline_id=new_timeline.id,
+                scene_id=scene.scene_id,
+                scene_order=scene.scene_order,
+            )
+            db.add(new_scene)
+            db.flush()
+
+            for p in scene.shot_placements:
+                new_p = AssemblyShotPlacement(
+                    id=uuid.uuid4(),
+                    timeline_id=new_timeline.id,
+                    assembly_scene_id=new_scene.id,
+                    scene_id=p.scene_id,
+                    shot_id=p.shot_id,
+                    shot_order=p.shot_order,
+                    visual_asset_id=p.visual_asset_id,
+                    source_type=p.source_type,
+                    trim_in=p.trim_in,
+                    trim_out=p.trim_out,
+                    effective_duration=p.effective_duration,
+                    still_duration=p.still_duration,
+                    transition_to_next=p.transition_to_next,
+                    is_locked=p.is_locked,
+                    version=p.version + 1,
+                )
+                db.add(new_p)
+
+        audit = TimelineAudit(
+            id=uuid.uuid4(),
+            project_id=timeline.project_id,
+            timeline_id=new_timeline.id,
+            action="CLONE_NEW_REVISION_AFTER_APPROVAL",
+            actor=actor,
+            change_reason=f"Spawned active timeline revision v{new_timeline.version} to preserve approved revision v{timeline.version}",
+        )
+        db.add(audit)
+        db.flush()
+        return new_timeline
+
+    @classmethod
     def reorder_scenes(cls, db: Session, project_id: str, scene_orders: List[Tuple[str, int]], actor: str = "USER") -> AssemblyTimeline:
         p_uuid = _to_uuid(project_id)
         project = db.query(Project).filter(Project.id == p_uuid).first()
@@ -318,6 +379,8 @@ class AssemblyService:
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
+        else:
+            timeline = cls._ensure_unapproved_active_timeline(db, timeline, actor=actor)
 
         scene_map = {str(s.scene_id): s for s in timeline.scenes}
         for scene_id, order in scene_orders:
@@ -348,6 +411,8 @@ class AssemblyService:
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
+        else:
+            timeline = cls._ensure_unapproved_active_timeline(db, timeline, actor=actor)
 
         sc_uuid = _to_uuid(scene_id)
         assembly_scene = db.query(AssemblyScene).filter(
@@ -396,6 +461,8 @@ class AssemblyService:
         timeline = cls.get_active_timeline(db, project_id)
         if not timeline:
             timeline = cls.auto_assemble_timeline(db, project_id)
+        else:
+            timeline = cls._ensure_unapproved_active_timeline(db, timeline, actor=actor)
 
         sh_uuid = _to_uuid(shot_id)
         placement = db.query(AssemblyShotPlacement).filter(
@@ -460,12 +527,22 @@ class AssemblyService:
         active_timeline = cls.get_active_timeline(db, project_id)
         if not active_timeline:
             raise HTTPException(status_code=404, detail="No active timeline found for project")
+        else:
+            active_timeline = cls._ensure_unapproved_active_timeline(db, active_timeline, actor=actor)
 
         pl_uuid = _to_uuid(placement_id)
         placement = db.query(AssemblyShotPlacement).filter(
             AssemblyShotPlacement.id == pl_uuid,
             AssemblyShotPlacement.timeline_id == active_timeline.id
         ).first()
+
+        if not placement:
+            old_placement = db.query(AssemblyShotPlacement).filter(AssemblyShotPlacement.id == pl_uuid).first()
+            if old_placement:
+                placement = db.query(AssemblyShotPlacement).filter(
+                    AssemblyShotPlacement.shot_id == old_placement.shot_id,
+                    AssemblyShotPlacement.timeline_id == active_timeline.id
+                ).first()
 
         if not placement:
             raise HTTPException(status_code=404, detail="Placement not found in active timeline for project")

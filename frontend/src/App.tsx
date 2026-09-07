@@ -28,6 +28,7 @@ import { BudgetLedgerPanel } from './components/budget/BudgetLedgerPanel';
 import { AudioProductionPanel } from './components/audio/AudioProductionPanel';
 import { SimpleTimelinePanel } from './components/assembly/SimpleTimelinePanel';
 import { QCHistoryPanel } from './components/qc/QCHistoryPanel';
+import { SimpleQCReview } from './components/qc/SimpleQCReview';
 import {
   Film,
   BookOpen,
@@ -838,14 +839,20 @@ export const App: React.FC = () => {
             )}
 
             {activeTab === 'qc' && (
-              <QCHistoryPanel
-                project={selectedProject}
-                jobs={jobs}
-                budget={budget}
-                orchestrationAudits={orchestrationHistory}
-                onUpdateStatus={handleUpdateStatus}
-                onApproveStage={handleApproveStage}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <SimpleQCReview
+                  projectId={selectedProject.id}
+                  onApprovalComplete={() => loadWorkspaceData(selectedProject)}
+                />
+                <QCHistoryPanel
+                  project={selectedProject}
+                  jobs={jobs}
+                  budget={budget}
+                  orchestrationAudits={orchestrationHistory}
+                  onUpdateStatus={handleUpdateStatus}
+                  onApproveStage={handleApproveStage}
+                />
+              </div>
             )}
           </main>
         </>
