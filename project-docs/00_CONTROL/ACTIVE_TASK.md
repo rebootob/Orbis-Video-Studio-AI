@@ -13,25 +13,31 @@ ACTIVE_WORK_PACKAGE = P4-WP019
 Status:
 
 ```text
-P4-WP019 IMPLEMENTATION IN PROGRESS
+P4-WP019 IN PROGRESS / CHANGES REQUIRED
 ```
 
 Current Work Tracking:
 
 ```text
 Active Package: P4-WP019
-Status: IN_PROGRESS / IMPLEMENTATION
+Status: IN_PROGRESS / CHANGES REQUIRED
 Canonical main HEAD: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
 Branch: ai/p4-wp019-orbis-archive
-Gate: P4-WP019 / IMPLEMENTATION
+PR: #50
+Reviewed HEAD: 59596c0e21c6d685a160742fd498128a53b4682b
+Latest Independent Review: Review ID 5135776036 (CHANGES REQUIRED)
+Latest PR commit: 632f70e9159413cb36ea4f767318c605c45497d1
+Gate: P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
+Implementation Authorized: YES
+P4-WP020: PROPOSED / NOT AUTHORIZED
 ```
 
 Execution Roles:
 
 ```text
-Owner = final human authority / authorization
+Owner = final human authority / authorization / merge approval
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = bounded low-credit Execution Plane
+Antigravity = bounded low-credit Execution Plane (STOP / NONE after doc sync)
 Codex = STOP
 Claude Code = STOP
 ```
@@ -89,14 +95,44 @@ Claude Code = STOP
 
 ---
 
+## P4-WP019 Implementation & Review History
+
+### Delivered Scope (PR #50)
+1. `.orbis` ZIP-compatible container subsystem with POSIX path safety.
+2. Canonical manifest & checksum design (`checksums.sha256` root trust, canonical RFC 8785 JSON).
+3. Archive security validation (Zip Slip, bomb decompression ratio, size limits, absolute/UNC path guards).
+4. Project graph export/import with full entity coverage.
+5. `FULL_SELF_CONTAINED` asset packaging.
+6. CLONE mode (fresh UUID remap, storage re-upload, source lineage).
+7. RESTORE mode (original identity, fail-closed collision detection).
+8. Phase-3 canonical in-memory preflight validation (`ArchivePreflightValidator`).
+9. Historical execution fencing (`imported_historical = True`, `execution_disabled = True`, worker lease clearing).
+10. RenderJob / GenerationJob active partial unique-index separation.
+11. UsageLedger imported historical financial fencing.
+12. Budget service exclusion of imported historical spend.
+13. REST API endpoints (`/export`, `/import/validate`, `/import/execute`).
+14. Frontend Export and Import modals integrated into `ProjectDashboard`.
+15. Extensive archive, security, migration, and regression test suites.
+
+### Review Blockers & Resolution
+- **Initial Review (5133420916)**: Historical truth mutation, missing Phase-3 graph preflight, asset completeness -> Addressed at HEAD `59596c0e21c6d685a160742fd498128a53b4682b`.
+- **Latest Review (5135776036 - CHANGES REQUIRED)**:
+  1. *Migration 020 fail-closed downgrade*: Precheck UsageLedger `(provider, provider_event_id)` collisions before any schema change.
+  2. *Archive self-consistency*: Enforce `FULL_SELF_CONTAINED`, disallow `include_renders=False`, assert `actual_size == catalog size_bytes == Asset.file_size_bytes`.
+  - Delivered in commit `632f70e9159413cb36ea4f767318c605c45497d1` with 412 backend tests and 52 frontend tests passing.
+
+---
+
 ## Next Allowed Action
 
 1. `ACTIVE_WORK_PACKAGE = P4-WP019`.
-2. `P4-WP019: IN_PROGRESS / IMPLEMENTATION`.
-3. `P4-WP020: PROPOSED / NOT AUTHORIZED`.
-4. Implement locked P4-WP019 scope per PRE1 specification.
-5. Deliver full test suite and validation.
-6. Antigravity: bounded low-credit Execution Plane.
-7. Codex: STOP.
-8. Claude Code: STOP.
-9. Do NOT start WP020.
+2. `CURRENT_GATE = P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE`.
+3. `P4-WP019 = IN_PROGRESS / CHANGES REQUIRED` (PR #50, branch `ai/p4-wp019-orbis-archive`).
+4. Reviewed implementation HEAD = `59596c0e21c6d685a160742fd498128a53b4682b` (Review ID 5135776036: CHANGES REQUIRED).
+5. Latest PR commit = `632f70e9159413cb36ea4f767318c605c45497d1`.
+6. Antigravity = STOP / NONE after documentation sync.
+7. Codex = STOP.
+8. Claude Code = STOP.
+9. Next Step = ChatGPT Independent Review on PR #50.
+10. Do NOT merge without Owner approval.
+11. Do NOT start WP020 (PROPOSED / NOT AUTHORIZED).

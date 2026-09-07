@@ -112,13 +112,20 @@ WP018 Status: PASS / CLOSED / MERGED
 
 ```text
 ACTIVE WORK PACKAGE = P4-WP019
-STATUS = IN_PROGRESS / IMPLEMENTATION
+STATUS = IN_PROGRESS / CHANGES REQUIRED
 BRANCH = ai/p4-wp019-orbis-archive
-MAIN_HEAD = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-ANTIGRAVITY = bounded low-credit Execution Plane
+PR = #50
+CANONICAL_MAIN_HEAD = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+PRE1_MERGE_COMMIT = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+CURRENT_REVIEWED_HEAD = 59596c0e21c6d685a160742fd498128a53b4682b
+LATEST_REVIEW_ID = 5135776036
+LATEST_REVIEW_VERDICT = CHANGES REQUIRED
+LATEST_PR_COMMIT = 632f70e9159413cb36ea4f767318c605c45497d1
+GATE = P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
+ANTIGRAVITY = STOP / NONE after documentation sync
 CODEX = STOP
 CLAUDE_CODE = STOP
-P4-WP019 = IN_PROGRESS / IMPLEMENTATION
+P4-WP019 = IN_PROGRESS / CHANGES REQUIRED
 P4-WP020 = PROPOSED / NOT AUTHORIZED
 ```
 
@@ -126,6 +133,42 @@ P4-WP019 implementation authorized by Owner.
 Implementing locked .orbis archive export/import scope.
 Do NOT merge without Owner approval.
 Do NOT start WP020.
+
+### P4-WP019 Delivered Capabilities in PR #50
+1. `.orbis` ZIP-compatible archive subsystem with POSIX path safety.
+2. Canonical manifest & checksum design (`manifest.json`, `checksums.sha256`, canonical RFC 8785 JSON, SHA-256 trust root).
+3. Archive security validation (Zip Slip/path traversal rejection, absolute/UNC path guards, extension denylist, compression ratio/decompression limits, zip magic bytes).
+4. Full project graph export and import across all entities.
+5. `FULL_SELF_CONTAINED` asset packaging direction.
+6. CLONE mode (fresh UUID remap, FK translation, new storage keys, lineage recording).
+7. RESTORE mode (original identities preserved, fail-closed collision rejection).
+8. Phase-3 canonical preflight validation (`ArchivePreflightValidator` checking files, duplicate IDs, ownership, FK integrity, polymorphic AssetLocks, asset completeness).
+9. Historical execution fencing (`imported_historical = True`, `execution_disabled = True`, worker lease clearing, original execution status/history preserved).
+10. RenderJob / GenerationJob active partial unique-index separation.
+11. UsageLedger imported historical financial fencing.
+12. Budget service exclusion of imported historical costs.
+13. REST API endpoints (`/projects/{id}/export`, `/projects/import/validate`, `/projects/import/execute`).
+14. Frontend Export and Import modals integrated into `ProjectDashboard`.
+15. Extensive regression, migration, and archive test suites.
+
+### Review History & Blockers
+- **Initial Implementation HEAD (`92c305ac1d5406e14cb3291805b6395c5b1707a2`)**:
+  - Independent Review ID `5133420916`: CHANGES REQUIRED (historical truth mutation, missing Phase-3 graph preflight, asset completeness).
+  - Materially corrected at reviewed HEAD `59596c0e21c6d685a160742fd498128a53b4682b`.
+- **Latest Review (`5135776036` on HEAD `59596c0e21c6d685a160742fd498128a53b4682b`)**:
+  - Verdict: CHANGES REQUIRED on 2 blockers:
+    1. *Migration 020 fail-closed downgrade*: Precheck UsageLedger `(provider, provider_event_id)` collisions before any schema change.
+    2. *Archive self-consistency*: Enforce `FULL_SELF_CONTAINED`, disallow `include_renders=False`, assert `actual_size == catalog size_bytes == Asset.file_size_bytes`.
+  - Delivered in commit `632f70e9159413cb36ea4f767318c605c45497d1` with 412 backend tests and 52 frontend tests passing.
+
+### Scope & Progress
+- 18 of 20 work packages merged into main = 90%.
+- WP019 implementation ~97% complete.
+- Overall Core V1 ~94–95% complete.
+- Core V1 completion still requires:
+  1. WP019 PASS / CLOSED / MERGED
+  2. Post-WP019 control sync
+  3. WP020 E2E / UAT / Core V1 Release
 
 ### Performance & Scalability Guardrails Delivered in WP011
 

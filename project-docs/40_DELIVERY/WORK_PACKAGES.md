@@ -233,9 +233,15 @@ Important product locks:
   - Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention.
 
 - **P4-WP019 — Project Export/Import Archive Package (.orbis)**
-  - **Status:** PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
+  - **Status:** IN_PROGRESS / CHANGES REQUIRED (PR #50)
+  - **Branch:** `ai/p4-wp019-orbis-archive`
+  - **PRE1 Reviewed HEAD:** `e1deff16aa93fb3b2e68d404415971351c4a9e46`
+  - **PRE1 Merge Commit:** `5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5` (PR #49)
+  - **Reviewed Implementation HEAD:** `59596c0e21c6d685a160742fd498128a53b4682b`
+  - **Latest Review:** CHANGES REQUIRED (Review ID 5135776036)
+  - **Latest PR Commit:** `632f70e9159413cb36ea4f767318c605c45497d1`
   - **Proposal Document:** [`project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md`](P4_WP019_PROPOSAL.md)
-  - Full-fidelity, portable `.orbis` ZIP container format, non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members), canonical relative POSIX path validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed 4-phase transactional import with atomic DB rollback and storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), preservation of original historical job execution status with worker fencing (`imported_historical = True`), and preservation of historical financial truth without spend double-counting.
+  - Full-fidelity, portable `.orbis` ZIP container format, non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members), canonical relative POSIX path validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed Phase-3 preflight validation (`ArchivePreflightValidator`), storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), preservation of original historical job execution status with worker fencing (`imported_historical = True`, `execution_disabled = True`), active partial unique index fencing, UsageLedger financial fencing, budget service historical spend exclusion, REST API endpoints, frontend Export/Import modals, and full test coverage.
 
 - **P4-WP020 — End-to-End System Integration, UAT & Core V1 Release**
   - **Status:** PROPOSED / NOT AUTHORIZED
