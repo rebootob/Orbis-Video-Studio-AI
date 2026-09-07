@@ -30,6 +30,7 @@ P3-WP014 = PASS / CLOSED / MERGED
 P3-WP015 = PASS / CLOSED / MERGED
 P3-WP016 = PASS / CLOSED / MERGED
 P3-WP017 = PASS / CLOSED / MERGED
+P4-WP018 = PASS / CLOSED / MERGED
 ```
 
 Key reviewed/merge truth:
@@ -94,6 +95,15 @@ WP017 Reviewed HEAD: 72d842936a7812aabec8df6b948930a0e296a553
 WP017 Merge commit: 72065b9c29350e54dd7811a00d7198c6765004d1
 WP017 Final Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
 WP017 Status: PASS / CLOSED / MERGED
+
+WP018 PR: #47 (MERGED / CLOSED)
+WP018 Branch: ai/p4-wp018-multi-output-export-presets
+WP018 PRE1 Reviewed HEAD: f51694643596acba54447cc0ab36bc8cbfd8dfd5
+WP018 PRE1 Merge commit: 96d53c30f0344dc84bb3d9205e5b7bbbde94885b
+WP018 Implementation Reviewed HEAD: fd745def2235fdaa6accf82ea2cb037a4fa42390
+WP018 Merge commit: 09e62876543ee7990919beb43600a1c748be545d
+WP018 Final Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
+WP018 Status: PASS / CLOSED / MERGED
 ```
 
 ---
@@ -102,17 +112,20 @@ WP017 Status: PASS / CLOSED / MERGED
 
 ```text
 ACTIVE WORK PACKAGE = NONE
-STATUS = POST-WP017 / P4-WP018 PRE1 PROPOSAL IN REVIEW
-BRANCH = docs/p4-wp018-pre1-proposal
+STATUS = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
+BRANCH = main
+MAIN_HEAD = 09e62876543ee7990919beb43600a1c748be545d
 ANTIGRAVITY = STOP / NONE (bounded low-credit Execution Plane when authorized)
 CODEX = STOP
 CLAUDE_CODE = STOP
+P4-WP019 = PROPOSED / NOT AUTHORIZED
+P4-WP020 = PROPOSED / NOT AUTHORIZED
 ```
 
-P4-WP018 PRE1 proposal is submitted and in review (`project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md`).
-No active Work Package implementation. Await explicit Owner authorization before starting WP018 implementation.
+P4-WP018 is merged and closed.
+No active Work Package implementation. Await explicit Owner authorization before starting WP019 PRE1 or any implementation work.
 Do NOT merge without Owner approval.
-Do NOT start or implement WP018 source code.
+Do NOT start WP019.
 
 ### Performance & Scalability Guardrails Delivered in WP011
 
@@ -276,7 +289,7 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD (`72065b9c29350e54dd7811a00d7198c6765004d1`).
+1. Fresh-fetch current `main` HEAD (`09e62876543ee7990919beb43600a1c748be545d`).
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
@@ -284,4 +297,4 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 6. Read this handoff.
 7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for explicit Owner authorization before starting implementation.
 8. Do not repeat closed work.
-9. Do not start WP018 automatically. P4-WP018 remains PROPOSED / NOT AUTHORIZED.
+9. Do not start WP019 automatically. P4-WP019 remains PROPOSED / NOT AUTHORIZED.
