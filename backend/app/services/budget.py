@@ -113,6 +113,9 @@ class BudgetService:
         project = query.first()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+        if lock_row:
+            project.updated_at = project.updated_at
+            db.flush()
         if project.budget_limit is None:
             return
 

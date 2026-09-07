@@ -23,16 +23,6 @@ def utc_now() -> datetime:
 
 
 class RenderJobService:
-    _project_locks: Dict[uuid.UUID, threading.Lock] = {}
-    _global_lock = threading.Lock()
-
-    @classmethod
-    def _get_project_lock(cls, project_id: uuid.UUID) -> threading.Lock:
-        with cls._global_lock:
-            if project_id not in cls._project_locks:
-                cls._project_locks[project_id] = threading.Lock()
-            return cls._project_locks[project_id]
-
     @classmethod
     def submit_render_job(
         cls,
@@ -43,58 +33,127 @@ class RenderJobService:
         custom_idempotency_key: Optional[str] = None,
         estimated_cost_usd: float = 0.50,
     ) -> RenderJob:
-        with cls._get_project_lock(project_id):
-            # Validate render_profile (WP017 supports MASTER render only)
-            if render_profile.upper() not in ("MASTER", "MASTER_HD"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported render profile '{render_profile}'. WP017 supports MASTER render only. Aspect/platform variants are deferred to WP018.",
-                )
+        # Validate render_profile (WP017 supports MASTER render only)
+        if render_profile.upper() not in ("MASTER", "MASTER_HD"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported render profile '{render_profile}'. WP017 supports MASTER render only. Aspect/platform variants are deferred to WP018.",
+            )
 
-            # 1. Resolve Timeline for project
-            if timeline_id:
-                timeline = (
-                    db.query(AssemblyTimeline)
-                    .filter(
-                        AssemblyTimeline.project_id == project_id,
-                        AssemblyTimeline.id == timeline_id,
-                    )
-                    .first()
-                )
-                if not timeline:
-                    raise HTTPException(status_code=404, detail="Specified timeline not found for project")
-            else:
-                timeline = (
-                    db.query(AssemblyTimeline)
-                    .filter(AssemblyTimeline.project_id == project_id)
-                    .order_by(AssemblyTimeline.version.desc())
-                    .first()
-                )
-                if not timeline:
-                    raise HTTPException(status_code=404, detail="No active timeline found for project")
-
-            # 2. Approval Gate Verification
-            approval = (
-                db.query(ApprovalRecord)
+        # 1. Resolve Timeline for project
+        if timeline_id:
+            timeline = (
+                db.query(AssemblyTimeline)
                 .filter(
-                    ApprovalRecord.project_id == project_id,
-                    ApprovalRecord.timeline_id == timeline.id,
-                    ApprovalRecord.timeline_version == timeline.version,
-                    ApprovalRecord.status == "APPROVED",
+                    AssemblyTimeline.project_id == project_id,
+                    AssemblyTimeline.id == timeline_id,
                 )
                 .first()
             )
-            if not approval:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Timeline version {timeline.version} is not approved. Final approval is required before rendering.",
-                )
+            if not timeline:
+                raise HTTPException(status_code=404, detail="Specified timeline not found for project")
+        else:
+            timeline = (
+                db.query(AssemblyTimeline)
+                .filter(AssemblyTimeline.project_id == project_id)
+                .order_by(AssemblyTimeline.version.desc())
+                .first()
+            )
+            if not timeline:
+                raise HTTPException(status_code=404, detail="No active timeline found for project")
 
-            # 3. Idempotency Check
-            base_idempotency_key = f"{project_id}:{timeline.id}:{timeline.version}:{render_profile}"
-            target_key = custom_idempotency_key or base_idempotency_key
+        # 2. Approval Gate Verification
+        approval = (
+            db.query(ApprovalRecord)
+            .filter(
+                ApprovalRecord.project_id == project_id,
+                ApprovalRecord.timeline_id == timeline.id,
+                ApprovalRecord.timeline_version == timeline.version,
+                ApprovalRecord.status == "APPROVED",
+            )
+            .first()
+        )
+        if not approval:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Timeline version {timeline.version} is not approved. Final approval is required before rendering.",
+            )
 
-            # Check for active render job (QUEUED, CLAIMED, RUNNING) for this project + timeline
+        base_idempotency_key = f"{project_id}:{timeline.id}:{timeline.version}:{render_profile}"
+        target_key = custom_idempotency_key or base_idempotency_key
+
+        # 3. DB Authority Idempotency Check
+        active_job = (
+            db.query(RenderJob)
+            .filter(
+                RenderJob.project_id == project_id,
+                RenderJob.timeline_id == timeline.id,
+                RenderJob.status.in_([
+                    RenderJobStatus.QUEUED.value,
+                    RenderJobStatus.CLAIMED.value,
+                    RenderJobStatus.RUNNING.value,
+                ]),
+            )
+            .first()
+        )
+        if active_job:
+            # Active render job exists -> Return existing job (Idempotent NO_OP replay)
+            return active_job
+
+        # Check if completed job exists with identical idempotency key
+        completed_job = (
+            db.query(RenderJob)
+            .filter(
+                RenderJob.project_id == project_id,
+                RenderJob.idempotency_key == target_key,
+                RenderJob.status == RenderJobStatus.COMPLETED.value,
+            )
+            .first()
+        )
+        if completed_job and custom_idempotency_key:
+            return completed_job
+        elif completed_job and not custom_idempotency_key:
+            # User triggers new render for approved timeline without custom key -> generate timestamped key
+            target_key = f"{base_idempotency_key}:{int(time.time())}"
+
+        # 4. Lock Project Row and check budget under DB authority row lock
+        BudgetService.check_budget_before_dispatch(
+            db=db,
+            project_id=project_id,
+            estimated_cost=estimated_cost_usd,
+            lock_row=True,
+        )
+
+        # 5. Create RenderJob Entity with IntegrityError fallback for DB authority race conditions
+        now = utc_now()
+        render_job = RenderJob(
+            project_id=project_id,
+            timeline_id=timeline.id,
+            timeline_version=timeline.version,
+            approval_id=approval.id,
+            render_profile=render_profile,
+            status=RenderJobStatus.QUEUED.value,
+            idempotency_key=target_key,
+            progress=0.0,
+            retry_count=0,
+            max_retries=3,
+            estimated_cost_usd=estimated_cost_usd,
+            render_metadata={
+                "timeline_version": timeline.version,
+                "render_profile": render_profile,
+                "approval_id": str(approval.id),
+                "qc_run_id": str(approval.qc_run_id),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            db.add(render_job)
+            db.flush()
+        except IntegrityError:
+            db.rollback()
             active_job = (
                 db.query(RenderJob)
                 .filter(
@@ -109,78 +168,28 @@ class RenderJobService:
                 .first()
             )
             if active_job:
-                # Active render job exists -> Return existing job (Idempotent NO_OP replay)
                 return active_job
+            raise
 
-            # Check if completed job exists with identical idempotency key
-            completed_job = (
-                db.query(RenderJob)
-                .filter(
-                    RenderJob.project_id == project_id,
-                    RenderJob.idempotency_key == target_key,
-                    RenderJob.status == RenderJobStatus.COMPLETED.value,
-                )
-                .first()
-            )
-            if completed_job and custom_idempotency_key:
-                return completed_job
-            elif completed_job and not custom_idempotency_key:
-                # User triggers new render for approved timeline without custom key -> generate timestamped key
-                target_key = f"{base_idempotency_key}:{int(time.time())}"
-
-            # 4. Atomic Budget Check with Row Locking
-            BudgetService.check_budget_before_dispatch(
-                db=db,
-                project_id=project_id,
-                estimated_cost=estimated_cost_usd,
-                lock_row=True,
-            )
-
-            # 5. Create RenderJob Entity
-            now = utc_now()
-            render_job = RenderJob(
-                project_id=project_id,
-                timeline_id=timeline.id,
-                timeline_version=timeline.version,
-                approval_id=approval.id,
-                render_profile=render_profile,
-                status=RenderJobStatus.QUEUED.value,
-                idempotency_key=target_key,
-                progress=0.0,
-                retry_count=0,
-                max_retries=3,
-                estimated_cost_usd=estimated_cost_usd,
-                render_metadata={
-                    "timeline_version": timeline.version,
-                    "render_profile": render_profile,
-                    "approval_id": str(approval.id),
-                    "qc_run_id": str(approval.qc_run_id),
-                },
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(render_job)
-            db.flush()
-
-            # 6. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED)
-            ledger_entry = UsageLedger(
-                project_id=project_id,
-                render_job_id=render_job.id,
-                provider="ORBIS_RENDER",
-                operation="RENDER_VIDEO",
-                estimated_cost=estimated_cost_usd,
-                actual_cost=None,
-                currency="USD",
-                cost_status="ESTIMATED",
-                idempotency_key=f"render_reserve_{render_job.id}",
-                description=f"Pre-render compute cost reservation for timeline v{timeline.version}",
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(ledger_entry)
-            db.commit()
-            db.refresh(render_job)
-            return render_job
+        # 6. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED)
+        ledger_entry = UsageLedger(
+            project_id=project_id,
+            render_job_id=render_job.id,
+            provider="ORBIS_RENDER",
+            operation="RENDER_VIDEO",
+            estimated_cost=estimated_cost_usd,
+            actual_cost=None,
+            currency="USD",
+            cost_status="ESTIMATED",
+            idempotency_key=f"render_reserve_{render_job.id}",
+            description=f"Pre-render compute cost reservation for timeline v{timeline.version}",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(ledger_entry)
+        db.commit()
+        db.refresh(render_job)
+        return render_job
 
     @classmethod
     def claim_next_render_job(
@@ -311,19 +320,20 @@ class RenderJobService:
             meta.update(render_metadata)
             job.render_metadata = meta
 
-        # Reconcile UsageLedger: ESTIMATED -> CONFIRMED
-        ledger_entries = (
+        # Reconcile UsageLedger: ESTIMATED -> CONFIRMED for current attempt only
+        target_ledger = (
             db.query(UsageLedger)
             .filter(
                 UsageLedger.render_job_id == job.id,
                 UsageLedger.cost_status == "ESTIMATED",
             )
-            .all()
+            .order_by(UsageLedger.created_at.desc())
+            .first()
         )
-        for ledger_entry in ledger_entries:
-            ledger_entry.cost_status = "CONFIRMED"
-            ledger_entry.actual_cost = actual_cost_usd
-            ledger_entry.updated_at = now
+        if target_ledger:
+            target_ledger.cost_status = "CONFIRMED"
+            target_ledger.actual_cost = actual_cost_usd
+            target_ledger.updated_at = now
 
         db.commit()
         db.refresh(job)
@@ -376,7 +386,11 @@ class RenderJobService:
 
                 ledger_entry = (
                     db.query(UsageLedger)
-                    .filter(UsageLedger.render_job_id == job.id)
+                    .filter(
+                        UsageLedger.render_job_id == job.id,
+                        UsageLedger.cost_status == "ESTIMATED",
+                    )
+                    .order_by(UsageLedger.created_at.desc())
                     .first()
                 )
                 if ledger_entry:
@@ -432,7 +446,11 @@ class RenderJobService:
 
         ledger_entry = (
             db.query(UsageLedger)
-            .filter(UsageLedger.render_job_id == job.id)
+            .filter(
+                UsageLedger.render_job_id == job.id,
+                UsageLedger.cost_status == "ESTIMATED",
+            )
+            .order_by(UsageLedger.created_at.desc())
             .first()
         )
         if ledger_entry:
@@ -490,35 +508,22 @@ class RenderJobService:
         job.error_message = None
         job.updated_at = now
 
-        # Preserve prior UsageLedger history entries and create distinct new retry reservation
-        existing_active_entry = (
-            db.query(UsageLedger)
-            .filter(
-                UsageLedger.render_job_id == job.id,
-                UsageLedger.cost_status == "ADJUSTED",
-            )
-            .first()
+        # Always create a distinct new attempt reservation in UsageLedger without mutating prior entries
+        new_ledger_entry = UsageLedger(
+            project_id=project_id,
+            render_job_id=job.id,
+            provider="ORBIS_RENDER",
+            operation=f"RENDER_RETRY_{int(now.timestamp())}",
+            estimated_cost=job.estimated_cost_usd,
+            actual_cost=None,
+            currency="USD",
+            cost_status="ESTIMATED",
+            idempotency_key=f"render_reserve_{job.id}_retry_{uuid.uuid4().hex[:8]}",
+            description=f"Pre-render compute cost reservation (retry) for timeline v{job.timeline_version}",
+            created_at=now,
+            updated_at=now,
         )
-        if existing_active_entry:
-            existing_active_entry.cost_status = "ESTIMATED"
-            existing_active_entry.estimated_cost = job.estimated_cost_usd
-            existing_active_entry.updated_at = now
-        else:
-            new_ledger_entry = UsageLedger(
-                project_id=project_id,
-                render_job_id=job.id,
-                provider="ORBIS_RENDER",
-                operation=f"RENDER_RETRY_{int(now.timestamp())}",
-                estimated_cost=job.estimated_cost_usd,
-                actual_cost=None,
-                currency="USD",
-                cost_status="ESTIMATED",
-                idempotency_key=f"render_reserve_{job.id}_retry_{int(now.timestamp())}",
-                description=f"Pre-render compute cost reservation (retry) for timeline v{job.timeline_version}",
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(new_ledger_entry)
+        db.add(new_ledger_entry)
 
         db.commit()
         db.refresh(job)

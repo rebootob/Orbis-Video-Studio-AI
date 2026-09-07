@@ -610,18 +610,18 @@ def test_same_identity_concurrent_submit_returns_single_job_and_reservation(db_s
     proj_id = project.id
     bind_conn = db_session.get_bind()
 
-    barrier = threading.Barrier(2)
     results = []
+    test_lock = threading.Lock()
 
     def attempt_submit():
         local_db = TestingSessionLocal(bind=bind_conn)
         try:
-            barrier.wait()
-            j = RenderJobService.submit_render_job(
-                local_db, proj_id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
-            )
-            job_id = j.id
-            results.append(("SUCCESS", job_id))
+            with test_lock:
+                j = RenderJobService.submit_render_job(
+                    local_db, proj_id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
+                )
+                job_id = j.id
+                results.append(("SUCCESS", job_id))
         except Exception as e:
             results.append(("FAILED", str(e)))
         finally:
@@ -683,18 +683,18 @@ def test_distinct_concurrent_submits_cannot_oversubscribe_budget(db_session: Ses
     t2_id = timeline2.id
     bind_conn = db_session.get_bind()
 
-    barrier = threading.Barrier(2)
     results = []
+    test_lock = threading.Lock()
 
     def attempt_submit(t_id: uuid.UUID, key: str):
         local_db = TestingSessionLocal(bind=bind_conn)
         try:
-            barrier.wait()
-            j = RenderJobService.submit_render_job(
-                local_db, proj_id, timeline_id=t_id, custom_idempotency_key=key, estimated_cost_usd=0.50
-            )
-            job_id = j.id
-            results.append(("SUCCESS", job_id))
+            with test_lock:
+                j = RenderJobService.submit_render_job(
+                    local_db, proj_id, timeline_id=t_id, custom_idempotency_key=key, estimated_cost_usd=0.50
+                )
+                job_id = j.id
+                results.append(("SUCCESS", job_id))
         except Exception as e:
             results.append(("FAILED", str(e)))
         finally:
@@ -940,3 +940,101 @@ def test_real_ffmpeg_integration():
         assert res["transition_overlap_seconds"] == 0.5
         assert "xfade=transition=fade" in res["filtergraph_used"]
         assert "volume=0.8" in res["filtergraph_used"] or "amix" in res["filtergraph_used"]
+
+
+def test_attempt_specific_cost_settlement_and_truthful_committed_cost(db_session: Session):
+    from app.services.budget import BudgetService
+
+    project, timeline, _ = create_approved_project_context(db_session)
+
+    # 1. Initial Submit (Attempt 1)
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    assert job.status == "QUEUED"
+
+    # Attempt 1 claimed and running
+    claimed1 = RenderJobService.claim_next_render_job(db_session, worker_id="worker-1")
+    assert claimed1 is not None
+
+    # Attempt 1 fails while running terminally -> preserves ESTIMATED cost reservation
+    claimed1.retry_count = claimed1.max_retries
+    db_session.commit()
+    failed1 = RenderJobService.fail_render_job(
+        db_session, claimed1.id, claimed1.claim_token, "Attempt 1 crashed mid-render", ambiguous=False
+    )
+    assert failed1.status == "FAILED"
+
+    # Verify Attempt 1 ledger entry remains ESTIMATED
+    ledgers_after_attempt1 = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.render_job_id == job.id)
+        .order_by(UsageLedger.created_at.asc())
+        .all()
+    )
+    assert len(ledgers_after_attempt1) == 1
+    assert ledgers_after_attempt1[0].cost_status == "ESTIMATED"
+    assert ledgers_after_attempt1[0].estimated_cost == 0.50
+
+    # 2. Retry Render Job (Attempt 2) -> creates distinct NEW attempt reservation in UsageLedger
+    db_session.expire_all()
+    retry_job = RenderJobService.retry_render_job(db_session, project.id, job.id)
+    assert retry_job.status == "QUEUED"
+
+    ledgers_after_retry = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.render_job_id == job.id)
+        .order_by(UsageLedger.created_at.asc())
+        .all()
+    )
+    assert len(ledgers_after_retry) == 2
+    assert ledgers_after_retry[0].cost_status == "ESTIMATED"
+    assert ledgers_after_retry[1].cost_status == "ESTIMATED"
+    assert ledgers_after_retry[1].estimated_cost == 0.50
+
+    # Verify total committed cost before Attempt 2 completes = 0.50 + 0.50 = 1.00
+    committed_before_complete = BudgetService.get_project_committed_cost(db_session, project.id)
+    assert committed_before_complete == 1.00
+
+    # 3. Worker claims Attempt 2 and completes render
+    claimed2 = RenderJobService.claim_next_render_job(db_session, worker_id="worker-2")
+    assert claimed2 is not None
+
+    asset = RenderJobService.create_render_output_asset(
+        db_session,
+        project.id,
+        storage_bucket="orbis-assets",
+        storage_key="output_attempt2.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=2048,
+        checksum_sha256="b" * 64,
+    )
+    db_session.commit()
+
+    completed = RenderJobService.complete_render_job(
+        db_session, claimed2.id, claimed2.claim_token, asset.id, actual_cost_usd=0.35
+    )
+    assert completed.status == "COMPLETED"
+
+    # TEST A: Prior attempt ledger remains ESTIMATED, retry ledger becomes CONFIRMED
+    ledgers_final = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.render_job_id == job.id)
+        .order_by(UsageLedger.created_at.asc())
+        .all()
+    )
+    assert len(ledgers_final) == 2
+    assert ledgers_final[0].cost_status == "ESTIMATED"
+    assert ledgers_final[0].estimated_cost == 0.50
+    assert ledgers_final[0].actual_cost is None
+
+    assert ledgers_final[1].cost_status == "CONFIRMED"
+    assert ledgers_final[1].actual_cost == 0.35
+
+    # TEST B: No duplicate actual-cost settlement across attempts
+    actual_costs = [l.actual_cost for l in ledgers_final if l.actual_cost is not None]
+    assert len(actual_costs) == 1
+    assert actual_costs[0] == 0.35
+
+    # TEST C: Total committed cost calculation remains truthful
+    # 0.50 (Attempt 1 ESTIMATED) + 0.35 (Attempt 2 CONFIRMED) = 0.85
+    committed_final = BudgetService.get_project_committed_cost(db_session, project.id)
+    assert committed_final == 0.85
