@@ -15,7 +15,7 @@ By inspecting repository truth, we confirmed that Orbis already possesses:
 1. **Strict Production Approval Gates** (`ApprovalRecord`, `QCService.validate_final_approval()`, `ProductionOrchestrator.approve_final_production()`).
 2. **Durable Job Claim & Lease Queue Mechanics** (`GenerationJob`, `JobDispatchService` lease/claim pattern).
 3. **Provider-Neutral Object Storage Boundaries** (`ObjectStorageProvider`, `S3StorageProvider`, `Asset` lineage).
-4. **Granular Usage Ledger & Budget Controls** (`UsageLedger`, `CostLedgerService`, `BudgetService`).
+4. **Granular Usage Ledger & Budget Controls** (`UsageLedger`, `CostLedgerService`, `BudgetService.check_budget_before_dispatch()`).
 
 WP017 will introduce a **stateless Cloud Render Worker** executing FFmpeg timeline assembly behind a provider-neutral `RenderExecutor` boundary, strictly gated by prior WP016 timeline approval and fail-closed pre-execution cost reservations.
 
@@ -33,7 +33,7 @@ WP017 will introduce a **stateless Cloud Render Worker** executing FFmpeg timeli
 
 ### B. Existing Job & Queue Infrastructure
 - **EXISTING REPOSITORY EVIDENCE:** DB lease and claim semantics in `GenerationJob` ([`models/generation_job.py:18-85`](../../backend/app/models/generation_job.py#L18-L85)) and `JobDispatchService` ([`services/job_dispatch.py:100-120`](../../backend/app/services/job_dispatch.py#L100-L120)) use a Compare-And-Set (CAS) atomic update pattern via `change(db, filters, values)` with `claimed_by=None` and `claim_expires_at <= now`. Existing code does NOT use `FOR UPDATE SKIP LOCKED`.
-- **PROPOSED NEW DESIGN CHOICE (WP017):** For `RenderJob`, we propose PostgreSQL `FOR UPDATE SKIP LOCKED` explicitly as a NEW WP017 design choice to eliminate optimistic claim contention under high worker concurrency, while maintaining fallback compatibility with the existing CAS lease pattern.
+- **PROPOSED NEW DESIGN CHOICE (WP017):** For `RenderJob`, we propose PostgreSQL `FOR UPDATE SKIP LOCKED` explicitly as a NEW WP017 design choice for worker claim loops to eliminate optimistic claim contention under high worker concurrency, while retaining fallback compatibility with the existing CAS lease pattern.
 - **Key Differences:** `GenerationJob` is for shot-level external AI generation APIs (polling remote provider endpoints). `RenderJob` is for project/timeline-level video rendering executed directly on worker nodes via FFmpeg. `GenerationJob` has a shot-level active index; `RenderJob` requires a timeline-level active index (`uq_render_jobs_active_timeline`).
 
 ### C. Storage & Asset Lineage
@@ -48,7 +48,7 @@ WP017 will introduce a **stateless Cloud Render Worker** executing FFmpeg timeli
 1. **Missing `RenderJob` Model & Migration:** No dedicated model exists for full-timeline render jobs. `GenerationJob` cannot be overloaded because it is scoped per-shot and oriented around external API polling.
 2. **Missing `RenderExecutor` Boundary:** No abstract execution interface exists for video timeline rendering (downloading visual/audio placements, building FFmpeg filtergraphs, encoding master MP4).
 3. **Missing Stateless Worker Process:** No worker process currently pulls render tasks, updates lease heartbeats, and uploads compiled master video assets.
-4. **Missing Pre-Execution Cost Reservation Contract:** No pre-execution compute cost reservation or settlement lifecycle exists in `UsageLedger`.
+4. **Missing `UsageLedger` Linkage to `RenderJob`:** `UsageLedger` currently has `job_id` linked to `generation_jobs`. `UsageLedger` needs a `render_job_id` column (FK `render_jobs.id`) to durably link render cost entries.
 5. **Missing Render API Endpoints:** `/api/v1/projects/{project_id}/renders` endpoints do not yet exist.
 
 ---
@@ -59,7 +59,8 @@ WP017 will introduce a **stateless Cloud Render Worker** executing FFmpeg timeli
 Orbis Control Plane
  -> ProductionOrchestrator / Approval Validation (WP016 Approval Gating)
  -> POST /api/v1/projects/{project_id}/renders/submit
- -> Pre-compute Cost Reservation & Budget Check (UsageLedger status: RESERVED)
+ -> BudgetService.check_budget_before_dispatch(lock_row=True)
+ -> Pre-compute Cost Reservation (UsageLedger cost_status: ESTIMATED, render_job_id)
  -> RenderJob (DB state: QUEUED)
  -> Stateless Cloud Render Worker (Claim via FOR UPDATE SKIP LOCKED or CAS)
  -> RenderJob (DB state: CLAIMED -> RUNNING)
@@ -67,7 +68,7 @@ Orbis Control Plane
  -> FFmpegRenderExecutor (Filtergraph build + render + encode)
  -> Upload final MP4 to S3 Storage
  -> Create Asset row (is_locked=True) & update RenderJob to COMPLETED
- -> UsageLedger (Reconcile RESERVED -> SETTLED with actual cost)
+ -> UsageLedger (Reconcile cost_status: CONFIRMED, actual_cost populated)
 ```
 
 ---
@@ -133,26 +134,35 @@ class RenderJob(Base):
 
 | Failure Case | Canonical Truth | Recovery & Cost Reconciliation Behavior | Automatic Retry? |
 | :--- | :--- | :--- | :--- |
-| Worker dies before render starts | DB Lease | Lease expires (`claim_expires_at < now`). Recovery resets to `QUEUED`. Reserved cost remains active. | Yes (if `retry_count < max_retries`) |
-| Worker dies mid-FFmpeg render | DB Lease | Lease expires. Recovery resets to `QUEUED`, cleans scratch dir. Reserved cost remains active. | Yes (if `retry_count < max_retries`) |
-| Output uploaded to S3, DB update crashes | Object Storage | Recovery finds S3 object matching checksum -> completes DB commit to `COMPLETED`, links `Asset`, settles reservation. | Reconcile to `COMPLETED` |
+| Worker dies before render starts | DB Lease | Lease expires (`claim_expires_at < now`). Recovery resets to `QUEUED`. Reserved `ESTIMATED` cost remains active. | Yes (if `retry_count < max_retries`) |
+| Worker dies mid-FFmpeg render | DB Lease | Lease expires. Recovery resets to `QUEUED`, cleans scratch dir. Reserved `ESTIMATED` cost remains active. | Yes (if `retry_count < max_retries`) |
+| Output uploaded to S3, DB update crashes | Object Storage | Recovery finds S3 object matching checksum -> completes DB commit to `COMPLETED`, links `Asset`, settles `cost_status="CONFIRMED"`. | Reconcile to `COMPLETED` |
 | DB says `RUNNING`, worker missing | Heartbeat | Lease expires -> check S3 -> re-queue or reconcile. | Yes |
 | Duplicate API submit call | `idempotency_key` | Active job check returns existing `RenderJob` (NO_OP). | N/A (Idempotent) |
-| Pre-execution cancellation / failure | DB Status | Pre-execution failure releases reserved cost (`status="CANCELLED"`, `cost_usd=0.0`). | No |
-| Ambiguous execution failure | DB Status | `RECONCILIATION_REQUIRED`: Reserved cost MUST NOT be silently released. Remains committed until verification. | No (Manual / Automated Recon) |
+| Safe pre-execution cancellation / failure | DB Status | Safe pre-execution failure releases reserved cost (`cost_status="ADJUSTED"`, `actual_cost=0.0`). | No |
+| Ambiguous execution failure | DB Status | `RECONCILIATION_REQUIRED`: `ESTIMATED` cost entry MUST NOT be silently released. Remains committed until manual/auto reconciliation. | No (Manual / Automated Recon) |
 | Timeline modified while render queued | Timeline Version | Worker compares `timeline.version` with `render_job.timeline_version`. If mismatched, cancels job with `REVISION_SUPERSEDED`. | No (Cancelled) |
 
 ---
 
-## 9. Pre-Compute Cost Reservation & Reconciliation
+## 9. Pre-Compute Cost Reservation & Concurrency-Safe Budget Check
 
-- **Pre-Execution Cost Reservation:** Compute cost is NOT accounted for only after render completion. Before worker starts billable render execution:
-  1. Estimate render cost based on timeline duration and profile (`estimated_cost_usd`).
-  2. Perform a concurrency-safe budget check via `BudgetService.get_budget_status()` to verify `current_spend + active_reservations + estimated_cost_usd <= hard_budget_limit`.
-  3. Record a fail-closed cost reservation in `UsageLedger` ([`models/usage_ledger.py`](../../backend/app/models/usage_ledger.py)) with status `RESERVED` / `is_estimated=True` linking `render_job_id`. Active reservations count toward `BudgetService` committed spend.
-- **Completion Settlement:** On render completion, reconcile reservation: update `UsageLedger` entry from `RESERVED` to `SETTLED` with actual compute duration/cost.
-- **Pre-Execution Cancellation/Failure:** On safe pre-execution cancellation or failure (before worker compute is incurred), release/adjust reservation (`status="CANCELLED"`, `cost_usd=0.0`) following existing cost ledger policy.
-- **Ambiguous Execution Failure:** Ambiguous execution failures (`RECONCILIATION_REQUIRED`, e.g., worker container lost mid-render) MUST NOT silently release possible incurred cost. The cost reservation remains committed until manual or automated verification confirms whether compute was consumed.
+- **Option A Minimal Cost Lifecycle Alignment:**
+  - `UsageLedger` ([`models/usage_ledger.py`](../../backend/app/models/usage_ledger.py)) uses `CostStatus` enum values (`ESTIMATED`, `CONFIRMED`, `ADJUSTED`, `UNKNOWN`).
+  - Pre-render reservation: Insert `UsageLedger` entry with `cost_status = "ESTIMATED"`, `estimated_cost = estimated_usd`, `actual_cost = None`, `operation = "RENDER_VIDEO"`, linking `render_job_id` (FK `render_jobs.id`).
+  - Budget inclusion: `BudgetService.get_project_committed_cost()` ([`services/budget.py:21-30`](../../backend/app/services/budget.py#L21-L30)) sums `CONFIRMED`, `ADJUSTED`, and `ESTIMATED` costs, ensuring active render reservations immediately count toward committed project spend.
+  - Completion settlement: Reconcile `UsageLedger` entry to `cost_status = "CONFIRMED"`, setting `actual_cost = actual_usd`.
+  - Pre-execution cancellation/failure: Adjust entry to `cost_status = "ADJUSTED"`, setting `actual_cost = 0.0`.
+  - Ambiguous failure: `RECONCILIATION_REQUIRED` keeps `cost_status = "ESTIMATED"` committed until reconciliation.
+- **Concurrency-Safe Atomic Transaction:**
+  - Pre-render submission MUST NOT rely on `get_budget_status()` alone.
+  - Submit endpoint executes `BudgetService.check_budget_before_dispatch(db=db, project_id=project_id, estimated_cost=estimated_usd, lock_row=True)` ([`services/budget.py:99-138`](../../backend/app/services/budget.py#L99-L138)).
+  - Executed atomically in ONE DB transaction:
+    1. Acquire row lock on `Project` via `SELECT FOR UPDATE` (`lock_row=True`).
+    2. Compute committed spend (`CONFIRMED` + `ADJUSTED` + active `ESTIMATED`) and verify `committed + estimated_usd <= project.budget_limit`.
+    3. Insert `UsageLedger` pre-render reservation entry (`cost_status = "ESTIMATED"`).
+    4. Insert `RenderJob` entity (`status = "QUEUED"`).
+  - Two concurrent submit calls against the same project budget execute sequentially against the row-locked `Project` row; the second request sees the first request's `ESTIMATED` entry in committed cost and fails closed with `400 Bad Request` if remaining budget is exceeded.
 
 ---
 
@@ -177,16 +187,22 @@ class RenderJob(Base):
 - **Streaming Storage:** Source assets stream to worker local scratch disk; output streams to S3 (never loaded into RAM).
 - **Zero N+1 Queries:** Placement assets fetched in set-based queries.
 - **Paginated History:** Render history strictly bounded (`offset`, `limit <= 100`).
-- **Usage Ledger:** Pre-execution cost reservation and post-execution settlement.
-- **Budget Guard:** `BudgetService.get_budget_status()` blocks render submission if hard limit is breached.
+- **Usage Ledger:** Pre-execution cost reservation (`ESTIMATED`) and post-execution settlement (`CONFIRMED`).
+- **Budget Guard:** `BudgetService.check_budget_before_dispatch(lock_row=True)` blocks render submission if hard limit is breached.
 - **Timeouts:** Hard execution timeout (30 minutes).
 
 ---
 
 ## 12. Migration & Schema Impact (Evidence Only)
 
-- Single new database table `render_jobs` with foreign keys to `projects`, `assembly_timelines`, `production_approvals`, and `assets`.
-- Partial unique index `uq_render_jobs_active_timeline` on `(project_id, timeline_id)` for active statuses.
+The exact database migration scope for WP017 comprises:
+1. **NEW table `render_jobs`**:
+   - Columns: `id`, `project_id`, `timeline_id`, `timeline_version`, `approval_id`, `render_profile`, `status`, `idempotency_key`, `output_asset_id`, `progress`, `claimed_by`, `claim_token`, `claim_expires_at`, `retry_count`, `max_retries`, `estimated_cost_usd`, `actual_cost_usd`, `error_message`, `render_metadata`, `created_at`, `started_at`, `completed_at`, `updated_at`.
+   - Foreign Keys: `projects.id` (CASCADE), `assembly_timelines.id` (CASCADE), `production_approvals.id` (CASCADE), `assets.id` (SET NULL).
+   - Indexes: `ix_render_jobs_project_id`, `ix_render_jobs_timeline_id`, `ix_render_jobs_status`, `ix_render_jobs_idempotency_key`.
+   - Partial Unique Index: `uq_render_jobs_active_timeline` on `(project_id, timeline_id)` WHERE `status IN ('QUEUED', 'CLAIMED', 'RUNNING')`.
+2. **MODIFIED table `usage_ledger`**:
+   - Column Addition: `render_job_id` (`PG_UUID`, nullable, Foreign Key `render_jobs.id` `ondelete="SET NULL"`, index `ix_usage_ledger_render_job_id`).
 
 ---
 
@@ -197,12 +213,13 @@ class RenderJob(Base):
 3. **Existing Approval Verification:** Render authorization verifies existing `ApprovalRecord` for exact `(project_id, timeline_id, timeline_version)`. Does NOT require a new QC run to re-pass.
 4. **Idempotency Replay:** Duplicate POST returns existing active job without creating duplicate DB rows or worker jobs.
 5. **Worker Lease Claim:** Propose `FOR UPDATE SKIP LOCKED` or CAS claim query guarantees at most 1 worker claims a job.
-6. **Pre-Compute Cost Reservation:** Submitting a render job creates a `RESERVED` `UsageLedger` entry counting toward budget limit before worker execution.
-7. **Cost Reconciliation:** Settles estimated reservation to actual compute cost on completion; pre-execution failures release reservation.
-8. **Ambiguous Failure Cost Guard:** `RECONCILIATION_REQUIRED` status preserves cost reservation without silent release.
-9. **Full History Retention:** Re-rendering creates new `Asset` without overwriting prior outputs.
-10. **Budget Lock:** Submitting a render when hard budget limit is exceeded fails with `400 Bad Request`.
-11. **Cross-Project Isolation:** Attempting to query or cancel another project's render job returns `404 Not Found`.
+6. **Pre-Compute Cost Reservation:** Submitting a render job creates an `ESTIMATED` `UsageLedger` entry counting toward budget limit before worker execution.
+7. **Cost Reconciliation:** Settles `ESTIMATED` reservation to `CONFIRMED` actual cost on completion; pre-execution failures adjust entry to `ADJUSTED` (0.0 cost).
+8. **Ambiguous Failure Cost Guard:** `RECONCILIATION_REQUIRED` status preserves `ESTIMATED` cost reservation without silent release.
+9. **Concurrent Budget Reservation Test:** Two concurrent render submit calls against the same project budget evaluate against the row-locked project row (`BudgetService.check_budget_before_dispatch(lock_row=True)`); atomic reservation applies so only the allowed submission succeeds, and total committed estimated render cost cannot exceed hard budget limit.
+10. **Full History Retention:** Re-rendering creates new `Asset` without overwriting prior outputs.
+11. **Budget Lock:** Submitting a render when hard budget limit is exceeded fails with `400 Bad Request`.
+12. **Cross-Project Isolation:** Attempting to query or cancel another project's render job returns `404 Not Found`.
 
 ---
 
@@ -215,7 +232,7 @@ class RenderJob(Base):
 - Stateless worker execution loop (`render_worker.py`).
 - S3 asset download, FFmpeg rendering, output upload, and `Asset` creation.
 - Production approval gating (`ApprovalRecord` validation).
-- Pre-execution cost reservation and settlement lifecycle in `UsageLedger`.
+- Pre-execution cost reservation (`ESTIMATED`) and settlement (`CONFIRMED`) lifecycle in `UsageLedger`.
 - Backend API endpoints (`/api/v1/projects/{project_id}/renders/*`).
 - Frontend Simple Mode render workspace UI integration.
 - Unit and integration test suite.
@@ -233,9 +250,9 @@ class RenderJob(Base):
 ## 15. Implementation Breakdown Recommendation
 
 When WP017 is explicitly authorized by the Owner, implementation should proceed in 4 ordered passes:
-1. **Pass 1 — Data Model & Migration:** `RenderJob` entity, Alembic migration, repository schemas.
+1. **Pass 1 — Data Model & Migration:** `RenderJob` entity, `usage_ledger.render_job_id` column addition, Alembic migration, repository schemas.
 2. **Pass 2 — Core Render Engine & Worker Service:** `RenderExecutor`, `FFmpegRenderExecutor`, `RenderJobService` claim/lease/reconciliation mechanics.
-3. **Pass 3 — API & Pre-Compute Cost Reservation:** `/projects/{project_id}/renders` endpoints, approval pre-condition checks, `UsageLedger` reservation & settlement lifecycle.
+3. **Pass 3 — API & Pre-Compute Cost Reservation:** `/projects/{project_id}/renders` endpoints, approval pre-condition checks, `BudgetService.check_budget_before_dispatch(lock_row=True)` & `UsageLedger` `ESTIMATED`/`CONFIRMED` lifecycle.
 4. **Pass 4 — Frontend Workspace & Verification Suite:** Simple Mode render UX, full automated backend & frontend test suite.
 
 ---
