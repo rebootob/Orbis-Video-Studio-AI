@@ -1160,3 +1160,170 @@ def test_retry_active_job_replay_and_concurrent_retry_idempotency(tmp_path):
     finally:
         check_db.close()
         engine.dispose()
+
+
+def test_automatic_worker_retry_creates_fresh_reservation_and_checks_budget(db_session: Session):
+    from app.services.budget import BudgetService
+
+    project, _, _ = create_approved_project_context(db_session)
+    p = db_session.get(Project, project.id)
+    p.budget_limit = 1.20
+    db_session.commit()
+
+    # Initial submit: Attempt 1 (cost = 0.50)
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    assert job.status == "QUEUED"
+    attempt1_ledger_id = job.current_usage_ledger_id
+    assert attempt1_ledger_id is not None
+
+    # Worker claims Attempt 1
+    claimed = RenderJobService.claim_next_render_job(db_session, worker_id="worker-1")
+    assert claimed is not None
+
+    # Worker fails Attempt 1 with retryable error (retry_count 0 < max_retries 3)
+    failed = RenderJobService.fail_render_job(
+        db_session, claimed.id, claimed.claim_token, "Transcoding worker error", ambiguous=False
+    )
+    assert failed.status == "QUEUED"
+    assert failed.retry_count == 1
+    attempt2_ledger_id = failed.current_usage_ledger_id
+    assert attempt2_ledger_id != attempt1_ledger_id
+
+    # Verify both ledgers exist and are ESTIMATED
+    ledgers = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.render_job_id == job.id)
+        .order_by(UsageLedger.created_at.asc())
+        .all()
+    )
+    assert len(ledgers) == 2
+    assert ledgers[0].id == attempt1_ledger_id
+    assert ledgers[0].cost_status == "ESTIMATED"
+    assert ledgers[1].id == attempt2_ledger_id
+    assert ledgers[1].cost_status == "ESTIMATED"
+
+    # Total committed cost = 0.50 + 0.50 = 1.00
+    committed = BudgetService.get_project_committed_cost(db_session, project.id)
+    assert committed == 1.00
+
+
+def test_automatic_retry_blocked_when_remaining_budget_insufficient(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    p = db_session.get(Project, project.id)
+    p.budget_limit = 0.80  # Limit is 0.80, attempt 1 reserves 0.50 (0.30 remaining)
+    db_session.commit()
+
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    assert job.status == "QUEUED"
+
+    claimed = RenderJobService.claim_next_render_job(db_session, worker_id="worker-1")
+    assert claimed is not None
+
+    # Attempt 1 fails while running. Attempt 2 needs 0.50, but remaining budget is 0.30 -> retry blocked
+    failed = RenderJobService.fail_render_job(
+        db_session, claimed.id, claimed.claim_token, "Worker node preempted", ambiguous=False
+    )
+    assert failed.status == "FAILED"
+    assert "budget" in failed.error_message.lower()
+
+    # Only Attempt 1 ledger exists
+    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).all()
+    assert len(ledgers) == 1
+
+
+def test_attempt_settlement_isolation_and_multiple_manual_retries(db_session: Session):
+    from app.services.budget import BudgetService
+
+    project, _, _ = create_approved_project_context(db_session)
+    p = db_session.get(Project, project.id)
+    p.budget_limit = 2.00
+    db_session.commit()
+
+    # Attempt 1
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    c1 = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
+    c1.retry_count = c1.max_retries
+    db_session.commit()
+    f1 = RenderJobService.fail_render_job(db_session, c1.id, c1.claim_token, "Attempt 1 failed")
+    assert f1.status == "FAILED"
+
+    # Attempt 2 (manual retry)
+    r2 = RenderJobService.retry_render_job(db_session, project.id, job.id)
+    c2 = RenderJobService.claim_next_render_job(db_session, worker_id="w2")
+    c2.retry_count = c2.max_retries
+    db_session.commit()
+    f2 = RenderJobService.fail_render_job(db_session, c2.id, c2.claim_token, "Attempt 2 failed")
+    assert f2.status == "FAILED"
+
+    # Attempt 3 (manual retry)
+    r3 = RenderJobService.retry_render_job(db_session, project.id, job.id)
+    c3 = RenderJobService.claim_next_render_job(db_session, worker_id="w3")
+
+    asset = RenderJobService.create_render_output_asset(
+        db_session, project.id, "bucket", "key3.mp4", 10.0, 1024, "c" * 64
+    )
+    db_session.commit()
+
+    completed = RenderJobService.complete_render_job(
+        db_session, c3.id, c3.claim_token, asset.id, actual_cost_usd=0.40
+    )
+    assert completed.status == "COMPLETED"
+
+    ledgers = (
+        db_session.query(UsageLedger)
+        .filter(UsageLedger.render_job_id == job.id)
+        .order_by(UsageLedger.created_at.asc())
+        .all()
+    )
+    assert len(ledgers) == 3
+    assert ledgers[0].cost_status == "ESTIMATED"
+    assert ledgers[1].cost_status == "ESTIMATED"
+    assert ledgers[2].cost_status == "CONFIRMED"
+    assert ledgers[2].actual_cost == 0.40
+
+    # Total committed cost: 0.50 + 0.50 + 0.40 = 1.40
+    committed = BudgetService.get_project_committed_cost(db_session, project.id)
+    assert committed == 1.40
+
+
+def test_current_usage_ledger_id_missing_fails_closed_without_guessing(db_session: Session):
+    from fastapi import HTTPException
+
+    project, _, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    c = RenderJobService.claim_next_render_job(db_session, worker_id="w1")
+
+    # Manually corrupt current_usage_ledger_id to None
+    c.current_usage_ledger_id = None
+    db_session.commit()
+
+    asset = RenderJobService.create_render_output_asset(
+        db_session, project.id, "bucket", "key_corrupt.mp4", 10.0, 1024, "d" * 64
+    )
+    db_session.commit()
+
+    # Complete fails closed with 500 and status RECONCILIATION_REQUIRED
+    with pytest.raises(HTTPException) as exc_info:
+        RenderJobService.complete_render_job(db_session, c.id, c.claim_token, asset.id, actual_cost_usd=0.30)
+    assert exc_info.value.status_code == 500
+    db_session.refresh(job)
+    assert job.status == "RECONCILIATION_REQUIRED"
+
+    # Reset job to CLAIMED with None ledger for fail test
+    job.status = "CLAIMED"
+    job.current_usage_ledger_id = None
+    db_session.commit()
+
+    failed = RenderJobService.fail_render_job(db_session, job.id, job.claim_token, "Test fail")
+    assert failed.status == "RECONCILIATION_REQUIRED"
+
+    # Reset job to CLAIMED with None ledger for cancel test
+    job.status = "CLAIMED"
+    job.current_usage_ledger_id = None
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info_cancel:
+        RenderJobService.cancel_render_job(db_session, project.id, job.id)
+    assert exc_info_cancel.value.status_code == 500
+    db_session.refresh(job)
+    assert job.status == "RECONCILIATION_REQUIRED"
