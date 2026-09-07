@@ -55,13 +55,13 @@ graph TD
         BatchSubmit --> ProjectLock["DB Row Lock: Project (with_for_update)"]
         ProjectLock --> BudgetCheck["BudgetService: Validate Combined Batch Estimated Cost"]
         BudgetCheck --> CreateBatch["Create RenderBatch Record"]
-        CreateBatch --> LoopJobs["For Each Preset: Create RenderJob + UsageLedger Reservation"]
+        CreateBatch --> LoopJobs["For Each Preset: Create RenderJob (render_variant_key) + UsageLedger Reservation"]
         LoopJobs --> AtomicCommit["Commit Transaction ONCE (Rollback All on Any Error)"]
     end
     
-    AtomicCommit --> Job1["RenderJob 1: YT_STANDARD_1080P (16:9)"]
-    AtomicCommit --> Job2["RenderJob 2: TIKTOK_REELS_9X16 (9:16)"]
-    AtomicCommit --> Job3["RenderJob 3: INSTAGRAM_SQUARE (1:1)"]
+    AtomicCommit --> Job1["RenderJob 1: render_variant_key = YT_STANDARD_1080P:hash1"]
+    AtomicCommit --> Job2["RenderJob 2: render_variant_key = TIKTOK_REELS_9X16:hash2"]
+    AtomicCommit --> Job3["RenderJob 3: render_variant_key = INSTAGRAM_SQUARE:hash3"]
     
     Job1 --> WorkerQueue[Stateless CloudRenderWorker Pool]
     Job2 --> WorkerQueue
@@ -96,10 +96,21 @@ graph TD
   2. **Custom Overrides:** User-specified parameters (resolution, target bitrate, custom dimensions).
   3. **Immutable Snapshot on Submission:** When a job is submitted, the full resolved preset specification is serialized into `RenderJob.render_metadata["preset_snapshot"]`. Future updates to system preset definitions will never alter historical render execution behavior.
 
-### Question C: Idempotency Identity
-- **Decision:** Deterministic idempotency key format:
-  `idempotency_key = f"{project_id}:{timeline_id}:{timeline_version}:{preset_id}:{preset_snapshot_hash}"`
-- **Replay Behavior:** Submitting an export request with an active (`QUEUED`, `CLAIMED`, `RUNNING`) job matching the idempotency key returns the existing job. Submitting a new export for a `COMPLETED` target creates a new timestamped idempotency key (`FULL_HISTORY_RETENTION`).
+### Question C: Idempotency Identity & DB Uniqueness Model
+- **Decision:** Durable `render_variant_key` column on `RenderJob` + replacement of partial unique index.
+  - Column addition: `render_variant_key: Mapped[str] = mapped_column(String(100), default="MASTER", nullable=False)`
+  - Value for WP017 Master render: `"MASTER"`
+  - Value for WP018 Export variants: `f"{preset_id}:{preset_snapshot_hash}"`
+- **DB Unique Index Replacement:**
+  Replace `uq_render_jobs_active_timeline` (`project_id`, `timeline_id`) with `uq_render_jobs_active_variant` over:
+  `("project_id", "timeline_id", "render_variant_key")`
+  Partial WHERE clause: `status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')`
+- **Safety Semantics:**
+  - **A. SAME timeline + DIFFERENT preset variants (`render_variant_key`):** May coexist concurrently in `QUEUED`/`RUNNING` without index conflict.
+  - **B. SAME timeline + SAME preset snapshot (`render_variant_key`):** Submitting identical preset variant returns active job idempotently (NO_OP replay). DB index prevents duplicate inserts.
+  - **C. RECONCILIATION_REQUIRED isolation:** `RECONCILIATION_REQUIRED` status blocks submission of THAT SAME variant key only, leaving unrelated sibling variants unblocked.
+  - **D. WP017 MASTER Protection:** Master renders use `render_variant_key = "MASTER"`, preserving at most ONE active MASTER render per timeline.
+  - **E. Concurrency Safety:** Uniqueness is enforced at the DB level, preventing race-based duplicate variant job creation.
 
 ### Question D: History & Re-render Semantics
 - **Decision:** Strict adherence to `FULL_HISTORY_RETENTION` and `NO_SILENT_HISTORY_LOSS`.
@@ -113,7 +124,8 @@ graph TD
   2. Validate combined estimated cost of ALL requested variants against remaining project budget via `BudgetService.check_budget_before_dispatch()`.
   3. Create `RenderBatch` row in `PROCESSING` status.
   4. For each requested preset variant:
-     - Create child `RenderJob` in `QUEUED` status.
+     - Compute variant key: `render_variant_key = f"{preset_id}:{preset_snapshot_hash}"`.
+     - Create child `RenderJob` in `QUEUED` status with `render_variant_key`.
      - Create `UsageLedger` pre-execution cost reservation entry (`cost_status="ESTIMATED"`).
      - Bind `RenderJob.current_usage_ledger_id = ledger_entry.id`.
   5. **COMMIT ONCE** at the end of the transaction.
@@ -143,6 +155,7 @@ graph TD
   ```json
   {
     "preset_id": "TIKTOK_REELS_9X16",
+    "render_variant_key": "TIKTOK_REELS_9X16:a1b2c3d4",
     "aspect_ratio": "9:16",
     "resolution": "1080x1920",
     "bitrate_kbps": 8000,
@@ -183,9 +196,9 @@ graph TD
 
 ---
 
-## 6. Data Model & API Changes
+## 6. Data Model & Migration Contract
 
-### Proposed Database Additions (WP018 Migration):
+### A. Proposed Database Additions (WP018 Migration):
 ```python
 # app/models/render_batch.py
 class RenderBatch(Base):
@@ -204,22 +217,47 @@ class RenderBatch(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 ```
 
-`RenderJob` table will receive a new nullable foreign key `batch_id`:
+`RenderJob` table additions:
 ```python
+# Column addition on RenderJob model
+render_variant_key: Mapped[str] = mapped_column(
+    String(100), default="MASTER", nullable=False
+)
 batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
     PG_UUID(as_uuid=True), ForeignKey("render_batches.id", ondelete="SET NULL"), nullable=True
 )
 ```
 
-### Proposed API Endpoints:
+### B. Alembic Migration Execution Plan (`018_export_presets_and_variant_key.py`):
+
+#### 1. Upgrade Sequence:
+1. `op.create_table("render_batches", ...)`
+2. `op.add_column("render_jobs", sa.Column("render_variant_key", sa.String(100), nullable=False, server_default="MASTER"))`
+3. `op.add_column("render_jobs", sa.Column("batch_id", sa.UUID(), sa.ForeignKey("render_batches.id", ondelete="SET NULL"), nullable=True))`
+4. `op.drop_index("uq_render_jobs_active_timeline", table_name="render_jobs")`
+5. `op.create_index("uq_render_jobs_active_variant", "render_jobs", ["project_id", "timeline_id", "render_variant_key"], unique=True, postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"), sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"))`
+
+#### 2. Legacy Row Migration Truth:
+- All existing WP017 `render_jobs` rows receive `render_variant_key = "MASTER"` via `server_default="MASTER"`.
+- Legacy WP017 master render jobs map 1:1 to `render_variant_key = "MASTER"`, preserving 100% of WP017 duplicate master render protection.
+
+#### 3. Downgrade / Reversibility Plan:
+1. `op.drop_index("uq_render_jobs_active_variant", table_name="render_jobs")`
+2. `op.create_index("uq_render_jobs_active_timeline", "render_jobs", ["project_id", "timeline_id"], unique=True, postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"), sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"))`
+3. `op.drop_column("render_jobs", "batch_id")`
+4. `op.drop_column("render_jobs", "render_variant_key")`
+5. `op.drop_table("render_batches")`
+
+### C. Proposed API Endpoints:
 - `POST /api/v1/projects/{project_id}/renders/export-batch` — Submit multi-variant export batch under single atomic DB transaction.
 - `GET /api/v1/projects/{project_id}/renders/batches/{batch_id}` — Get batch status summary and variant job list.
 - `GET /api/v1/renders/presets` — List available system export presets and target specifications.
 
 ---
 
-## 7. Explicit Acceptance Criteria for WP018
+## 7. Explicit Acceptance Criteria & Required Tests for WP018
 
+### A. Acceptance Criteria:
 1. **Preset Aspect & Resolution Accuracy:** Generating outputs for `YT_STANDARD_1080P`, `TIKTOK_REELS_9X16`, and `INSTAGRAM_SQUARE` produces valid MP4 video files matching exact target dimensions (`1920x1080`, `1080x1920`, `1080x1080`).
 2. **Approval Gate Enforcement:** Attempting to submit an export batch for an unapproved timeline revision fails closed with `400 Bad Request`.
 3. **Atomic Batch Authorization:** Submitting a batch request executes under a single DB transaction. If total estimated batch cost exceeds project remaining budget, submission fails closed with `400 Bad Request` before creating any `RenderJob` rows or `UsageLedger` entries.
@@ -231,6 +269,16 @@ batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
 9. **Worker Fencing & Lease Recovery:** Stale export worker claims expire safely and are reclaimed by available workers without losing attempt ledger tracking.
 10. **Frontend Usability:** The Export & Platform Presets UI modal displays accurate cost estimates, allows selecting target presets, and updates variant progress live.
 
+### B. Required Automated Test Suite (WP018 Implementation Contract):
+1. **Concurrent Variant Submissions Test:** 3 different presets (`YT_STANDARD_1080P`, `TIKTOK_REELS_9X16`, `INSTAGRAM_SQUARE`) for the same timeline revision can be `QUEUED` concurrently without violating DB uniqueness constraints.
+2. **Idempotent Variant Replay Test:** Submitting the exact same preset snapshot twice for the same timeline revision returns the same active `RenderJob`.
+3. **Concurrent Same-Preset Submit Test:** Submitting the exact same preset variant concurrently from two independent DB sessions creates exactly 1 `RenderJob` due to DB unique index authority.
+4. **Variant Independence Test:** Different preset variants do not block each other's submission, worker claim, execution, or completion.
+5. **Reconciliation Variant Isolation Test:** A `RECONCILIATION_REQUIRED` state on one variant blocks only new attempts of that SAME variant key, leaving sibling variants unblocked.
+6. **MASTER Protection Regression Test:** WP017 MASTER duplicate render protection remains 100% intact (`render_variant_key="MASTER"`).
+7. **Migration Upgrade Test:** Alembic migration upgrade preserves all existing WP017 `RenderJob` rows with `render_variant_key="MASTER"`.
+8. **Migration Downgrade Test:** Alembic migration downgrade restores `uq_render_jobs_active_timeline` safely and reversibly.
+
 ---
 
 ## 8. Recommended WP018 Implementation Contract
@@ -240,7 +288,7 @@ WP018 CONTRACT VERDICT: READY FOR OWNER AUTHORIZATION
 
 Target Work Package: P4-WP018 — Multi-Output & Platform Export Presets
 Dependencies: P3-WP017 (Cloud Render Workers) MERGED in main at 07ba0fdaf1719a7d6ed882155dfb113a4729d55a
-Scope: Multi-variant aspect/resolution export presets (16:9, 9:16, 1:1), FFmpeg scaling/cropping, atomic batch export submission, Design B Asset lineage in RenderJob.render_metadata, frontend export modal.
+Scope: Multi-variant aspect/resolution export presets (16:9, 9:16, 1:1), FFmpeg scaling/cropping, render_variant_key DB uniqueness index, atomic batch export submission, Design B Asset lineage in RenderJob.render_metadata, frontend export modal.
 Out of Scope: Subtitles/audio stems/watermarking (FUTURE), .orbis archive (WP019), release closure (WP020), raw AI video generation, ComfyUI, social auto-posting.
 Execution Plane: Antigravity (when explicitly authorized by Owner).
 ```
