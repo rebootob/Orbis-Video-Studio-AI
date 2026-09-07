@@ -613,7 +613,7 @@ def test_21_bounded_approval_history(db_session: Session, test_project_context):
                 project_id=project.id,
                 timeline_id=timeline.id,
                 timeline_version=1,
-                qc_run_id=qc_run.id,
+                qc_run_id=uuid.uuid4(),
                 status="APPROVED",
                 actor=f"User{i}",
                 approved_at=utc_now(),
@@ -757,3 +757,137 @@ def test_26_paginated_findings_endpoint_and_security_check(db_session: Session, 
     wrong_project_id = uuid.uuid4()
     res_sec = client.get(f"/api/v1/projects/{wrong_project_id}/qc/runs/{qc_run.id}/findings")
     assert res_sec.status_code == 404
+
+
+def test_27_warning_decisions_are_append_only_history(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="CONTINUITY_CHECK",
+        severity="WARNING",
+        message="Potential discontinuity detected.",
+    )
+    db_session.add(finding)
+    qc_run.warning_count += 1
+    qc_run.status = "RUNNING"
+    db_session.commit()
+
+    # Decision #1: FIX_REQUIRED
+    dec1 = QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="FIX_REQUIRED", reason="Need to fix continuity", actor="UserA"
+    )
+    db_session.refresh(qc_run)
+    assert qc_run.status == "BLOCKED"
+
+    # Decision #2: ACCEPTED_WITH_REASON later
+    dec2 = QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="ACCEPTED_WITH_REASON", reason="Director accepts intentional discontinuity", actor="UserA"
+    )
+    db_session.refresh(qc_run)
+    assert qc_run.status == "PASSED"
+
+    # 3. both records still exist in DB
+    all_decisions = (
+        db_session.query(WarningDecision)
+        .filter(WarningDecision.finding_id == finding.id)
+        .order_by(WarningDecision.decided_at.asc())
+        .all()
+    )
+    assert len(all_decisions) == 2
+
+    # 4. actor/reason/time preserved for both
+    assert all_decisions[0].decision == "FIX_REQUIRED"
+    assert all_decisions[0].reason == "Need to fix continuity"
+    assert all_decisions[0].actor == "UserA"
+
+    assert all_decisions[1].decision == "ACCEPTED_WITH_REASON"
+    assert all_decisions[1].reason == "Director accepts intentional discontinuity"
+    assert all_decisions[1].actor == "UserA"
+    assert all_decisions[1].id != all_decisions[0].id
+
+    # 5. latest decision controls approval eligibility
+    approval = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert approval.status == "APPROVED"
+
+    # 6. old decision remains immutable
+    db_session.refresh(all_decisions[0])
+    assert all_decisions[0].decision == "FIX_REQUIRED"
+    assert all_decisions[0].reason == "Need to fix continuity"
+
+
+def test_28_final_approval_is_idempotent_and_supports_multiple_revisions(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run_v1 = QCService.run_qc(db_session, project.id)
+    for f in qc_run_v1.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Waived for v1")
+
+    # 1. First final approval succeeds
+    appr1 = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr1.status == "APPROVED"
+
+    from app.models.orchestration_audit import OrchestrationAudit
+    applied_audits_count_1 = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id, OrchestrationAudit.action == "APPROVE_FINAL", OrchestrationAudit.result == "APPLIED")
+        .count()
+    )
+    assert applied_audits_count_1 == 1
+
+    # 2. Second identical final approval does NOT create another ApprovalRecord
+    appr2 = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr2.id == appr1.id
+
+    all_approvals = (
+        db_session.query(ApprovalRecord)
+        .filter(ApprovalRecord.project_id == project.id)
+        .all()
+    )
+    assert len(all_approvals) == 1
+
+    # 3. Second identical request does NOT create duplicate APPLIED audit
+    applied_audits_count_2 = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id, OrchestrationAudit.action == "APPROVE_FINAL", OrchestrationAudit.result == "APPLIED")
+        .count()
+    )
+    assert applied_audits_count_2 == 1
+
+    # 4. Newer revision can receive its own independent approval after new QC
+    timeline_v2 = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
+    assert timeline_v2.version == 2
+
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run_v2 = QCService.run_qc(db_session, project.id)
+    for f in qc_run_v2.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Waived for v2")
+
+    appr_v2 = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr_v2.id != appr1.id
+    assert appr_v2.timeline_version == 2
+
+    # 5. Older revision approval remains historical truth
+    all_revisions_approvals = (
+        db_session.query(ApprovalRecord)
+        .filter(ApprovalRecord.project_id == project.id)
+        .order_by(ApprovalRecord.approved_at.asc())
+        .all()
+    )
+    assert len(all_revisions_approvals) == 2
+    assert all_revisions_approvals[0].id == appr1.id
+    assert all_revisions_approvals[0].timeline_version == 1
+    assert all_revisions_approvals[1].id == appr_v2.id
+    assert all_revisions_approvals[1].timeline_version == 2

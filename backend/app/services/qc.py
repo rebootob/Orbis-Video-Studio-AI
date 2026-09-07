@@ -408,48 +408,36 @@ class QCService:
         else:
             reason = reason.strip() if reason else None
 
-        # Check existing decision for finding on exact timeline revision
-        existing_decision = (
-            db.query(WarningDecision)
-            .filter(
-                WarningDecision.finding_id == finding_id,
-                WarningDecision.qc_run_id == finding.qc_run_id,
-            )
-            .first()
+        # Append new immutable WarningDecision audit event row (never overwrite prior history)
+        target_dec = WarningDecision(
+            id=uuid.uuid4(),
+            project_id=project_id,
+            qc_run_id=finding.qc_run_id,
+            finding_id=finding_id,
+            timeline_id=finding.timeline_id,
+            decision=decision_upper,
+            reason=reason,
+            actor=actor,
+            decided_at=utc_now(),
         )
-
-        if existing_decision:
-            existing_decision.decision = decision_upper
-            existing_decision.reason = reason
-            existing_decision.actor = actor
-            existing_decision.decided_at = utc_now()
-            target_dec = existing_decision
-        else:
-            target_dec = WarningDecision(
-                id=uuid.uuid4(),
-                project_id=project_id,
-                qc_run_id=finding.qc_run_id,
-                finding_id=finding_id,
-                timeline_id=finding.timeline_id,
-                decision=decision_upper,
-                reason=reason,
-                actor=actor,
-                decided_at=utc_now(),
-            )
-            db.add(target_dec)
-
+        db.add(target_dec)
         db.flush()
 
-        # Re-evaluate parent QC run status
-        # Re-evaluate parent QC run status
+        # Re-evaluate parent QC run status using latest decision events per finding
         qc_run = db.get(QCRun, finding.qc_run_id)
         if qc_run and qc_run.blocker_count == 0:
             warning_findings = [f for f in qc_run.findings if f.severity == "WARNING"]
-            decided_map = {wd.finding_id: wd.decision for wd in qc_run.decisions}
+            decisions = (
+                db.query(WarningDecision)
+                .filter(WarningDecision.qc_run_id == qc_run.id)
+                .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+                .all()
+            )
+            latest_map = {wd.finding_id: wd.decision for wd in decisions}
 
-            has_fix_required = any(decided_map.get(f.id) == "FIX_REQUIRED" for f in warning_findings)
+            has_fix_required = any(latest_map.get(f.id) == "FIX_REQUIRED" for f in warning_findings)
             all_accepted = (
-                all(decided_map.get(f.id) == "ACCEPTED_WITH_REASON" for f in warning_findings)
+                all(latest_map.get(f.id) == "ACCEPTED_WITH_REASON" for f in warning_findings)
                 if warning_findings else True
             )
 
@@ -525,7 +513,13 @@ class QCService:
 
         # 2. Check Warning Decisions: EVERY WARNING REQUIRES USER DECISION and FIX_REQUIRED BLOCKS APPROVAL!
         warning_findings = [f for f in latest_qc.findings if f.severity == "WARNING"]
-        decided_map = {wd.finding_id: wd for wd in latest_qc.decisions}
+        decisions = (
+            db.query(WarningDecision)
+            .filter(WarningDecision.qc_run_id == latest_qc.id)
+            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+            .all()
+        )
+        decided_map = {wd.finding_id: wd for wd in decisions}
 
         undecided = [f for f in warning_findings if f.id not in decided_map]
         if undecided:
@@ -593,7 +587,13 @@ class QCService:
             # Auto-run QC if no evaluation exists for active timeline
             qc_run = cls.run_qc(db, project_id)
 
-        decisions_map = {wd.finding_id: wd for wd in qc_run.decisions}
+        decisions = (
+            db.query(WarningDecision)
+            .filter(WarningDecision.qc_run_id == qc_run.id)
+            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+            .all()
+        )
+        decisions_map = {wd.finding_id: wd for wd in decisions}
         simple_findings: List[SimpleFindingRead] = []
         unresolved_warnings = 0
         fix_required_warnings = 0
@@ -731,13 +731,18 @@ class QCService:
         decisions = (
             db.query(WarningDecision)
             .filter(WarningDecision.finding_id.in_(finding_ids))
+            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
             .all()
         ) if finding_ids else []
-        dec_map = {d.finding_id: d for d in decisions}
+
+        dec_history_map: Dict[uuid.UUID, List[WarningDecision]] = {}
+        for d in decisions:
+            dec_history_map.setdefault(d.finding_id, []).append(d)
 
         findings_read: List[QCFindingRead] = []
         for f in findings:
-            dec = dec_map.get(f.id)
+            history = dec_history_map.get(f.id, [])
+            latest_dec = history[-1] if history else None
             findings_read.append(
                 QCFindingRead(
                     id=f.id,
@@ -754,7 +759,8 @@ class QCService:
                     target_label=f.target_label,
                     action_type=f.action_type,
                     created_at=f.created_at,
-                    current_decision=WarningDecisionRead.model_validate(dec) if dec else None,
+                    current_decision=WarningDecisionRead.model_validate(latest_dec) if latest_dec else None,
+                    decision_history=[WarningDecisionRead.model_validate(d) for d in history],
                 )
             )
 

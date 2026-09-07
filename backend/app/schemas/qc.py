@@ -57,6 +57,7 @@ class QCFindingRead(BaseModel):
     action_type: Optional[str] = None
     created_at: datetime
     current_decision: Optional[WarningDecisionRead] = None
+    decision_history: List[WarningDecisionRead] = []
 
     model_config = ConfigDict(from_attributes=True)
 

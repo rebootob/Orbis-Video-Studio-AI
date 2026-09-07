@@ -1324,6 +1324,31 @@ class ProductionOrchestrator:
             qc_run_id=qc_run_id,
         )
 
+        # Idempotency check: return existing approval safely if exact timeline revision + QC run is already approved
+        existing_approval = (
+            db.query(ApprovalRecord)
+            .filter(
+                ApprovalRecord.project_id == project_id,
+                ApprovalRecord.timeline_id == active_timeline.id,
+                ApprovalRecord.qc_run_id == latest_qc.id,
+            )
+            .first()
+        )
+        if existing_approval:
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=from_state,
+                to_state=from_state,
+                action="APPROVE_FINAL",
+                actor=actor,
+                result=OrchestrationActionResult.NO_OP,
+                reason_code="ALREADY_APPROVED",
+                detail=f"Production cut v{active_timeline.version} with QC Run {latest_qc.id} is already approved.",
+            )
+            db.commit()
+            return existing_approval
+
         target_state = "COMPLETED"
 
         approval = ApprovalRecord(
