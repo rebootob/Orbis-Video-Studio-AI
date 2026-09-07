@@ -1342,6 +1342,9 @@ def test_atomic_expired_lease_reclaim_two_worker_race(tmp_path):
         f"sqlite:///{db_file}",
         connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
     )
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+        conn.exec_driver_sql("PRAGMA busy_timeout=10000")
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
