@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Text
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -106,6 +106,9 @@ class QCFinding(Base):
 
 class WarningDecision(Base):
     __tablename__ = "qc_warning_decisions"
+    __table_args__ = (
+        UniqueConstraint("qc_run_id", "finding_id", name="uq_qc_warning_decisions_qc_run_finding"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

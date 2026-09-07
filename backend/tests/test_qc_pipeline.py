@@ -304,7 +304,7 @@ def test_7_clean_current_revision_can_approve(db_session: Session, test_project_
     )
 
     assert approval.status == "APPROVED"
-    assert project.status == "APPROVED"
+    assert project.status == "COMPLETED"
     assert ctx["timeline"].status == "APPROVED"
 
 
@@ -490,3 +490,141 @@ def test_16_representative_large_project_no_n_plus_1(db_session: Session):
     qc_run = QCService.run_qc(db_session, project.id)
     assert qc_run is not None
     assert qc_run.blocker_count == 0
+
+
+def test_17_fix_required_blocks_approval_and_status_not_passed(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_FIX_REQ_RULE",
+        severity="WARNING",
+        message="Warning that needs fixing.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    # User decides FIX_REQUIRED for the warning
+    QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="FIX_REQUIRED", reason="Intend to fix later"
+    )
+
+    db_session.refresh(qc_run)
+    # QC run MUST NOT become PASSED solely because all warnings have decisions when any is FIX_REQUIRED
+    assert qc_run.status != "PASSED"
+
+    # Attempting approval while a warning is FIX_REQUIRED MUST fail
+    with pytest.raises(Exception) as exc_info:
+        QCService.approve_production(db_session, project.id)
+
+    assert "FIX_REQUIRED" in str(exc_info.value) or "fix" in str(exc_info.value).lower()
+
+
+def test_18_accepted_with_reason_allows_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_ACCEPT_RULE",
+        severity="WARNING",
+        message="Waived warning.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="ACCEPTED_WITH_REASON", reason="Director stylistic waiver"
+    )
+
+    db_session.refresh(qc_run)
+    assert qc_run.status == "PASSED"
+
+    approval = QCService.approve_production(db_session, project.id)
+    assert approval.status == "APPROVED"
+
+
+def test_19_final_approval_uses_canonical_orchestrator_transition_and_audit(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    approval = QCService.approve_production(db_session, project.id, actor="TestAuditor")
+
+    db_session.refresh(project)
+    assert project.status == "COMPLETED"
+
+    # Check orchestrator audit history for correct from_state and to_state
+    from app.models.orchestration_audit import OrchestrationAudit
+    audits = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id)
+        .order_by(OrchestrationAudit.created_at.desc())
+        .all()
+    )
+    assert len(audits) > 0
+    latest_audit = audits[0]
+    assert latest_audit.from_state == "FINAL_REVIEW"
+    assert latest_audit.to_state == "COMPLETED"
+    assert latest_audit.action == "APPROVE_FINAL"
+    assert latest_audit.actor == "TestAuditor"
+
+
+def test_20_generic_patch_cannot_jump_to_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    response = client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"status": "APPROVED"},
+    )
+    assert response.status_code == 400
+    assert "disallowed" in response.json()["detail"].lower() or "orchestration" in response.json()["detail"].lower()
+
+
+def test_21_bounded_approval_history(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    timeline = ctx["timeline"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    from app.models.qc import ApprovalRecord
+    from app.services.qc import utc_now
+    for i in range(15):
+        db_session.add(
+            ApprovalRecord(
+                id=uuid.uuid4(),
+                project_id=project.id,
+                timeline_id=timeline.id,
+                timeline_version=1,
+                qc_run_id=qc_run.id,
+                status="APPROVED",
+                actor=f"User{i}",
+                approved_at=utc_now(),
+            )
+        )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/projects/{project.id}/qc/approvals?limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 5
+
+    # Enforces max limit cap at 100
+    response_cap = client.get(f"/api/v1/projects/{project.id}/qc/approvals?limit=150")
+    assert response_cap.status_code == 422 or len(response_cap.json()) <= 100

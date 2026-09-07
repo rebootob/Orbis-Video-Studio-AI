@@ -89,12 +89,17 @@ def approve_production(
 @router.get("/approvals", response_model=List[ApprovalRecordRead])
 def list_production_approvals(
     project_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """Get history of production approvals for project."""
+    """Get bounded, paginated history of production approvals for project."""
+    eff_limit = min(max(limit, 1), 100)
     return (
         db.query(ApprovalRecord)
         .filter(ApprovalRecord.project_id == project_id)
         .order_by(ApprovalRecord.approved_at.desc())
+        .offset(offset)
+        .limit(eff_limit)
         .all()
     )
