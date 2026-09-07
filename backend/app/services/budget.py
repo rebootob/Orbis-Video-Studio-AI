@@ -116,6 +116,7 @@ class BudgetService:
         if lock_row:
             project.updated_at = project.updated_at
             db.flush()
+            db.expire_all()
         if project.budget_limit is None:
             return
 

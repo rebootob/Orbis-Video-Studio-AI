@@ -87,6 +87,11 @@ class RenderJob(Base):
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     actual_cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_usage_ledger_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usage_ledger.id", ondelete="SET NULL", use_alter=True, name="fk_render_jobs_current_usage_ledger_id"),
+        nullable=True,
+    )
     render_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -107,3 +112,4 @@ class RenderJob(Base):
     timeline: Mapped["AssemblyTimeline"] = relationship("AssemblyTimeline")
     approval: Mapped["ApprovalRecord"] = relationship("ApprovalRecord")
     output_asset: Mapped[Optional["Asset"]] = relationship("Asset")
+    current_usage_ledger: Mapped[Optional["UsageLedger"]] = relationship("UsageLedger", foreign_keys=[current_usage_ledger_id])

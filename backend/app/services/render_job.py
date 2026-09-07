@@ -40,7 +40,15 @@ class RenderJobService:
                 detail=f"Unsupported render profile '{render_profile}'. WP017 supports MASTER render only. Aspect/platform variants are deferred to WP018.",
             )
 
-        # 1. Resolve Timeline for project
+        # 1. Lock Project Row and check budget under DB authority
+        BudgetService.check_budget_before_dispatch(
+            db=db,
+            project_id=project_id,
+            estimated_cost=estimated_cost_usd,
+            lock_row=True,
+        )
+
+        # 2. Resolve Timeline for project
         if timeline_id:
             timeline = (
                 db.query(AssemblyTimeline)
@@ -62,7 +70,7 @@ class RenderJobService:
             if not timeline:
                 raise HTTPException(status_code=404, detail="No active timeline found for project")
 
-        # 2. Approval Gate Verification
+        # 3. Approval Gate Verification
         approval = (
             db.query(ApprovalRecord)
             .filter(
@@ -82,7 +90,7 @@ class RenderJobService:
         base_idempotency_key = f"{project_id}:{timeline.id}:{timeline.version}:{render_profile}"
         target_key = custom_idempotency_key or base_idempotency_key
 
-        # 3. DB Authority Idempotency Check
+        # 4. DB Authority Idempotency Check (under project lock)
         active_job = (
             db.query(RenderJob)
             .filter(
@@ -116,14 +124,6 @@ class RenderJobService:
             # User triggers new render for approved timeline without custom key -> generate timestamped key
             target_key = f"{base_idempotency_key}:{int(time.time())}"
 
-        # 4. Lock Project Row and check budget under DB authority row lock
-        BudgetService.check_budget_before_dispatch(
-            db=db,
-            project_id=project_id,
-            estimated_cost=estimated_cost_usd,
-            lock_row=True,
-        )
-
         # 5. Create RenderJob Entity with IntegrityError fallback for DB authority race conditions
         now = utc_now()
         render_job = RenderJob(
@@ -147,12 +147,11 @@ class RenderJobService:
             created_at=now,
             updated_at=now,
         )
-        from sqlalchemy.exc import IntegrityError
 
         try:
             db.add(render_job)
             db.flush()
-        except IntegrityError:
+        except Exception:
             db.rollback()
             active_job = (
                 db.query(RenderJob)
@@ -171,7 +170,7 @@ class RenderJobService:
                 return active_job
             raise
 
-        # 6. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED)
+        # 6. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED) and bind current_usage_ledger_id
         ledger_entry = UsageLedger(
             project_id=project_id,
             render_job_id=render_job.id,
@@ -187,6 +186,8 @@ class RenderJobService:
             updated_at=now,
         )
         db.add(ledger_entry)
+        db.flush()
+        render_job.current_usage_ledger_id = ledger_entry.id
         db.commit()
         db.refresh(render_job)
         return render_job
@@ -320,17 +321,21 @@ class RenderJobService:
             meta.update(render_metadata)
             job.render_metadata = meta
 
-        # Reconcile UsageLedger: ESTIMATED -> CONFIRMED for current attempt only
-        target_ledger = (
-            db.query(UsageLedger)
-            .filter(
-                UsageLedger.render_job_id == job.id,
-                UsageLedger.cost_status == "ESTIMATED",
+        # Reconcile UsageLedger: ESTIMATED -> CONFIRMED for current attempt only using durable reference
+        target_ledger = None
+        if job.current_usage_ledger_id:
+            target_ledger = db.get(UsageLedger, job.current_usage_ledger_id)
+        if not target_ledger:
+            target_ledger = (
+                db.query(UsageLedger)
+                .filter(
+                    UsageLedger.render_job_id == job.id,
+                    UsageLedger.cost_status == "ESTIMATED",
+                )
+                .order_by(UsageLedger.created_at.desc())
+                .first()
             )
-            .order_by(UsageLedger.created_at.desc())
-            .first()
-        )
-        if target_ledger:
+        if target_ledger and target_ledger.cost_status == "ESTIMATED":
             target_ledger.cost_status = "CONFIRMED"
             target_ledger.actual_cost = actual_cost_usd
             target_ledger.updated_at = now
@@ -384,24 +389,28 @@ class RenderJobService:
                 job.claim_expires_at = None
                 job.error_message = f"Terminal failure after {job.retry_count}/{job.max_retries} attempts: {error_message}"
 
-                ledger_entry = (
-                    db.query(UsageLedger)
-                    .filter(
-                        UsageLedger.render_job_id == job.id,
-                        UsageLedger.cost_status == "ESTIMATED",
+                target_ledger = None
+                if job.current_usage_ledger_id:
+                    target_ledger = db.get(UsageLedger, job.current_usage_ledger_id)
+                if not target_ledger:
+                    target_ledger = (
+                        db.query(UsageLedger)
+                        .filter(
+                            UsageLedger.render_job_id == job.id,
+                            UsageLedger.cost_status == "ESTIMATED",
+                        )
+                        .order_by(UsageLedger.created_at.desc())
+                        .first()
                     )
-                    .order_by(UsageLedger.created_at.desc())
-                    .first()
-                )
-                if ledger_entry:
+                if target_ledger and target_ledger.cost_status == "ESTIMATED":
                     if not was_running_or_claimed:
                         # Proven PRE-EXECUTION failure -> release cost to 0
-                        ledger_entry.cost_status = "ADJUSTED"
-                        ledger_entry.actual_cost = 0.0
+                        target_ledger.cost_status = "ADJUSTED"
+                        target_ledger.actual_cost = 0.0
                     else:
                         # Execution was in progress -> preserve ESTIMATED cost reservation
-                        ledger_entry.cost_status = "ESTIMATED"
-                    ledger_entry.updated_at = now
+                        target_ledger.cost_status = "ESTIMATED"
+                    target_ledger.updated_at = now
 
         db.commit()
         db.refresh(job)
@@ -444,24 +453,28 @@ class RenderJobService:
         job.error_message = "Cancelled by user"
         job.updated_at = now
 
-        ledger_entry = (
-            db.query(UsageLedger)
-            .filter(
-                UsageLedger.render_job_id == job.id,
-                UsageLedger.cost_status == "ESTIMATED",
+        target_ledger = None
+        if job.current_usage_ledger_id:
+            target_ledger = db.get(UsageLedger, job.current_usage_ledger_id)
+        if not target_ledger:
+            target_ledger = (
+                db.query(UsageLedger)
+                .filter(
+                    UsageLedger.render_job_id == job.id,
+                    UsageLedger.cost_status == "ESTIMATED",
+                )
+                .order_by(UsageLedger.created_at.desc())
+                .first()
             )
-            .order_by(UsageLedger.created_at.desc())
-            .first()
-        )
-        if ledger_entry:
+        if target_ledger and target_ledger.cost_status == "ESTIMATED":
             if not was_running:
                 # Pre-execution cancellation -> release cost to 0
-                ledger_entry.cost_status = "ADJUSTED"
-                ledger_entry.actual_cost = 0.0
+                target_ledger.cost_status = "ADJUSTED"
+                target_ledger.actual_cost = 0.0
             else:
                 # Running cancellation -> preserve ESTIMATED cost reservation
-                ledger_entry.cost_status = "ESTIMATED"
-            ledger_entry.updated_at = now
+                target_ledger.cost_status = "ESTIMATED"
+            target_ledger.updated_at = now
 
         db.commit()
         db.refresh(job)
@@ -474,6 +487,14 @@ class RenderJobService:
         project_id: uuid.UUID,
         render_job_id: uuid.UUID,
     ) -> RenderJob:
+        # Concurrency-safe project budget check under row lock before authorizing new retry reservation
+        BudgetService.check_budget_before_dispatch(
+            db=db,
+            project_id=project_id,
+            estimated_cost=None,
+            lock_row=True,
+        )
+
         job = (
             db.query(RenderJob)
             .filter(
@@ -485,18 +506,27 @@ class RenderJobService:
         if not job:
             raise HTTPException(status_code=404, detail="RenderJob not found for project")
 
+        db.refresh(job)
+        # Idempotent replay check: if job is already active for retry, return without duplicate reservation
+        if job.status in (
+            RenderJobStatus.QUEUED.value,
+            RenderJobStatus.CLAIMED.value,
+            RenderJobStatus.RUNNING.value,
+        ):
+            return job
+
         if job.status not in (RenderJobStatus.FAILED.value, RenderJobStatus.CANCELLED.value):
             raise HTTPException(
                 status_code=400,
                 detail=f"Cannot retry render job in status {job.status}",
             )
 
-        # Concurrency-safe project budget check before authorizing new retry reservation
+        # Verify estimated cost against budget limit under project lock
         BudgetService.check_budget_before_dispatch(
             db=db,
             project_id=project_id,
             estimated_cost=job.estimated_cost_usd,
-            lock_row=True,
+            lock_row=False,
         )
 
         now = utc_now()
@@ -508,24 +538,50 @@ class RenderJobService:
         job.error_message = None
         job.updated_at = now
 
-        # Always create a distinct new attempt reservation in UsageLedger without mutating prior entries
+        operation_key = f"RENDER_RETRY_{job.id}"
+        idempotency_key = f"render_reserve_{job.id}_retry"
+
+        # Create exactly ONE new attempt reservation in UsageLedger and bind current_usage_ledger_id atomically
         new_ledger_entry = UsageLedger(
             project_id=project_id,
             render_job_id=job.id,
             provider="ORBIS_RENDER",
-            operation=f"RENDER_RETRY_{int(now.timestamp())}",
+            operation=operation_key,
             estimated_cost=job.estimated_cost_usd,
             actual_cost=None,
             currency="USD",
             cost_status="ESTIMATED",
-            idempotency_key=f"render_reserve_{job.id}_retry_{uuid.uuid4().hex[:8]}",
+            idempotency_key=idempotency_key,
             description=f"Pre-render compute cost reservation (retry) for timeline v{job.timeline_version}",
             created_at=now,
             updated_at=now,
         )
-        db.add(new_ledger_entry)
-
-        db.commit()
+        from sqlalchemy.exc import IntegrityError
+        try:
+            db.add(new_ledger_entry)
+            db.flush()
+            job.current_usage_ledger_id = new_ledger_entry.id
+            db.commit()
+        except IntegrityError as e:
+            print("RETRY INTEGRITY ERROR:", repr(e))
+            db.rollback()
+            job = db.get(RenderJob, render_job_id)
+            if job:
+                existing_ledger = (
+                    db.query(UsageLedger)
+                    .filter(
+                        UsageLedger.render_job_id == render_job_id,
+                        UsageLedger.operation == operation_key,
+                    )
+                    .first()
+                )
+                if existing_ledger:
+                    job.status = RenderJobStatus.QUEUED.value
+                    job.current_usage_ledger_id = existing_ledger.id
+                    db.commit()
+                    db.refresh(job)
+                    return job
+            raise
         db.refresh(job)
         return job
 

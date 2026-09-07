@@ -78,6 +78,15 @@ def create_approved_project_context(db: Session) -> Tuple[Project, AssemblyTimel
     return project, timeline, approval
 
 
+def create_approved_project_context_standalone() -> Tuple[Project, AssemblyTimeline, ApprovalRecord]:
+    from tests.conftest import TestingSessionLocal
+    db = TestingSessionLocal()
+    try:
+        return create_approved_project_context(db)
+    finally:
+        db.close()
+
+
 def test_unapproved_timeline_fails(client: TestClient, db_session: Session):
     project = Project(id=uuid.uuid4(), title="Unapproved Project", video_mode="STORY")
     db_session.add(project)
@@ -599,29 +608,42 @@ def test_approved_timeline_without_new_qc_replay(db_session: Session):
     assert job.status == "QUEUED"
 
 
-def test_same_identity_concurrent_submit_returns_single_job_and_reservation(db_session: Session):
+def test_same_identity_concurrent_submit_returns_single_job_and_reservation(tmp_path):
     import threading
-    from tests.conftest import TestingSessionLocal
+    import os
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
 
-    project, timeline, _ = create_approved_project_context(db_session)
-    project.budget_limit = 0.60
-    db_session.commit()
+    db_file = os.path.join(str(tmp_path), "test_same_identity.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+    setup_db = SessionLocal()
+    project, timeline, _ = create_approved_project_context(setup_db)
     proj_id = project.id
-    bind_conn = db_session.get_bind()
+    p = setup_db.get(Project, project.id)
+    p.budget_limit = 0.60
+    setup_db.commit()
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
 
     results = []
-    test_lock = threading.Lock()
 
     def attempt_submit():
-        local_db = TestingSessionLocal(bind=bind_conn)
+        local_db = SessionLocal()
         try:
-            with test_lock:
-                j = RenderJobService.submit_render_job(
-                    local_db, proj_id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
-                )
-                job_id = j.id
-                results.append(("SUCCESS", job_id))
+            barrier.wait()
+            j = RenderJobService.submit_render_job(
+                local_db, proj_id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
+            )
+            job_id = j.id
+            results.append(("SUCCESS", job_id))
         except Exception as e:
             results.append(("FAILED", str(e)))
         finally:
@@ -639,62 +661,91 @@ def test_same_identity_concurrent_submit_returns_single_job_and_reservation(db_s
     assert len(successes) == 2, f"Expected 2 successful submissions, got: {results}"
     assert successes[0][1] == successes[1][1]
 
-    # Verify single reservation in UsageLedger
-    db_session.expire_all()
-    job_id = successes[0][1]
-    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job_id).all()
-    assert len(ledgers) == 1
-    assert ledgers[0].cost_status == "ESTIMATED"
-    assert ledgers[0].estimated_cost == 0.50
+    # Verify single reservation in UsageLedger and current_usage_ledger_id bound
+    check_db = SessionLocal()
+    try:
+        job_id = successes[0][1]
+        ledgers = check_db.query(UsageLedger).filter(UsageLedger.render_job_id == job_id).all()
+        assert len(ledgers) == 1
+        assert ledgers[0].cost_status == "ESTIMATED"
+        assert ledgers[0].estimated_cost == 0.50
+
+        job = check_db.get(RenderJob, job_id)
+        assert job.current_usage_ledger_id == ledgers[0].id
+    finally:
+        check_db.close()
+        engine.dispose()
 
 
-def test_distinct_concurrent_submits_cannot_oversubscribe_budget(db_session: Session):
+def test_distinct_concurrent_submits_cannot_oversubscribe_budget(tmp_path):
     import threading
-    from tests.conftest import TestingSessionLocal
+    import os
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
 
-    project, timeline1, app1 = create_approved_project_context(db_session)
-    project.budget_limit = 0.60
-    db_session.commit()
+    from sqlalchemy import event
+
+    db_file = os.path.join(str(tmp_path), "test_distinct.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
+    )
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    setup_db = SessionLocal()
+    project, timeline1, app1 = create_approved_project_context(setup_db)
+    p = setup_db.get(Project, project.id)
+    p.budget_limit = 0.60
+    setup_db.commit()
 
     # Create timeline 2 for the same project
     timeline2 = AssemblyTimeline(
         id=uuid.uuid4(), project_id=project.id, version=2, status="APPROVED", is_active=False
     )
-    db_session.add(timeline2)
-    db_session.flush()
+    setup_db.add(timeline2)
+    setup_db.flush()
 
     qc2 = QCRun(
         id=uuid.uuid4(), project_id=project.id, timeline_id=timeline2.id, timeline_version=2,
         status="PASSED", blocker_count=0, warning_count=0, actor="system",
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
     )
-    db_session.add(qc2)
-    db_session.flush()
+    setup_db.add(qc2)
+    setup_db.flush()
 
     app2 = ApprovalRecord(
         id=uuid.uuid4(), project_id=project.id, timeline_id=timeline2.id, timeline_version=2,
         qc_run_id=qc2.id, status="APPROVED", actor="user", approved_at=datetime.now(timezone.utc),
     )
-    db_session.add(app2)
-    db_session.commit()
-
+    setup_db.add(app2)
     proj_id = project.id
     t1_id = timeline1.id
     t2_id = timeline2.id
-    bind_conn = db_session.get_bind()
+    setup_db.commit()
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
 
     results = []
-    test_lock = threading.Lock()
 
     def attempt_submit(t_id: uuid.UUID, key: str):
-        local_db = TestingSessionLocal(bind=bind_conn)
+        barrier.wait()
+        local_db = SessionLocal()
         try:
-            with test_lock:
-                j = RenderJobService.submit_render_job(
-                    local_db, proj_id, timeline_id=t_id, custom_idempotency_key=key, estimated_cost_usd=0.50
-                )
-                job_id = j.id
-                results.append(("SUCCESS", job_id))
+            j = RenderJobService.submit_render_job(
+                local_db, proj_id, timeline_id=t_id, custom_idempotency_key=key, estimated_cost_usd=0.50
+            )
+            job_id = j.id
+            results.append(("SUCCESS", job_id))
         except Exception as e:
             results.append(("FAILED", str(e)))
         finally:
@@ -714,6 +765,7 @@ def test_distinct_concurrent_submits_cannot_oversubscribe_budget(db_session: Ses
     assert len(successes) == 1, f"Expected 1 success, got: {results}"
     assert len(failures) == 1, f"Expected 1 failure, got: {results}"
     assert "budget" in failures[0][1].lower()
+    engine.dispose()
 
 
 def test_cut_assembly():
@@ -1038,3 +1090,73 @@ def test_attempt_specific_cost_settlement_and_truthful_committed_cost(db_session
     # 0.50 (Attempt 1 ESTIMATED) + 0.35 (Attempt 2 CONFIRMED) = 0.85
     committed_final = BudgetService.get_project_committed_cost(db_session, project.id)
     assert committed_final == 0.85
+
+
+def test_retry_active_job_replay_and_concurrent_retry_idempotency(tmp_path):
+    import threading
+    import os
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = os.path.join(str(tmp_path), "test_retry.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    setup_db = SessionLocal()
+    project, timeline, _ = create_approved_project_context(setup_db)
+    job = RenderJobService.submit_render_job(setup_db, project.id, estimated_cost_usd=0.50)
+    assert job.status == "QUEUED"
+
+    # 1. Replay retry on QUEUED job returns existing job without creating duplicate reservations
+    replay_job = RenderJobService.retry_render_job(setup_db, project.id, job.id)
+    assert replay_job.id == job.id
+    assert replay_job.status == "QUEUED"
+
+    ledgers_queued = setup_db.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).all()
+    assert len(ledgers_queued) == 1
+
+    proj_id = project.id
+    job_id = job.id
+    # Mark job FAILED
+    j = setup_db.get(RenderJob, job.id)
+    j.status = "FAILED"
+    setup_db.commit()
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def attempt_retry():
+        barrier.wait()
+        local_db = SessionLocal()
+        try:
+            rj = RenderJobService.retry_render_job(local_db, proj_id, job_id)
+            results.append(("SUCCESS", rj.id))
+        except Exception as e:
+            results.append(("FAILED", str(e)))
+        finally:
+            local_db.close()
+
+    t1 = threading.Thread(target=attempt_retry)
+    t2 = threading.Thread(target=attempt_retry)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[0] == "SUCCESS"]
+    assert len(successes) == 2, f"Expected 2 successful retries, got: {results}"
+
+    check_db = SessionLocal()
+    try:
+        ledgers_retry = check_db.query(UsageLedger).filter(UsageLedger.render_job_id == job_id).all()
+        # 1 initial + 1 from retry (concurrent retry calls resolve to the same retry attempt)
+        assert len(ledgers_retry) == 2
+    finally:
+        check_db.close()
+        engine.dispose()

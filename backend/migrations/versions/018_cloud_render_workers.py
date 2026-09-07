@@ -35,6 +35,7 @@ def upgrade():
         sa.Column("estimated_cost_usd", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("actual_cost_usd", sa.Float(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("current_usage_ledger_id", sa.Uuid(), sa.ForeignKey("usage_ledger.id", ondelete="SET NULL", name="fk_render_jobs_current_usage_ledger_id", use_alter=True), nullable=True),
         sa.Column("render_metadata", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
@@ -46,6 +47,7 @@ def upgrade():
     op.create_index("ix_render_jobs_status", "render_jobs", ["status"])
     op.create_index("ix_render_jobs_idempotency_key", "render_jobs", ["idempotency_key"])
     op.create_index("ix_render_jobs_claimed_by", "render_jobs", ["claimed_by"])
+    op.create_index("ix_render_jobs_current_usage_ledger_id", "render_jobs", ["current_usage_ledger_id"])
 
     # Partial index for active timeline render job
     op.create_index(

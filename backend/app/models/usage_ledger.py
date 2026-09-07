@@ -112,7 +112,7 @@ class UsageLedger(Base):
     project: Mapped["Project"] = relationship("Project", back_populates="usage_ledger_entries")
     shot: Mapped[Optional["Shot"]] = relationship("Shot")
     job: Mapped[Optional["GenerationJob"]] = relationship("GenerationJob")
-    render_job: Mapped[Optional["RenderJob"]] = relationship("RenderJob")
+    render_job: Mapped[Optional["RenderJob"]] = relationship("RenderJob", foreign_keys=[render_job_id])
     adjustments: Mapped[List["LedgerAdjustment"]] = relationship(
         "LedgerAdjustment",
         back_populates="ledger_entry",
