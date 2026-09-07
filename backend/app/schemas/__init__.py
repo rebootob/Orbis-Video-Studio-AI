@@ -28,6 +28,11 @@ from app.schemas.qc import (
     ApprovalRecordRead,
     QCHistoryPagination,
 )
+from app.schemas.render_job import (
+    RenderJobSubmitRequest,
+    RenderJobRead,
+    RenderJobListResponse,
+)
 
 __all__ = [
     "HealthCheck",
@@ -55,6 +60,9 @@ __all__ = [
     "FinalApprovalCreate",
     "ApprovalRecordRead",
     "QCHistoryPagination",
+    "RenderJobSubmitRequest",
+    "RenderJobRead",
+    "RenderJobListResponse",
 ]
 
 
