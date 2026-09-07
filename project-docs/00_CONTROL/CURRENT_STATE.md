@@ -9,7 +9,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-MAIN_HEAD: 09e62876543ee7990919beb43600a1c748be545d
+MAIN_HEAD: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -103,13 +103,19 @@ P4-WP018_MERGE_COMMIT: 09e62876543ee7990919beb43600a1c748be545d
 P4-WP018_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
 P4-WP018_PROPOSAL: project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md
 
-P4-WP019: PRE1 / PROPOSAL IN REVIEW
+P4-WP019: IN_PROGRESS / CHANGES REQUIRED
+P4-WP019_PR: "#50"
+P4-WP019_BRANCH: ai/p4-wp019-orbis-archive
+P4-WP019_PRE1_REVIEWED_HEAD: e1deff16aa93fb3b2e68d404415971351c4a9e46
+P4-WP019_PRE1_MERGE_COMMIT: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+P4-WP019_REVIEWED_HEAD: 59596c0e21c6d685a160742fd498128a53b4682b
+P4-WP019_LATEST_REVIEW: CHANGES REQUIRED (Review ID 5135776036)
 P4-WP019_PROPOSAL: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
-IMPLEMENTATION_AUTHORIZED: NO
+IMPLEMENTATION_AUTHORIZED: YES
 P4-WP020: PROPOSED / NOT AUTHORIZED
 
-ACTIVE_WORK_PACKAGE: P4-WP019-PRE1
-CURRENT_GATE: P4-WP019-PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
+ACTIVE_WORK_PACKAGE: P4-WP019
+CURRENT_GATE: P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -169,8 +175,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
 | Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
 | Cloud Render Workers (P3-WP017) | PASS / CLOSED / MERGED | RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering. PR #44 merged into main at 72065b9c29350e54dd7811a00d7198c6765004d1. |
-| Multi-Output & Platform Export Presets (P4-WP018) | PASS / CLOSED / MERGED | Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention. PR #47 merged into main at 09e62876543ee7990919beb43600a1c748be545d. |
-| Project Export/Import Archive Package (.orbis) (P4-WP019) | PRE1 / PROPOSAL IN REVIEW | Proposal submitted under project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md. Scope: .orbis ZIP container, non-circular checksum trust root, canonical relative POSIX path validation, CLONE vs RESTORE semantics, referential ID remapping, fail-closed transactional rollback, storage compensation, security hardening, historical job status preservation with worker fencing, and ledger financial protection. Implementation NOT authorized. |
+| Project Export/Import Archive Package (.orbis) (P4-WP019) | IN_PROGRESS / CHANGES REQUIRED | PRE1 merged at `5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5` (PR #49). Implementation PR #50 on branch `ai/p4-wp019-orbis-archive`. Delivered: .orbis ZIP container, non-circular checksums (`checksums.sha256`), security hardening (zip slip/bomb/ratio), full project graph export/import, FULL_SELF_CONTAINED asset packaging, CLONE mode with UUID remapping/storage re-upload, RESTORE mode with collision detection, Phase-3 canonical preflight validation (`ArchivePreflightValidator`), historical job status preservation with worker fencing (`imported_historical`, `execution_disabled`), active partial unique index fencing, UsageLedger financial fencing, budget service exclusion, API export/import endpoints, frontend Export/Import modals, extensive test suites. Reviewed HEAD `59596c0e21c6d685a160742fd498128a53b4682b` (Review ID 5135776036): CHANGES REQUIRED on Migration 020 fail-closed downgrade preflight and archive self-consistency (enforcing FULL_SELF_CONTAINED, catalog size_bytes). Subsequent corrective commit `632f70e9159413cb36ea4f767318c605c45497d1` pushed to PR #50 with 412 backend tests and 52 frontend tests passing. Implementation ~97% complete; 18 of 20 WPs merged (90%); Overall Core V1 ~94-95%. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -219,13 +224,13 @@ Beautiful but not distracting
 ## Next Allowed Action
 
 1. Keep WP001-WP018 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = P4-WP019-PRE1`.
-3. `P4-WP019 = PRE1 / PROPOSAL IN REVIEW`.
-4. `IMPLEMENTATION_AUTHORIZED = NO`.
-5. `P4-WP020 = PROPOSED / NOT AUTHORIZED`.
-6. Await ChatGPT independent review of P4-WP019 proposal and Owner decision.
-7. Do NOT implement WP019 without explicit Owner implementation authorization.
-8. Antigravity = STOP / NONE.
+2. `ACTIVE_WORK_PACKAGE = P4-WP019`.
+3. `CURRENT_GATE = P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE`.
+4. `P4-WP019 = IN_PROGRESS / CHANGES REQUIRED` (PR #50, branch `ai/p4-wp019-orbis-archive`).
+5. Current reviewed implementation HEAD = `59596c0e21c6d685a160742fd498128a53b4682b` (Review ID 5135776036: CHANGES REQUIRED).
+6. Latest PR commit = `632f70e9159413cb36ea4f767318c605c45497d1`.
+7. `P4-WP020 = PROPOSED / NOT AUTHORIZED`.
+8. Antigravity = STOP / NONE after documentation sync.
 9. Codex = STOP.
 10. Claude Code = STOP.
 11. Do NOT merge without Owner approval.

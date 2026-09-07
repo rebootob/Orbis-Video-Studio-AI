@@ -11,6 +11,29 @@ rebootob/Orbis-Video-Studio-AI
 Canonical branch:
 main
 
+ACTIVE IMPLEMENTATION BRANCH:
+ai/p4-wp019-orbis-archive
+
+ACTIVE PR:
+#50
+
+CURRENT EXACT REVIEWED HEAD:
+59596c0e21c6d685a160742fd498128a53b4682b
+
+LATEST INDEPENDENT REVIEW:
+Review ID: 5135776036
+Verdict: CHANGES REQUIRED
+
+LATEST PR COMMIT (AFTER CORRECTIVE):
+632f70e9159413cb36ea4f767318c605c45497d1
+
+CURRENT STATUS:
+P4-WP019: IN_PROGRESS / CHANGES REQUIRED
+ACTIVE_WORK_PACKAGE: P4-WP019
+CURRENT_GATE: P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
+IMPLEMENTATION_AUTHORIZED: YES
+P4-WP020: PROPOSED / NOT AUTHORIZED
+
 IMPORTANT:
 Fresh-fetch current GitHub/repository truth first.
 Repository truth newer than documentation is authoritative.
@@ -21,14 +44,12 @@ Read in exact order:
 3. project-docs/00_CONTROL/ACTIVE_TASK.md
 4. project-docs/00_CONTROL/DOCUMENT_INDEX.md
 5. project-docs/00_CONTROL/CHAT_HANDOFF.md
-6. project-docs/30_PRODUCT/PRODUCT_VISION.md
-7. project-docs/30_PRODUCT/VIDEO_PRODUCTION_MODES.md
-8. project-docs/30_PRODUCT/USER_WORKFLOW.md
-9. project-docs/30_PRODUCT/V1_SCOPE.md
-10. only other directly relevant routed documents
-
-Then note:
-- Closed work packages (including Issue #24 / PR #25) may be consulted only for audit, regression, or historical context when relevant. Do NOT require re-review of closed PR #25.
+6. project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
+7. project-docs/30_PRODUCT/PRODUCT_VISION.md
+8. project-docs/30_PRODUCT/VIDEO_PRODUCTION_MODES.md
+9. project-docs/30_PRODUCT/USER_WORKFLOW.md
+10. project-docs/30_PRODUCT/V1_SCOPE.md
+11. only other directly relevant routed documents
 
 KNOWN COMPLETED STATE:
 P0-WP001 = PASS / CLOSED / MERGED
@@ -49,145 +70,38 @@ P3-WP015 = PASS / CLOSED / MERGED
 P3-WP016 = PASS / CLOSED / MERGED
 P3-WP017 = PASS / CLOSED / MERGED
 P4-WP018 = PASS / CLOSED / MERGED
+P4-WP019 PRE1 = PASS / CLOSED / MERGED (PR #49, merge commit: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5)
 
-WP017 reviewed HEAD:
-72d842936a7812aabec8df6b948930a0e296a553
-WP017 merge:
-72065b9c29350e54dd7811a00d7198c6765004d1
-WP017 PR:
-#44 (MERGED / CLOSED)
+P4-WP019 DELIVERED IMPLEMENTATION (PR #50):
+1. .orbis ZIP-compatible archive subsystem with POSIX path safety.
+2. Canonical manifest & checksum design (checksums.sha256 root trust, canonical RFC 8785 JSON).
+3. Archive security validation (Zip Slip, bomb decompression ratio, size limits, absolute/UNC path guards).
+4. Project graph export/import with full entity coverage.
+5. FULL_SELF_CONTAINED asset packaging.
+6. CLONE mode (fresh UUID remap, storage re-upload, source lineage).
+7. RESTORE mode (original identity, fail-closed collision detection).
+8. Phase-3 canonical in-memory preflight validation (ArchivePreflightValidator).
+9. Historical execution fencing (imported_historical = True, execution_disabled = True, worker lease clearing).
+10. RenderJob / GenerationJob active partial unique-index separation.
+11. UsageLedger imported historical financial fencing.
+12. Budget service exclusion of imported historical spend.
+13. REST API endpoints (/export, /import/validate, /import/execute).
+14. Frontend Export and Import modals integrated into ProjectDashboard.
+15. Extensive archive, security, migration, and regression test suites (412 backend tests, 52 frontend tests).
 
-WP018 reviewed HEAD:
-fd745def2235fdaa6accf82ea2cb037a4fa42390
-WP018 merge / main HEAD:
-09e62876543ee7990919beb43600a1c748be545d
-WP018 PR:
-#47 (MERGED / CLOSED)
-
-CURRENT GATE:
-ACTIVE WORK PACKAGE = NONE
-CURRENT_GATE = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
-NEXT CANDIDATE = P4-WP019 (PROPOSED / NOT AUTHORIZED)
-
-Do not start WP019 or any later WP without explicit Owner authorization.
-
-PERFORMANCE & SCALABILITY GUARDRAILS (DELIVERED IN WP011):
-PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
-- selective/batch operations avoid unbounded loading
-- avoid N+1 database queries
-- pagination/chunking for large job/shot sets
-- required DB indexes for batch/resume paths
-- bounded concurrency and truthful batch progress
-- performance/load regression tests
-
-FUTURE-PERFORMANCE BACKLOG (PRESERVED):
-- server-side Project pagination
-- Asset/Job history pagination
-- media thumbnail/lazy-loading
-- streaming/multipart large-file upload
-- media preview streaming
-- frontend virtualization where needed
-
-OWNER-LOCKED PRODUCT DIRECTION:
-Orbis is an AI Video Production Orchestrator / Production Control Plane.
-Do not rebuild foundation AI models when provider services can be orchestrated behind adapters.
-
-Provider-neutral model:
-CreativeProvider -> OpenAI / Gemini / future
-ImageProvider -> Gemini Image / OpenAI Image / future
-VideoProvider -> Vidu / Veo / future
-AudioProvider -> TTS / music / SFX / future
-
-Orbis owns production state/control:
-Project, multi-mode structure, references, Story/Scene/Shot lineage, approvals, history/versioning, locks, durable jobs/retry/recovery, cost/budget, QC, assembly and export.
-
-CORE V1 MODES:
-STORY
-SHORT
-LOOP
-SCENE
-
-ARCHITECTURE-READY LATER:
-PRODUCT
-EXPLAINER
-PRESENTER
-MONTAGE
-
-MULTI-PROJECT / HISTORY LOCKS:
-MULTI_PROJECT = REQUIRED
-FULL_HISTORY_RETENTION = REQUIRED
-AUDITABLE_CHANGES = REQUIRED
-NO_SILENT_HISTORY_LOSS = REQUIRED
-
-AUTOMATION-FIRST LOCKS:
-AUTOMATION_FIRST = REQUIRED
-AUTO_STORYBOARD = REQUIRED
-AUTO_SHOT_PLANNING = REQUIRED
-AUTO_PROMPT_GENERATION = REQUIRED
-BATCH_GENERATION = REQUIRED
-HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
-
-GUIDED FLEXIBILITY:
-Always show the next sensible action.
-Use safe defaults and progressive disclosure.
-Simple mode hides technical provider/model settings.
-Advanced mode preserves expert control.
-No dead ends; explain blockers and recovery in plain language.
-
-APPROVAL-GATED TARGET FLOW:
-Brief / References
--> Story
--> Review / Approve
--> Storyboard
--> Review / Approve
--> Detailed Shot Plan + Prompts
--> Review / Approve
--> Images / Keyframes
--> Continuity QC
--> Review / Approve
--> Video Generation
--> VO / BGM / SFX / Ambience
--> Auto Assembly
--> Final QC
--> Final Approval
--> Render / Export
-
-The user must be able to inspect Story and Storyboard before detailed Shot/Image/Video generation.
-Full Auto may exist, but must not remove safe user control.
-
-AUDIO CORE V1:
-VO = REQUIRED
-BGM = REQUIRED
-SFX = REQUIRED
-AMBIENCE = REQUIRED
-BASIC_AUTO_DUCKING = REQUIRED
-BATCH_AUDIO_AUTOMATION = REQUIRED
-ADVANCED_DAW_STYLE_EDITING = OUT OF V1
-
-ARCHITECTURE LOCKS:
-Cloud-first
-LOCAL_AI = DISALLOWED
-CLOUD_AI = REQUIRED
-Vidu = V1 default video provider behind adapter
-Provider abstraction required
-Vendor lock-in prohibited
-Human approval before final render
-Multi-output from one master project
+REMAINING REVIEW BLOCKERS (Review ID 5135776036) & DELIVERED CORRECTION:
+1. Migration 020 fail-closed downgrade preflight: Precheck UsageLedger (provider, provider_event_id) collisions before any schema change -> Delivered in commit 632f70e with test_020_usage_ledger_coexistence_and_fail_closed_downgrade.
+2. Archive self-consistency: Enforce FULL_SELF_CONTAINED, disallow include_renders=False, assert actual_size == catalog size_bytes == Asset.file_size_bytes -> Delivered in commit 632f70e with test_export_with_render_output_asset_self_contained_round_trip and test_preflight_catalog_size_mismatch_rejected_independently.
 
 ROLES:
 Owner = final human authority / UAT / merge approval
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = low-credit bounded Execution Plane only when implementation is genuinely necessary
-Codex = STOP by default
+Antigravity = STOP / NONE after documentation sync
+Codex = STOP
 Claude Code = STOP
 
-AUTOMATION INFRA:
-Local Antigravity watcher/dispatcher is PAUSED and not production-trusted.
-Do not depend on it.
-
-FIRST ACTION:
-1. Fresh-fetch live origin/main and report exact live main HEAD SHA (09e62876543ee7990919beb43600a1c748be545d).
-2. Confirm ACTIVE_WORK_PACKAGE = NONE and CURRENT_GATE = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION.
-3. Await explicit Owner authorization before starting or implementing any new Work Package (including P4-WP019).
-4. Do not start WP019 or any later WP automatically.
+NEXT ALLOWED ACTION:
+Independent Review on PR #50 for the delivered corrective commit 632f70e9159413cb36ea4f767318c605c45497d1.
+Do NOT merge without Owner approval.
+Do NOT start WP020.
 ```

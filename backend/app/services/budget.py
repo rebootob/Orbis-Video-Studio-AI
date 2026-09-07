@@ -22,7 +22,14 @@ class BudgetService:
     @classmethod
     def get_project_committed_cost(cls, db: Session, project_id: uuid.UUID) -> float:
         """Calculate total committed cost: confirmed actuals + manual adjustments + active estimates."""
-        entries = db.query(UsageLedger).filter(UsageLedger.project_id == project_id).all()
+        entries = (
+            db.query(UsageLedger)
+            .filter(
+                UsageLedger.project_id == project_id,
+                UsageLedger.imported_historical.isnot(True),
+            )
+            .all()
+        )
         total = 0.0
         for e in entries:
             if e.cost_status in (CostStatus.CONFIRMED, CostStatus.ADJUSTED, "COMMITTED"):

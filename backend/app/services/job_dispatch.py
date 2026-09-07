@@ -278,7 +278,11 @@ class JobDispatchService:
                         return existing
                 existing_active = (
                     db.query(Job)
-                    .filter(Job.shot_id == shot_id, Job.status.in_(ACTIVE_JOB_STATUSES))
+                    .filter(
+                        Job.shot_id == shot_id,
+                        Job.status.in_(ACTIVE_JOB_STATUSES),
+                        Job.imported_historical.isnot(True),
+                    )
                     .first()
                 )
                 if existing_active:
@@ -310,6 +314,8 @@ class JobDispatchService:
         lease_secs = lease_duration_seconds
         eligible = [
             Job.status == "PENDING",
+            Job.imported_historical.isnot(True),
+            Job.execution_disabled.isnot(True),
             Job.provider_job_id.is_(None),
             Job.submission_attempt_id.is_(None),
             Job.retry_count < Job.max_retries,
@@ -335,6 +341,7 @@ class JobDispatchService:
     def recover_pending_jobs(db: Session, *, now=None):
         now = now or utc_now()
         expired = due(Job.claim_expires_at, now)
+        not_imported = Job.imported_historical.isnot(True)
         count = 0
         for state, values in (
             ("CLAIMED", {"status": "PENDING"}),
@@ -342,8 +349,8 @@ class JobDispatchService:
             ("POLLING", {"status": "PROCESSING", "next_poll_at": now + timedelta(seconds=POLL_SECONDS)}),
             ("CANCELLING", {"status": "RECONCILIATION_REQUIRED", "error_message": "Cancellation outcome unknown; manual reconciliation required"}),
         ):
-            count += change(db, [Job.status == state, expired], {**released(), **values})
-        count += change(db, [Job.status.in_(ACTIVE), Job.provider_job_id.is_(None), expired], {
+            count += change(db, [Job.status == state, expired, not_imported], {**released(), **values})
+        count += change(db, [Job.status.in_(ACTIVE), Job.provider_job_id.is_(None), expired, not_imported], {
             **released(), "status": "RECONCILIATION_REQUIRED",
             "error_message": "Provider identity missing; manual reconciliation required",
         })
@@ -479,7 +486,7 @@ class JobDispatchService:
         supplied_now = now
         now = now or utc_now()
         job = load(db, job_id)
-        if job.status not in ACTIVE or not job.provider_job_id:
+        if job.status not in ACTIVE or not job.provider_job_id or job.imported_historical or job.execution_disabled:
             return job
 
         limit = min(job.max_polls, max_polls) if max_polls is not None else job.max_polls

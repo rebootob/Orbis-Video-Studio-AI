@@ -417,7 +417,10 @@ class BatchResumeService:
             if found_ids:
                 job_rows = (
                     db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
-                    .filter(GenerationJob.shot_id.in_(found_ids))
+                    .filter(
+                        GenerationJob.shot_id.in_(found_ids),
+                        GenerationJob.imported_historical.isnot(True),
+                    )
                     .all()
                 )
             (
@@ -537,7 +540,10 @@ class BatchResumeService:
             if found_ids:
                 job_rows = (
                     db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
-                    .filter(GenerationJob.shot_id.in_(found_ids))
+                    .filter(
+                        GenerationJob.shot_id.in_(found_ids),
+                        GenerationJob.imported_historical.isnot(True),
+                    )
                     .all()
                 )
             (
@@ -713,7 +719,10 @@ class BatchResumeService:
             if found_ids:
                 job_rows = (
                     db.query(GenerationJob.shot_id, GenerationJob.status, GenerationJob.job_type)
-                    .filter(GenerationJob.shot_id.in_(found_ids))
+                    .filter(
+                        GenerationJob.shot_id.in_(found_ids),
+                        GenerationJob.imported_historical.isnot(True),
+                    )
                     .all()
                 )
             (

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, UniqueConstraint, Index, func, text
+from sqlalchemy import String, Text, Float, Integer, JSON, DateTime, ForeignKey, UniqueConstraint, Index, func, text, Boolean
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
@@ -21,12 +21,13 @@ class GenerationJob(Base):
         UniqueConstraint("shot_id", "idempotency_key", name="uq_generation_jobs_shot_idempotency_key"),
         Index("ix_generation_jobs_status", "status"),
         Index("ix_generation_jobs_job_type", "job_type"),
+        Index("ix_generation_jobs_imported_historical", "imported_historical"),
         Index(
             "uq_generation_jobs_active_shot",
             "shot_id",
             unique=True,
-            sqlite_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED')"),
-            postgresql_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED')"),
+            sqlite_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
+            postgresql_where=text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
         ),
     )
 
@@ -69,6 +70,12 @@ class GenerationJob(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("assets.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    imported_historical: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
+    execution_disabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -60,6 +60,9 @@ export interface Project {
   scene_count?: number;
   shot_count?: number;
   thumbnail_url?: string | null;
+  source_project_id?: string | null;
+  source_archive_checksum?: string | null;
+  imported_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -681,4 +684,39 @@ export interface RenderBatch {
   created_at: string;
   updated_at: string;
   child_jobs?: RenderJob[];
+}
+
+export interface ProjectExportOptions {
+  package_type?: 'FULL_SELF_CONTAINED' | 'REFERENCE_ONLY';
+  include_history?: boolean;
+  include_renders?: boolean;
+}
+
+export interface ProjectValidationResult {
+  valid: boolean;
+  archive_format_version: string;
+  source_project_id: string;
+  title: string;
+  video_mode: VideoMode;
+  entity_counts: Record<string, number>;
+  collision_detected: boolean;
+  allowed_modes: ('CLONE' | 'RESTORE')[];
+  total_uncompressed_bytes: number;
+  manifest_summary?: Record<string, any>;
+  warnings?: string[];
+}
+
+export interface ProjectImportPayload {
+  import_mode: 'CLONE' | 'RESTORE';
+  override_title?: string;
+}
+
+export interface ProjectImportResult {
+  project_id: string;
+  title: string;
+  status: string;
+  import_mode: 'CLONE' | 'RESTORE';
+  source_project_id: string;
+  imported_asset_count: number;
+  created_at: string;
 }

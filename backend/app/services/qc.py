@@ -96,6 +96,7 @@ class QCService:
             db.query(GenerationJob)
             .filter(
                 GenerationJob.shot_id.in_(shot_map.keys()),
+                GenerationJob.imported_historical.isnot(True),
                 GenerationJob.status == "RECONCILIATION_REQUIRED",
             )
             .all()

@@ -17,7 +17,10 @@ async def run_once(session_factory=SessionLocal):
             await JobDispatchService.process_job(db, job.id, claim_token=job.claim_token)
         now = utc_now()
         pending = db.query(GenerationJob.id).filter(
-            GenerationJob.status.in_(ACTIVE), GenerationJob.provider_job_id.is_not(None),
+            GenerationJob.status.in_(ACTIVE),
+            GenerationJob.imported_historical.isnot(True),
+            GenerationJob.execution_disabled.isnot(True),
+            GenerationJob.provider_job_id.is_not(None),
             or_(GenerationJob.next_poll_at.is_(None), GenerationJob.next_poll_at <= now),
         ).order_by(GenerationJob.next_poll_at, GenerationJob.created_at).limit(10).all()
         db.commit()

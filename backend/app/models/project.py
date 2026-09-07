@@ -41,6 +41,17 @@ class Project(Base):
     budget_currency: Mapped[str] = mapped_column(String(10), default="USD", nullable=False)
     budget_threshold_percentage: Mapped[Optional[float]] = mapped_column(Float, default=80.0, nullable=True)
 
+    # Archive Lineage
+    source_project_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    source_archive_checksum: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    imported_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

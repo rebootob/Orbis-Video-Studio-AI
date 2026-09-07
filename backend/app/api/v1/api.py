@@ -15,11 +15,13 @@ from app.api.v1.endpoints import (
     assembly,
     qc,
     renders,
+    project_archive,
 )
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(projects.router, tags=["projects"])
+api_router.include_router(project_archive.router, tags=["project-archive"])
 api_router.include_router(orchestration.router, tags=["orchestration"])
 api_router.include_router(assets.router, tags=["assets"])
 api_router.include_router(document_extraction.router, tags=["document-extraction"])
