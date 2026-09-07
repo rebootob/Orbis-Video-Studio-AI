@@ -103,11 +103,13 @@ P4-WP018_MERGE_COMMIT: 09e62876543ee7990919beb43600a1c748be545d
 P4-WP018_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
 P4-WP018_PROPOSAL: project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md
 
-P4-WP019: PROPOSED / NOT AUTHORIZED
+P4-WP019: PRE1 / PROPOSAL IN REVIEW
+P4-WP019_PROPOSAL: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
+IMPLEMENTATION_AUTHORIZED: NO
 P4-WP020: PROPOSED / NOT AUTHORIZED
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION
+ACTIVE_WORK_PACKAGE: P4-WP019-PRE1
+CURRENT_GATE: P4-WP019-PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -168,6 +170,7 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
 | Cloud Render Workers (P3-WP017) | PASS / CLOSED / MERGED | RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering. PR #44 merged into main at 72065b9c29350e54dd7811a00d7198c6765004d1. |
 | Multi-Output & Platform Export Presets (P4-WP018) | PASS / CLOSED / MERGED | Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention. PR #47 merged into main at 09e62876543ee7990919beb43600a1c748be545d. |
+| Project Export/Import Archive Package (.orbis) (P4-WP019) | PRE1 / PROPOSAL IN REVIEW | Proposal submitted under project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md. Scope: .orbis ZIP container, manifest schema, CLONE vs RESTORE semantics, referential ID remapping, fail-closed transactional rollback, storage compensation, security hardening, non-resumption of jobs, ledger financial protection. Implementation NOT authorized. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -216,15 +219,16 @@ Beautiful but not distracting
 ## Next Allowed Action
 
 1. Keep WP001-WP018 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = NONE`.
-3. `CURRENT_GATE = POST-WP018 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-4. `P4-WP019 = PROPOSED / NOT AUTHORIZED`.
+2. `ACTIVE_WORK_PACKAGE = P4-WP019-PRE1`.
+3. `P4-WP019 = PRE1 / PROPOSAL IN REVIEW`.
+4. `IMPLEMENTATION_AUTHORIZED = NO`.
 5. `P4-WP020 = PROPOSED / NOT AUTHORIZED`.
-6. Await explicit Owner authorization before starting P4-WP019 PRE1 or any implementation work.
-7. Antigravity = STOP / NONE until next WP authorization.
-8. Codex = STOP.
-9. Claude Code = STOP.
-10. Do NOT merge without Owner approval.
-11. Do NOT start WP019.
+6. Await ChatGPT independent review of P4-WP019 proposal and Owner decision.
+7. Do NOT implement WP019 without explicit Owner implementation authorization.
+8. Antigravity = STOP / NONE.
+9. Codex = STOP.
+10. Claude Code = STOP.
+11. Do NOT merge without Owner approval.
+12. Do NOT start WP020.
 
 Live GitHub/repository truth newer than this document is authoritative.
