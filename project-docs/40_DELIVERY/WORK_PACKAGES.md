@@ -134,6 +134,15 @@ graph TD
   - **Final Review:** PASS / READY TO MERGE (Review ID 5127769635)
   - **Scope Delivered:** Provider/revision-bound QC engine, structured findings (BLOCKER / WARNING), warning decision audit history (ACCEPTED_WITH_REASON / FIX_REQUIRED), 1-shot approval per timeline revision, production orchestrator workflow integration.
 
+- **P3-WP017 — Cloud Render Workers**
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #44
+  - **Starting Head:** `556ca1c2566c154e5f10559e74907896bbf3b797`
+  - **Reviewed Head:** `72d842936a7812aabec8df6b948930a0e296a553`
+  - **Merge Commit:** `72065b9c29350e54dd7811a00d7198c6765004d1`
+  - **Final Review:** PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
+  - **Scope Delivered:** Cloud Render Workers, RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering.
+
 ---
 
 ## 3. Active Work Package
@@ -142,12 +151,12 @@ graph TD
 ACTIVE_WORK_PACKAGE = NONE
 ```
 
-- **Current Status:** POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
-- P3-WP017 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP017 without explicit Owner authorization.
+- **Current Status:** POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION
+- P4-WP018 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP018 without explicit Owner authorization.
 
 ---
 
-## 4. Remaining Roadmap — Direction After WP016
+## 4. Remaining Roadmap — Direction After WP017
 
 The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
 
@@ -206,7 +215,8 @@ Important product locks:
   - **PR:** #41 (Merged into `main` at `43e5221e7f39a19e8c6fde54c450324aa8333059`)
 
 - **P3-WP017 — Cloud Render Workers**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - **Status:** PASS / CLOSED / MERGED
+  - **PR:** #44 (Merged into `main` at `72065b9c29350e54dd7811a00d7198c6765004d1`)
   - Final assembly/render after approval, preserving deterministic job control and auditability.
 
 ### Phase 4 — Multi-Output, Export & Core V1 Release
