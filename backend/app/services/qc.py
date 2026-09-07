@@ -378,8 +378,13 @@ class QCService:
                 detail=f"Project '{project_id}' not found",
             )
 
-        finding = db.get(QCFinding, finding_id)
-        if not finding or finding.project_id != project_id:
+        finding = (
+            db.query(QCFinding)
+            .filter(QCFinding.id == finding_id, QCFinding.project_id == project_id)
+            .with_for_update()
+            .first()
+        )
+        if not finding:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="QC finding not found for this project context",

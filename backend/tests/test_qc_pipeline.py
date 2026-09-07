@@ -12,7 +12,7 @@ from app.models.asset import Asset
 from app.models.audio_clip import AudioClip
 from app.models.assembly import AssemblyTimeline, AssemblyScene, AssemblyShotPlacement
 from app.models.qc import QCRun, QCFinding, WarningDecision, ApprovalRecord
-from app.services.qc import QCService
+from app.services.qc import QCService, utc_now
 from app.services.assembly import AssemblyService
 from app.services.production_orchestrator import ProductionOrchestrator
 
@@ -851,11 +851,8 @@ def test_28_one_shot_approval_per_timeline_revision(db_session: Session, test_pr
     assert qc_run_v1_again.id != qc_run_v1.id
     assert qc_run_v1_again.timeline_id == qc_run_v1.timeline_id
 
-    for f in qc_run_v1_again.findings:
-        if f.severity == "WARNING":
-            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Waived for v1 again")
-
-    # 3. Approve again on same unchanged timeline revision v1 (even with new QC run)
+    # Do NOT decide warnings for new QC run — leave new warning UNDECIDED!
+    # 3. Call approve again: MUST return existing approval safely before QC validation!
     appr1_again = ProductionOrchestrator.approve_final_production(db_session, project.id)
     assert appr1_again.id == appr1.id
 
@@ -956,3 +953,78 @@ def test_29_bounded_findings_and_paginated_decision_history_endpoint(db_session:
     wrong_proj_id = uuid.uuid4()
     sec_res = client.get(f"/api/v1/projects/{wrong_proj_id}/qc/findings/{finding.id}/history")
     assert sec_res.status_code == 404
+
+
+def test_30_concurrency_safe_decision_sequence_uniqueness(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="CONTINUITY_CHECK",
+        severity="WARNING",
+        message="Concurrency test finding",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    dec1 = WarningDecision(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        finding_id=finding.id,
+        timeline_id=qc_run.timeline_id,
+        decision="FIX_REQUIRED",
+        reason="Initial fix required",
+        actor="User1",
+        decided_at=utc_now(),
+        decision_sequence=1,
+    )
+    db_session.add(dec1)
+    db_session.commit()
+
+    project_id = project.id
+    finding_id = finding.id
+
+    # Attempting to insert duplicate (finding_id, decision_sequence=1) raises IntegrityError
+    from sqlalchemy.exc import IntegrityError
+    try:
+        with db_session.begin_nested():
+            dec_dup = WarningDecision(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                qc_run_id=qc_run.id,
+                finding_id=finding_id,
+                timeline_id=qc_run.timeline_id,
+                decision="ACCEPTED_WITH_REASON",
+                reason="Duplicate sequence insert attempt",
+                actor="User2",
+                decided_at=utc_now(),
+                decision_sequence=1,
+            )
+            db_session.add(dec_dup)
+            db_session.flush()
+        assert False, "Should have raised IntegrityError for duplicate (finding_id, decision_sequence)"
+    except IntegrityError:
+        pass
+
+    # Verify latest decision resolves by sequence number 2, not UUID
+    dec2 = QCService.record_warning_decision(
+        db_session, project_id, finding_id, decision="ACCEPTED_WITH_REASON", reason="Waived with sequence 2"
+    )
+    assert dec2.decision_sequence == 2
+
+    all_decs = (
+        db_session.query(WarningDecision)
+        .filter(WarningDecision.finding_id == finding_id)
+        .order_by(WarningDecision.decision_sequence.asc())
+        .all()
+    )
+    assert len(all_decs) == 2
+    assert all_decs[0].decision_sequence == 1
+    assert all_decs[1].decision_sequence == 2
+    assert all_decs[-1].decision == "ACCEPTED_WITH_REASON"

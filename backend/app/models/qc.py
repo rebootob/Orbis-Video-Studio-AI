@@ -106,6 +106,9 @@ class QCFinding(Base):
 
 class WarningDecision(Base):
     __tablename__ = "qc_warning_decisions"
+    __table_args__ = (
+        UniqueConstraint("finding_id", "decision_sequence", name="uq_qc_warning_decisions_finding_seq"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

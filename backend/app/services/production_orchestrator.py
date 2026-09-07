@@ -1288,15 +1288,53 @@ class ProductionOrchestrator:
                 detail=f"Project '{project_id}' not found",
             )
 
-        from_state = project.status or "FINAL_REVIEW"
+        # 1. Resolve active timeline revision
+        from app.services.assembly import AssemblyService
+        active_timeline = AssemblyService.get_active_timeline(db, str(project_id))
+        if not active_timeline:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active timeline assembly available for production approval",
+            )
 
+        if timeline_id and timeline_id != active_timeline.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Specified timeline ID '{timeline_id}' does not match the active current timeline revision (v{active_timeline.version}). Stale revisions cannot be approved.",
+            )
+
+        # 2. Look up existing ApprovalRecord for project_id + timeline_id FIRST (idempotent replay)
+        existing_approval = (
+            db.query(ApprovalRecord)
+            .filter(
+                ApprovalRecord.project_id == project_id,
+                ApprovalRecord.timeline_id == active_timeline.id,
+            )
+            .first()
+        )
+        if existing_approval:
+            from_state = project.status or "COMPLETED"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=from_state,
+                to_state=from_state,
+                action="APPROVE_FINAL",
+                actor=actor,
+                result=OrchestrationActionResult.NO_OP,
+                reason_code="ALREADY_APPROVED",
+                detail=f"Production cut v{active_timeline.version} is already approved.",
+            )
+            db.commit()
+            return existing_approval
+
+        # 3. Only if no existing approval exists for this revision, enforce allowed workflow source state
+        from_state = project.status or "FINAL_REVIEW"
         ALLOWED_APPROVAL_FROM_STATES = {
             "FINAL_REVIEW",
             "READY_FOR_REVIEW",
             "AUDIO_APPROVED",
             "READY_FOR_ASSEMBLY",
-            "APPROVED",
-            "COMPLETED",
         }
         if from_state not in ALLOWED_APPROVAL_FROM_STATES:
             cls.record_audit(
@@ -1316,6 +1354,7 @@ class ProductionOrchestrator:
                 detail=f"Cannot approve production from stage '{from_state}'. Project must be in final review stage.",
             )
 
+        # 4. Validate latest QC for new unapproved timeline revision
         from app.services.qc import QCService
         active_timeline, latest_qc = QCService.validate_final_approval(
             db=db,
@@ -1323,30 +1362,6 @@ class ProductionOrchestrator:
             timeline_id=timeline_id,
             qc_run_id=qc_run_id,
         )
-
-        # Idempotency check: return existing approval safely if timeline revision is already approved
-        existing_approval = (
-            db.query(ApprovalRecord)
-            .filter(
-                ApprovalRecord.project_id == project_id,
-                ApprovalRecord.timeline_id == active_timeline.id,
-            )
-            .first()
-        )
-        if existing_approval:
-            cls.record_audit(
-                db=db,
-                project_id=project_id,
-                from_state=from_state,
-                to_state=from_state,
-                action="APPROVE_FINAL",
-                actor=actor,
-                result=OrchestrationActionResult.NO_OP,
-                reason_code="ALREADY_APPROVED",
-                detail=f"Production cut v{active_timeline.version} is already approved.",
-            )
-            db.commit()
-            return existing_approval
 
         target_state = "COMPLETED"
 

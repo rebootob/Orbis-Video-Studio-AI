@@ -70,6 +70,7 @@ def upgrade():
         sa.Column("actor", sa.String(length=100), nullable=False, server_default="USER"),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("decision_sequence", sa.Integer(), nullable=False, server_default="1"),
+        sa.UniqueConstraint("finding_id", "decision_sequence", name="uq_qc_warning_decisions_finding_seq"),
     )
     op.create_index("ix_qc_warning_decisions_project_id", "qc_warning_decisions", ["project_id"])
     op.create_index("ix_qc_warning_decisions_qc_run_id", "qc_warning_decisions", ["qc_run_id"])
