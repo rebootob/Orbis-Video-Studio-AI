@@ -235,7 +235,7 @@ Important product locks:
 - **P4-WP019 — Project Export/Import Archive Package (.orbis)**
   - **Status:** PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
   - **Proposal Document:** [`project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md`](P4_WP019_PROPOSAL.md)
-  - Full-fidelity, portable `.orbis` ZIP container format, deterministic manifest schema with member-level SHA-256 validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed 4-phase transactional import with atomic DB rollback and storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), normalization of historical jobs to CANCELLED, and financial protection (ARCHIVED_IMPORT usage ledger tagging without double-counting).
+  - Full-fidelity, portable `.orbis` ZIP container format, non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members), canonical relative POSIX path validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed 4-phase transactional import with atomic DB rollback and storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), preservation of original historical job execution status with worker fencing (`imported_historical = True`), and preservation of historical financial truth without spend double-counting.
 
 - **P4-WP020 — End-to-End System Integration, UAT & Core V1 Release**
   - **Status:** PROPOSED / NOT AUTHORIZED

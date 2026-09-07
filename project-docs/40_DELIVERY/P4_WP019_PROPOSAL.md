@@ -72,10 +72,10 @@ WP019 delivers the following bounded capabilities:
 7. **Fail-Closed Transactional Import**:
    - Strict 4-phase import pipeline: Inspection & Sandbox Unpack -> Pre-flight Validation -> Staged Database Mutation -> Storage Promotion.
    - Atomic database rollback and automated storage cleanup on any failure.
-8. **Security Hardening**: Protection against ZIP Slip (path traversal), decompression bombs, excessive file counts, duplicate file headers, corrupted checksums, and secret leakage.
+8. **Security Hardening**: Protection against ZIP Slip (path traversal), decompression bombs, excessive file counts, duplicate file headers, corrupted checksums, and secret leakage. Strict path validation allows only normalized relative POSIX-style paths (`entities/story.json`, `assets/data/file.mp4`) and rejects absolute, leading-slash, Windows drive, UNC, backslash, traversal (`..`), and non-regular entries.
 9. **Sanitized Configuration (No Secret Leakage)**: Strict redaction/exclusion of provider API keys, authorization tokens, presigned URLs, and machine-local credential paths.
-10. **Historical Safety & Non-Resumption Guarantee**: Historical `RenderJob` and `GenerationJob` records are imported in terminal historical states (`COMPLETED`, `FAILED`, `CANCELLED`); never imported as active (`QUEUED`, `CLAIMED`, `RUNNING`) to prevent accidental automated execution.
-11. **Financial & Ledger Integrity**: Historical `UsageLedger` entries are imported as historical audit records only, marked as `ARCHIVED_IMPORT`; they never reduce or re-charge the active project budget in the target environment.
+10. **Preservation of Historical Execution Truth**: Historical `RenderJob` and `GenerationJob` records preserve their original execution status, attempts, errors, and timestamps exactly as historical truth (no rewriting of status to `CANCELLED`). Non-resumption is guaranteed via explicit import-safety metadata: `imported_historical = True` and `execution_disabled = True`. Background workers and dispatch queues strictly fence out jobs where `imported_historical IS TRUE`.
+11. **Preservation of Historical Financial Truth**: Historical `UsageLedger` and `LedgerAdjustment` entries preserve their original `cost_status`, `estimated_cost`, `actual_cost`, currency, and timestamps bit-for-bit (no rewriting of status to `ARCHIVED_IMPORT`). Rows are tagged with `imported_historical = True`. Live budget calculations strictly exclude rows where `imported_historical IS TRUE`, preventing double-counting or re-charging without altering historical financial truth.
 12. **Minimal V1 UI / API**:
     - Backend endpoints for export generation and streaming download, and import upload, pre-flight validation, and execution.
     - Frontend dashboard actions: "Export .orbis" and "Import Project".
@@ -131,10 +131,32 @@ my-project.orbis (ZIP)
 └── checksums.sha256               # Raw SHA-256 manifest of every file in the ZIP
 ```
 
-### Container Principles
+### Container Principles & Path Specification
 1. **Archive Compression Policy**: ZIP `deflate` (standard compression level 6) for JSON manifests; `store` (0 compression) or light `deflate` for media binaries (MP4, PNG, JPG, WAV) to optimize creation and extraction speed without wasteful double compression.
-2. **Deterministic Layout**: All filenames inside the archive use forward slashes (`/`), lowercase hex hashes, and standard UTF-8 paths. No absolute paths, no relative paths with `..` (ZIP Slip prevention), and no backslashes.
-3. **Checksum Integrity**: `manifest.json` embeds SHA-256 hashes for all member files, supplemented by root-level `checksums.sha256`.
+2. **Canonical Relative Path Format**: All paths inside the archive MUST be canonical POSIX-style relative paths using forward slashes (`/`) as delimiters.
+   - **ALLOW**: Normalized relative POSIX-style paths (e.g. `manifest.json`, `project.json`, `entities/story.json`, `assets/data/3a7b...4f8e.mp4`, `history/usage_ledger.json`).
+   - **REJECT**:
+     - Absolute paths (e.g. `/etc/passwd`, `/manifest.json`, `\Windows\System32\...`).
+     - Leading forward slashes (`/`) or leading backslashes (`\`).
+     - Windows drive-letter paths (e.g. `C:file.txt`, `D:\data\...`, `C:/data/...`).
+     - UNC paths (e.g. `\\server\share\...`, `//server/share/...`).
+     - Backslashes (`\`) anywhere in the path string (canonical archive format strictly requires `/`).
+     - Traversal path segments (`.` or `..`, e.g. `../entities/story.json`, `entities/../story.json`).
+     - Empty or ambiguous path segments (e.g. `entities//story.json`, trailing slashes for non-directories).
+     - Canonicalized paths that escape the extraction sandbox: verify `os.path.commonpath([sandbox_dir, target_path]) == sandbox_dir`.
+     - Non-regular entries: Symlinks (`S_IFLNK`), hardlinks, FIFOs, device nodes, or sockets.
+3. **Non-Circular Checksum Trust Root**:
+   - **`manifest.json`**: Contains SHA-256 hashes and byte lengths for all payload members (all files under `project.json`, `entities/`, `assets/`, and `history/`). `manifest.json` does NOT contain a hash for itself or for `checksums.sha256`.
+   - **Deterministic Canonical Serialization**: `manifest.json` is serialized using Canonical JSON (RFC 8785 / JCS: recursively sorted dictionary keys, no insignificant whitespace between tokens, UTF-8 encoding without BOM, normalized Unicode NFC).
+   - **`checksums.sha256`**: Serves as the non-circular cryptographic trust root for the archive. It contains standard GNU coreutils format lines: `<64-hex-sha256>  <normalized-relative-path>\n` for:
+     - Every payload member file in the archive.
+     - `manifest.json`.
+   - **Exclusion**: `checksums.sha256` does NOT include a hash for itself.
+   - **Formatting & Sorting Rules**:
+     - Encoding: UTF-8 without BOM.
+     - Newline: Strictly UNIX LF (`\n`, `0x0A`).
+     - Sorting: Entries are lexicographically sorted by normalized relative path in ASCII byte order.
+     - Separator: Exactly two ASCII spaces (`0x20 0x20`) between the 64-character lowercase hexadecimal hash and the relative path.
 
 ---
 
@@ -232,12 +254,12 @@ my-project.orbis (ZIP)
 | **Warning Dec.** | `WarningDecision` | REQUIRED | Remap to Finding & QCRun | Audit trail of accepted warnings with reasons. |
 | **Approval** | `ApprovalRecord` | REQUIRED | Remap to Timeline & QCRun | Production sign-off records (`APPROVED`). |
 | **Render Batch** | `RenderBatch` | REQUIRED | Remap to Timeline | Multi-output batch groupings. |
-| **Render Job** | `RenderJob` | REQUIRED | Remap; **Normalize to Terminal State** | Historical record only; **never active**. |
-| **Generation Job**| `GenerationJob` | REQUIRED | Remap; **Normalize to Terminal State** | Provider prompts and results; **never active**. |
+| **Render Job** | `RenderJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Workers strictly fence out imported jobs. |
+| **Generation Job**| `GenerationJob` | REQUIRED | Remap IDs; **Preserve original status & fields** | Historical record preserved bit-for-bit. Tagged with `imported_historical = True` and `execution_disabled = True`. Workers strictly fence out imported jobs. |
 | **Batch Run** | `BatchRun`, `BatchRunItem`| REQUIRED | Remap to Project & Shot | History of batch generation resume dispatches. |
 | **Audit Logs** | `GenerationAuditLog`| OPTIONAL/REQ | Remap to Project | Telemetry history (token counts, latency). |
 | **Orchestration** | `OrchestrationAudit`| REQUIRED | Remap to Project | State machine transitions and actor audits. |
-| **Usage Ledger** | `UsageLedger`, `Adjustment`| REQUIRED | **Historical Only / No Spend Impact** | Retained for audit; tagged `ARCHIVED_IMPORT`. |
+| **Usage Ledger** | `UsageLedger`, `Adjustment`| REQUIRED | Remap IDs; **Preserve original status & costs** | Retained for audit bit-for-bit. Tagged with `imported_historical = True`. Live budget calculations ignore `imported_historical` rows without spend double-counting. |
 
 ---
 
@@ -351,13 +373,23 @@ graph TD
 ### Phase Details:
 1. **Phase 1: Sandbox & ZIP Security Inspection**:
    - File signature verified (magic bytes `PK\x03\x04`).
-   - Archive size checked against max limit (e.g., 10 GB).
+   - Archive size checked against max limit (10 GB).
    - Total uncompressed size and entry count verified against compression ratio limits (max expansion ratio 10:1; max 50,000 files).
-   - Filenames scanned for traversal sequences (`..`, `/`, `\`, leading drive letters).
-2. **Phase 2: Manifest & Checksum Verification**:
-   - `manifest.json` parsed and validated against schema.
-   - `archive_format_version` checked for compatibility.
-   - Every file in the archive verified against its SHA-256 hash listed in `manifest.json`. Any mismatch terminates import immediately.
+   - **Canonical Path Normalization & Rejection Contract**:
+     - Extract entry metadata without extracting payload.
+     - For each entry, examine the raw archive filename:
+       - Reject if entry contains backslashes (`\`).
+       - Reject if entry has leading forward slashes (`/`) or drive letters (`C:`, `D:`) or UNC prefixes (`//`, `\\`).
+       - Reject if path components include `.` or `..` traversal segments.
+       - Reject if entry is a symlink (`S_IFLNK`), hardlink, FIFO, socket, or device node.
+       - Resolve destination canonical path: `target = os.path.realpath(os.path.join(sandbox_dir, entry_path))`.
+       - Enforce sandbox containment: `os.path.commonpath([sandbox_dir, target]) == sandbox_dir`. Any breach aborts with `SECURITY_VIOLATION_PATH_TRAVERSAL`.
+2. **Phase 2: Non-Circular Checksum Trust Root Verification**:
+   - **Step 2.1 (Parse Root Checksum File)**: Read `checksums.sha256`. Parse entries formatted as `<hex-hash>  <relative-path>`.
+   - **Step 2.2 (Verify Manifest against Root)**: Compute SHA-256 of extracted `manifest.json`. Compare against the `manifest.json` entry in `checksums.sha256`. If hash does not match, immediately reject with `TAMPERED_MANIFEST_ERROR`.
+   - **Step 2.3 (Verify Payload Members against Root)**: For every payload member file listed in `checksums.sha256`, compute its SHA-256 and verify against the expected hash. Any mismatch immediately aborts with `TAMPERED_PAYLOAD_ERROR`.
+   - **Step 2.4 (Manifest Cross-Verification)**: Verify that every payload file registered in `manifest.json["file_manifest"]` has an identical hash to `checksums.sha256`, and that no extra/missing files exist. Discrepancy aborts with `MANIFEST_CHECKSUM_DISCREPANCY_ERROR`.
+   - **Step 2.5 (Manifest Schema & Compatibility)**: Validate `manifest.json` against Pydantic schema and check `archive_format_version` compatibility.
 3. **Phase 3: Schema & Referential Integrity Pre-flight**:
    - JSON entity files parsed and validated against SQLAlchemy/Pydantic models.
    - Referential integrity verified in memory (every FK in scenes, shots, audio, timeline, etc. must resolve to an entity within the archive).
@@ -448,12 +480,12 @@ Importing the same `.orbis` archive multiple times must be deterministic and pre
 
 | Threat | Attack Vector | Mitigation Contract |
 | :--- | :--- | :--- |
-| **ZIP Slip / Path Traversal** | Archive contains entries like `../../../../etc/passwd` or `C:\Windows\System32\...`. | Strict path validation: resolve every canonical path inside temp sandbox; reject any path starting with `/`, containing `..`, or having drive letters. |
+| **ZIP Slip / Path Traversal** | Archive contains entries like `../../../../etc/passwd`, `\Windows\System32\...`, or absolute/UNC paths. | Canonical path normalization: Allow only normalized relative POSIX paths using `/`. Reject leading `/`, leading `\`, drive letters (`C:`), UNC paths (`\\`), backslashes (`\`), traversal segments (`.`/`..`), and any entry whose canonicalized path escapes the temp sandbox (`commonpath` verification). |
 | **Decompression Bomb** | Tiny compressed file expands to hundreds of gigabytes, exhausting disk/RAM. | Enforce: (1) Max uncompressed size cap (10 GB), (2) Max file count (50,000), (3) Max expansion ratio (10:1 per file). Abort extraction immediately on breach. |
 | **Excessive File Count** | Hundreds of thousands of tiny files causing inode exhaustion. | Strict file count quota checked before full extraction. |
 | **Symlink / Hardlink Attack** | ZIP entry is a symlink pointing to sensitive system files. | Reject any ZIP entry with UNIX symlink attributes (`S_IFLNK`); only standard regular files allowed. |
 | **Executable Injection** | Archive contains `.exe`, `.bat`, `.sh`, `.so` masquerading as assets. | Restrict extracted asset file extensions to strictly allowed media types (`.mp4`, `.mov`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.wav`, `.mp3`, `.pdf`, `.docx`, `.pptx`, `.txt`, `.json`). |
-| **Corrupted / Tampered Binaries** | Malicious byte substitution in media files. | Verify SHA-256 hash of every extracted file against `manifest.json` before database mutation. |
+| **Corrupted / Tampered Payload or Manifest** | Malicious byte substitution in manifests or media files. | Non-circular verification: Verify `manifest.json` against `checksums.sha256`, verify all payload members against `checksums.sha256`, and cross-verify `manifest.json` file entries before database mutation. |
 | **Secret Exfiltration** | Archive contains exported database configuration or provider keys. | Export service uses explicit whitelist of exported fields; sensitive fields (`api_key`, `secret`, `token`, `password`) are strictly excluded. |
 
 ---
@@ -578,41 +610,58 @@ In `frontend/src/components/dashboard/ProjectDashboard.tsx`:
 
 ## 20. History & Financial Safety
 
-### 20.1 Prevention of Historical Job Resumption
-A major risk of importing historical execution records (`RenderJob`, `GenerationJob`) is accidental resumption by cloud background workers or queue processors:
-- **Safety Contract**:
-  - Any imported `RenderJob` or `GenerationJob` having an active or pending status (`QUEUED`, `CLAIMED`, `RUNNING`, `RECONCILIATION_REQUIRED`, `SUBMITTED`, `POLLING`) is **automatically normalized to `CANCELLED`** during import:
-    ```python
-    if job.status in ACTIVE_JOB_STATUSES:
-        job.status = "CANCELLED"
-        job.error_message = "Normalized to CANCELLED upon archive import"
-    ```
-  - Claim tokens and worker leases (`claimed_by`, `claim_token`, `claim_expires_at`) are cleared.
-  - No imported job is ever enqueued for execution.
+### 20.1 Preservation of Historical Execution Truth & Worker Fencing
+Orbis strictly prohibits silent mutation or falsification of historical records.
+- **No Status Rewriting**:
+  - Historical `RenderJob` and `GenerationJob` records preserve their original execution status (`QUEUED`, `CLAIMED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`), original error messages, attempt counts, retry timestamps, payloads, and results bit-for-bit as recorded in the archive.
+  - Jobs are **NOT** mutated to `CANCELLED`.
+- **Import-Safety Metadata**:
+  - During import, all imported `RenderJob` and `GenerationJob` rows are flagged with:
+    `imported_historical = True`
+    `execution_disabled = True`
+- **Worker Fencing Contract**:
+  - Background workers (`RenderJobWorker`, `GenerationWorker`, `BatchResumeService`, queue pollers) query active jobs using strict fencing:
+    `WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING') AND imported_historical IS NOT TRUE`
+  - No background worker or dispatcher will ever claim, execute, poll, or reconcile an imported historical job, even if its original status was active at export time.
+  - Source worker lease tokens (`claim_token`, `claimed_by`, `claim_expires_at`) are cleared on import to prevent local lease collisions while preserving all other audit fields.
 
-### 20.2 Financial Integrity & Ledger Non-Duplication
-- All imported `UsageLedger` and `LedgerAdjustment` entries are tagged with:
-  `cost_status = "ARCHIVED_IMPORT"`.
-- The existing budget computation service (`app/services/budget.py`) computes remaining budget using live project ledger entries. To ensure financial safety:
-  - Entries marked `ARCHIVED_IMPORT` are excluded from active project budget consumption calculations.
-  - No provider charges, wallet debits, or reservation adjustments are triggered during archive import.
+### 20.2 Preservation of Historical Financial Truth & Budget Safety
+Orbis strictly prohibits silent alteration of financial audit records.
+- **No Ledger Status Rewriting**:
+  - All imported `UsageLedger` and `LedgerAdjustment` entries preserve their original fields bit-for-bit:
+    `cost_status` (e.g. `ESTIMATED`, `ACTUAL`), `estimated_cost`, `actual_cost`, currency, provider, model, timestamps, idempotency keys, and adjustment histories.
+  - Rows are **NOT** mutated to `ARCHIVED_IMPORT`.
+- **Import-Safety Metadata**:
+  - During import, all imported `UsageLedger` entries are flagged with:
+    `imported_historical = True`
+- **Budget Calculation Protection**:
+  - The budget computation service (`app/services/budget.py`) computes live project spend using:
+    `SELECT sum(...) FROM usage_ledger WHERE project_id = :project_id AND cost_status IN ('ESTIMATED', 'ACTUAL') AND imported_historical IS NOT TRUE`
+  - This guarantees that imported historical ledger rows do not consume, charge, or double-count against the destination project's live budget limit.
+  - No external billing actions, wallet deductions, or credit reservations are triggered during or after import.
 
 ---
 
 ## 21. Migration & Database Schema Impact
 
-WP019 requires minor schema support to track archive lineage and status:
+WP019 requires explicit schema support to record import lineage and fence historical records safely without mutating status values:
 
 ### Proposed Alembic Migration (`020_project_archive_lineage.py`):
 1. **`projects` table**:
    - Add `source_archive_checksum` (`String(64)`, nullable=True) — SHA-256 fingerprint of source archive.
-   - Add `source_project_id` (`UUID`, nullable=True) — Original project ID if cloned.
+   - Add `source_project_id` (`UUID`, nullable=True) — Original project ID if imported in CLONE mode.
    - Add `imported_at` (`DateTime(timezone=True)`, nullable=True) — Timestamp of import.
-2. **`usage_ledger` table**:
-   - Ensure `cost_status` check constraint or enum supports `"ARCHIVED_IMPORT"`.
+2. **`render_jobs` table**:
+   - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
+   - Add `execution_disabled` (`Boolean`, default=False, nullable=False, server_default=text("false")).
+3. **`generation_jobs` table**:
+   - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
+   - Add `execution_disabled` (`Boolean`, default=False, nullable=False, server_default=text("false")).
+4. **`usage_ledger` table**:
+   - Add `imported_historical` (`Boolean`, default=False, nullable=False, server_default=text("false"), index=True).
 
 ### Downgrade Safety:
-- Migration cleanly drops added columns if reverted. Existing projects and ledgers remain unaffected.
+- Clean drop of added columns and indexes. Existing projects, jobs, and ledgers remain unaffected.
 
 ---
 
@@ -620,26 +669,37 @@ WP019 requires minor schema support to track archive lineage and status:
 
 Implementation of WP019 will require comprehensive automated testing across all layers:
 
-1. **Security & Sandbox Validation**:
-   - `test_import_zip_slip_traversal_rejected`: Archive containing paths with `../` is rejected.
+1. **Security & Path Validation**:
+   - `test_import_zip_slip_traversal_rejected`: Archive containing paths with `../` or `..\\` is rejected.
+   - `test_import_absolute_path_rejected`: Archive containing paths with leading `/` or Windows drive letters (`C:`) is rejected.
+   - `test_import_backslash_path_rejected`: Archive containing backslash path separators is rejected.
+   - `test_import_valid_relative_posix_paths_allowed`: Normal relative paths (`entities/story.json`, `assets/data/file.mp4`) are accepted.
    - `test_import_decompression_bomb_rejected`: Archive violating compression ratio or size limits is aborted.
+   - `test_import_symlink_rejected`: Archive with symlink entries is rejected.
    - `test_import_executable_extension_rejected`: Archive with non-media/non-JSON files is rejected.
-   - `test_import_checksum_mismatch_rejected`: Tampered archive member triggers immediate failure.
-2. **Referential Integrity & Remapping**:
+2. **Non-Circular Checksum Trust Root**:
+   - `test_import_tampered_manifest_rejected`: Modified `manifest.json` fails validation against `checksums.sha256`.
+   - `test_import_tampered_payload_rejected`: Modified payload member fails validation against `checksums.sha256`.
+   - `test_import_manifest_discrepancy_rejected`: Hash mismatch between `manifest.json` and `checksums.sha256` fails closed.
+   - `test_checksum_root_excludes_itself`: `checksums.sha256` verified to be strictly non-circular.
+   - `test_manifest_excludes_self_and_checksum_root`: `manifest.json` verified not to contain self-hashes.
+3. **Historical Truth Preservation & Worker Fencing**:
+   - `test_import_preserves_original_job_status_and_timestamps`: Original status (including active statuses) and attempt timestamps preserved bit-for-bit with `imported_historical = True`.
+   - `test_workers_fence_out_imported_historical_jobs`: `RenderJobWorker` and `GenerationWorker` claim queries never pick up jobs with `imported_historical = True`.
+   - `test_import_preserves_original_usage_ledger_cost_and_status`: Original ledger `cost_status` and amounts preserved bit-for-bit with `imported_historical = True`.
+   - `test_budget_service_excludes_imported_historical_ledger_rows`: `BudgetService` live spend query ignores `imported_historical = True` rows.
+4. **Referential Integrity & Remapping**:
    - `test_clone_mode_generates_new_unique_ids`: All entity UUIDs in destination DB are distinct from source.
    - `test_clone_mode_maintains_all_foreign_keys`: Scene, shot, audio, timeline, and asset FKs remain referentially intact.
    - `test_asset_lock_polymorphic_remapping`: `AssetLock` rows point accurately to remapped entities.
-3. **Restore Mode & Collision Safety**:
+5. **Restore Mode & Collision Safety**:
    - `test_restore_mode_preserves_original_ids`: Restore on clean DB retains exact source UUIDs.
    - `test_restore_mode_collision_fails_closed`: Attempting restore when Project ID already exists returns `409 Conflict`.
-4. **Transaction Rollback & Storage Cleanup**:
+6. **Transaction Rollback & Storage Cleanup**:
    - `test_mid_import_failure_rolls_back_db_completely`: Simulated DB failure leaves zero orphan rows.
    - `test_mid_import_failure_cleans_up_uploaded_s3_objects`: Uploaded files in S3 are deleted upon rollback.
-5. **Round-Trip Fidelity**:
+7. **Round-Trip Fidelity**:
    - `test_full_project_export_import_roundtrip`: Export complex project (Story + Scenes + Shots + Audio + Timeline + QC + Render) -> Import as Clone -> verify total entity count and content parity.
-6. **Financial & Worker Safety**:
-   - `test_imported_active_render_jobs_normalized_to_cancelled`: No imported jobs remain in `QUEUED` state.
-   - `test_imported_usage_ledger_does_not_consume_budget`: Project remaining budget remains unaffected by imported historical ledger entries.
 
 ---
 
@@ -647,12 +707,14 @@ Implementation of WP019 will require comprehensive automated testing across all 
 
 P4-WP019 will be considered complete when:
 - [ ] Export service packages a complete, verifiable `.orbis` container including all required entities and binaries.
+- [ ] Non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members) verified and tamper-tested.
+- [ ] Canonical path validation strictly enforces relative POSIX paths (`/`) and rejects traversal, absolute, UNC, and backslash paths.
 - [ ] Import engine successfully imports a complex multi-scene, multi-asset project with 100% referential integrity.
 - [ ] Both `CLONE` and `RESTORE` modes behave exactly according to the locked specification.
 - [ ] All security threats (ZIP slip, decompression bombs, tampering) are intercepted and rejected fail-closed.
 - [ ] Complete atomic rollback and storage cleanup are proven on simulated import failure.
-- [ ] Historical render/generation jobs are proven never to resume execution automatically.
-- [ ] Historical usage ledgers are proven never to re-charge or double-count spend.
+- [ ] Original historical execution status and timestamps are preserved bit-for-bit, and workers are proven to fence out imported jobs.
+- [ ] Original usage ledger rows are preserved bit-for-bit, and live budget calculations are proven never to double-count spend.
 - [ ] Full automated test suite passes with zero regressions.
 - [ ] Frontend modals provide clear, accessible, and truthful export and import workflows.
 
