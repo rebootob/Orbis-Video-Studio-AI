@@ -10,6 +10,11 @@ class RenderJobSubmitRequest(BaseModel):
     idempotency_key: Optional[str] = Field(default=None, description="Optional custom idempotency key")
 
 
+class ExportBatchSubmitRequest(BaseModel):
+    timeline_id: Optional[uuid.UUID] = None
+    preset_ids: List[str] = Field(..., description="List of export preset IDs to execute")
+
+
 class RenderJobRead(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
@@ -17,6 +22,8 @@ class RenderJobRead(BaseModel):
     timeline_version: int
     approval_id: uuid.UUID
     render_profile: str
+    render_variant_key: str = "MASTER"
+    batch_id: Optional[uuid.UUID] = None
     status: str
     idempotency_key: str
     output_asset_id: Optional[uuid.UUID] = None
@@ -35,6 +42,38 @@ class RenderJobRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RenderBatchRead(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    timeline_id: uuid.UUID
+    timeline_version: int
+    status: str
+    total_variants: int
+    completed_variants: int
+    failed_variants: int
+    estimated_total_cost_usd: float
+    created_at: datetime
+    updated_at: datetime
+    child_jobs: Optional[List[RenderJobRead]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExportPresetRead(BaseModel):
+    preset_id: str
+    target_platform: str
+    aspect_ratio: str
+    width: int
+    height: int
+    video_codec: str
+    video_profile: str
+    audio_codec: str
+    audio_bitrate_kbps: int
+    video_bitrate_kbps: int
+    estimated_cost_usd: float
+    framing_mode: str
 
 
 class RenderJobListResponse(BaseModel):

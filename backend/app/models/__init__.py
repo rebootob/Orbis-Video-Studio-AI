@@ -43,6 +43,7 @@ from app.models.qc import (
     ApprovalRecord,
 )
 from app.models.render_job import RenderJob, RenderJobStatus
+from app.models.render_batch import RenderBatch
 
 __all__ = [
     "Base",
@@ -86,5 +87,6 @@ __all__ = [
     "ApprovalRecord",
     "RenderJob",
     "RenderJobStatus",
+    "RenderBatch",
 ]
 

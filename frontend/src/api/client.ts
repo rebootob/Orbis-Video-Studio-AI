@@ -39,6 +39,9 @@ import type {
   RenderJob,
   RenderJobSubmitPayload,
   RenderJobListResponse,
+  ExportPreset,
+  ExportBatchSubmitPayload,
+  RenderBatch,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -813,6 +816,24 @@ export const api = {
     return request<RenderJobListResponse>(
       `/projects/${projectId}/renders?offset=${offset}&limit=${limit}`
     );
+  },
+
+  async listExportPresets(projectId: string): Promise<ExportPreset[]> {
+    return request<ExportPreset[]>(`/projects/${projectId}/renders/presets`);
+  },
+
+  async submitExportBatch(
+    projectId: string,
+    payload: ExportBatchSubmitPayload
+  ): Promise<RenderBatch> {
+    return request<RenderBatch>(`/projects/${projectId}/renders/export-batch`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getRenderBatch(projectId: string, batchId: string): Promise<RenderBatch> {
+    return request<RenderBatch>(`/projects/${projectId}/renders/batches/${batchId}`);
   },
 
   async cancelRenderJob(projectId: string, renderId: string): Promise<RenderJob> {

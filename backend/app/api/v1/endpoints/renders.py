@@ -8,11 +8,46 @@ from app.schemas.render_job import (
     RenderJobSubmitRequest,
     RenderJobRead,
     RenderJobListResponse,
+    ExportBatchSubmitRequest,
+    RenderBatchRead,
+    ExportPresetRead,
 )
 from app.services.render_job import RenderJobService
+from app.services.export_preset import ExportPresetService
 from app.models.render_job import RenderJobStatus
 
 router = APIRouter()
+
+
+@router.get("/presets", response_model=List[ExportPresetRead])
+def list_export_presets():
+    """List system export presets with dimensions, codecs, and cost estimates."""
+    return ExportPresetService.list_presets()
+
+
+@router.post("/export-batch", response_model=RenderBatchRead)
+def submit_export_batch(
+    project_id: uuid.UUID,
+    payload: ExportBatchSubmitRequest,
+    db: Session = Depends(get_db),
+):
+    """Submit a multi-variant export batch for an approved timeline revision."""
+    return RenderJobService.submit_export_batch(
+        db=db,
+        project_id=project_id,
+        preset_ids=payload.preset_ids,
+        timeline_id=payload.timeline_id,
+    )
+
+
+@router.get("/batches/{batch_id}", response_model=RenderBatchRead)
+def get_render_batch(
+    project_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """Get render batch status and child variant progress."""
+    return RenderJobService.get_render_batch(db=db, project_id=project_id, batch_id=batch_id)
 
 
 @router.post("/submit", response_model=RenderJobRead)

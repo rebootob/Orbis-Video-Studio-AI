@@ -34,12 +34,26 @@ class MockRenderExecutor(RenderExecutor):
         placements = timeline_spec.get("placements", [])
         audio_clips = timeline_spec.get("audio_clips", [])
         render_profile = str(timeline_spec.get("render_profile", "MASTER_HD")).upper()
+        render_meta = timeline_spec.get("render_metadata") or {}
+        preset_snapshot = timeline_spec.get("preset_snapshot") or render_meta.get("preset_snapshot") or {}
 
-        if render_profile not in ("MASTER", "MASTER_HD"):
-            raise ValueError(
-                f"Unsupported render_profile '{render_profile}'. WP017 supports MASTER render only. "
-                "Aspect/platform variants (VERTICAL_4K, SQUARE_SD, etc.) are deferred to WP018."
-            )
+        target_width = timeline_spec.get("target_width") or preset_snapshot.get("width")
+        target_height = timeline_spec.get("target_height") or preset_snapshot.get("height")
+
+        if not target_width or not target_height:
+            if render_profile in ("YT_MASTER_4K", "3840X2160"):
+                target_width, target_height = 3840, 2160
+            elif render_profile in ("TIKTOK_REELS_9X16", "1080X1920"):
+                target_width, target_height = 1080, 1920
+            elif render_profile in ("INSTAGRAM_SQUARE", "1080X1080"):
+                target_width, target_height = 1080, 1080
+            elif render_profile in ("LMS_WEB_720P", "1280X720"):
+                target_width, target_height = 1280, 720
+            else:
+                target_width, target_height = 1920, 1080
+
+        width = int(target_width)
+        height = int(target_height)
 
         # Compute placement transition overlaps
         total_overlap = 0.0
@@ -100,8 +114,8 @@ class MockRenderExecutor(RenderExecutor):
             "file_size_bytes": file_size,
             "video_codec": "h264",
             "audio_codec": "aac",
-            "width": 1920,
-            "height": 1080,
+            "width": width,
+            "height": height,
             "frame_rate": 30.0,
             "render_profile": timeline_spec.get("render_profile", "MASTER_HD"),
             "placement_count": len(placements),
