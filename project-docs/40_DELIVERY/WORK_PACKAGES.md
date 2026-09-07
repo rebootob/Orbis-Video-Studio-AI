@@ -233,7 +233,9 @@ Important product locks:
   - Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention.
 
 - **P4-WP019 — Project Export/Import Archive Package (.orbis)**
-  - **Status:** PROPOSED / NOT AUTHORIZED
+  - **Status:** PRE1 / PROPOSAL IN REVIEW (IMPLEMENTATION NOT AUTHORIZED)
+  - **Proposal Document:** [`project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md`](P4_WP019_PROPOSAL.md)
+  - Full-fidelity, portable `.orbis` ZIP container format, non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members), canonical relative POSIX path validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed 4-phase transactional import with atomic DB rollback and storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), preservation of original historical job execution status with worker fencing (`imported_historical = True`), and preservation of historical financial truth without spend double-counting.
 
 - **P4-WP020 — End-to-End System Integration, UAT & Core V1 Release**
   - **Status:** PROPOSED / NOT AUTHORIZED
