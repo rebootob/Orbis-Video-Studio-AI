@@ -623,3 +623,158 @@ def test_012_production_orchestrator_and_staged_approvals_lifecycle(tmp_path, mo
     assert "orchestration_audits" in meta_head.tables
     assert "automation_mode" in meta_head.tables["projects"].c
     engine.dispose()
+
+
+def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, MetaData, Table, select, text, Uuid
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+
+    url = f"sqlite:///{tmp_path / 'wp019_migration_test.db'}"
+    monkeypatch.setattr(settings, "SQLALCHEMY_DATABASE_URI_OVERRIDE", url)
+
+    # 1. Upgrade to 018_cloud_render_workers
+    command.upgrade(cfg, "018_cloud_render_workers")
+    engine = create_engine(url)
+    meta = MetaData()
+    meta.reflect(bind=engine)
+    assert "render_batches" not in meta.tables
+    assert "render_variant_key" not in meta.tables["render_jobs"].c
+
+    # Populate sample project, timeline, qc_run, approval, and WP017 render_job
+    p_id = uuid.uuid4()
+    t_id = uuid.uuid4()
+    qc_id = uuid.uuid4()
+    app_id = uuid.uuid4()
+    rj_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    projects_tbl = Table("projects", meta, autoload_with=engine)
+    projects_tbl.c.id.type = Uuid()
+    timelines_tbl = Table("assembly_timelines", meta, autoload_with=engine)
+    timelines_tbl.c.id.type = Uuid()
+    timelines_tbl.c.project_id.type = Uuid()
+    qc_runs_tbl = Table("qc_runs", meta, autoload_with=engine)
+    qc_runs_tbl.c.id.type = Uuid()
+    qc_runs_tbl.c.project_id.type = Uuid()
+    qc_runs_tbl.c.timeline_id.type = Uuid()
+    approvals_tbl = Table("production_approvals", meta, autoload_with=engine)
+    approvals_tbl.c.id.type = Uuid()
+    approvals_tbl.c.project_id.type = Uuid()
+    approvals_tbl.c.timeline_id.type = Uuid()
+    approvals_tbl.c.qc_run_id.type = Uuid()
+    render_jobs_tbl = Table("render_jobs", meta, autoload_with=engine)
+    render_jobs_tbl.c.id.type = Uuid()
+    render_jobs_tbl.c.project_id.type = Uuid()
+    render_jobs_tbl.c.timeline_id.type = Uuid()
+    render_jobs_tbl.c.approval_id.type = Uuid()
+
+    with engine.begin() as conn:
+        conn.execute(projects_tbl.insert().values(id=p_id, title="P19", status="FINAL_REVIEW", created_at=now, updated_at=now))
+        conn.execute(timelines_tbl.insert().values(id=t_id, project_id=p_id, version=1, status="APPROVED", created_at=now, updated_at=now))
+        conn.execute(qc_runs_tbl.insert().values(id=qc_id, project_id=p_id, timeline_id=t_id, timeline_version=1, status="PASSED", created_at=now, updated_at=now))
+        conn.execute(approvals_tbl.insert().values(id=app_id, project_id=p_id, timeline_id=t_id, timeline_version=1, qc_run_id=qc_id, status="APPROVED", created_at=now, approved_at=now))
+        conn.execute(render_jobs_tbl.insert().values(
+            id=rj_id,
+            project_id=p_id,
+            timeline_id=t_id,
+            timeline_version=1,
+            approval_id=app_id,
+            render_profile="MASTER_HD",
+            status="QUEUED",
+            idempotency_key=f"render_{p_id}_1_MASTER_HD",
+            progress=0.0,
+            retry_count=0,
+            max_retries=3,
+            estimated_cost_usd=0.50,
+            created_at=now,
+            updated_at=now,
+        ))
+
+    # 2. A. UPGRADE to head (019)
+    command.upgrade(cfg, "head")
+    meta2 = MetaData()
+    meta2.reflect(bind=engine)
+    assert "render_batches" in meta2.tables
+    render_jobs_tbl2 = Table("render_jobs", meta2, autoload_with=engine)
+    render_jobs_tbl2.c.id.type = Uuid()
+    assert "render_variant_key" in render_jobs_tbl2.c
+    assert "batch_id" in render_jobs_tbl2.c
+
+    with engine.connect() as conn:
+        row = conn.execute(select(render_jobs_tbl2).where(render_jobs_tbl2.c.id == rj_id)).mappings().first()
+        assert row is not None
+        assert row["render_variant_key"] == "MASTER"
+
+    # 3. C. BLOCKED DOWNGRADE: Add a second active variant for the same timeline
+    rj_id_2 = uuid.uuid4()
+    rb_id = uuid.uuid4()
+    render_batches_tbl2 = Table("render_batches", meta2, autoload_with=engine)
+    render_batches_tbl2.c.id.type = Uuid()
+    render_batches_tbl2.c.project_id.type = Uuid()
+    render_batches_tbl2.c.timeline_id.type = Uuid()
+
+    with engine.begin() as conn:
+        conn.execute(render_batches_tbl2.insert().values(
+            id=rb_id,
+            project_id=p_id,
+            timeline_id=t_id,
+            timeline_version=1,
+            status="PROCESSING",
+            total_variants=1,
+            created_at=now,
+            updated_at=now,
+        ))
+        conn.execute(render_jobs_tbl2.insert().values(
+            id=rj_id_2,
+            project_id=p_id,
+            timeline_id=t_id,
+            timeline_version=1,
+            approval_id=app_id,
+            render_profile="YT_STANDARD_1080P",
+            render_variant_key="YT_STANDARD_1080P",
+            batch_id=rb_id,
+            status="QUEUED",
+            idempotency_key=f"render_{p_id}_1_YT_STANDARD_1080P",
+            progress=0.0,
+            retry_count=0,
+            max_retries=3,
+            estimated_cost_usd=0.50,
+            created_at=now,
+            updated_at=now,
+        ))
+
+    # Multiple active variants exist on same timeline -> downgrade MUST fail closed
+    with pytest.raises(RuntimeError) as exc_info:
+        command.downgrade(cfg, "018_cloud_render_workers")
+    assert "Downgrade ABORTED" in str(exc_info.value)
+    assert "multiple active/reconciliation export variants" in str(exc_info.value)
+
+    # Verify rows & history remain intact
+    with engine.connect() as conn:
+        all_jobs = conn.execute(select(render_jobs_tbl2).where(render_jobs_tbl2.c.project_id == p_id)).mappings().all()
+        assert len(all_jobs) == 2
+
+    # 4. D. COMPLETED HISTORICAL VARIANTS: Mark variants as COMPLETED
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE render_jobs SET status = 'COMPLETED'"))
+
+    # Now multiple COMPLETED variants exist for same project/timeline
+    # Downgrade to 018 SHOULD SUCCEED because COMPLETED is not in QUEUED/CLAIMED/RUNNING/RECONCILIATION_REQUIRED
+    command.downgrade(cfg, "018_cloud_render_workers")
+    meta3 = MetaData()
+    meta3.reflect(bind=engine)
+    assert "render_batches" not in meta3.tables
+    assert "render_variant_key" not in meta3.tables["render_jobs"].c
+
+    # 5. B. SAFE DOWNGRADE & RE-UPGRADE
+    command.upgrade(cfg, "head")
+    meta4 = MetaData()
+    meta4.reflect(bind=engine)
+    assert "render_batches" in meta4.tables
+    assert "render_variant_key" in meta4.tables["render_jobs"].c
+    engine.dispose()

@@ -394,3 +394,228 @@ def test_conflict_active_variant_raises_400(db_session: Session):
             preset_ids=["YT_STANDARD_1080P", "INSTAGRAM_SQUARE"],
         )
     assert "already exists in state" in str(exc_info.value)
+
+
+def test_concurrent_same_preset_submission(tmp_path):
+    import threading
+    import os
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = os.path.join(str(tmp_path), "test_concurrent_same_preset.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0},
+    )
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+        conn.exec_driver_sql("PRAGMA busy_timeout=10000")
+
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    setup_db = SessionLocal()
+    project, timeline, approval = create_approved_project_context(setup_db)
+    proj_id = project.id
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def attempt_submit():
+        local_db = SessionLocal()
+        try:
+            barrier.wait()
+            batch = RenderJobService.submit_export_batch(
+                db=local_db,
+                project_id=proj_id,
+                preset_ids=["YT_STANDARD_1080P"],
+            )
+            results.append(("SUCCESS", batch.id))
+        except Exception as e:
+            results.append(("FAILED", str(e)))
+        finally:
+            local_db.close()
+
+    t1 = threading.Thread(target=attempt_submit)
+    t2 = threading.Thread(target=attempt_submit)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    verify_db = SessionLocal()
+    batches = verify_db.query(RenderBatch).filter(RenderBatch.project_id == proj_id).all()
+    jobs = verify_db.query(RenderJob).filter(RenderJob.project_id == proj_id).all()
+    ledgers = verify_db.query(UsageLedger).filter(UsageLedger.project_id == proj_id).all()
+    verify_db.close()
+
+    assert len(batches) == 1
+    assert len(jobs) == 1
+    assert len(ledgers) == 1
+    assert jobs[0].render_variant_key.startswith("YT_STANDARD_1080P")
+    assert jobs[0].current_usage_ledger_id == ledgers[0].id
+
+
+def test_concurrent_batch_budget_safety(tmp_path):
+    import threading
+    import os
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = os.path.join(str(tmp_path), "test_concurrent_budget.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
+    )
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+        conn.exec_driver_sql("PRAGMA busy_timeout=30000")
+
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    setup_db = SessionLocal()
+    project, timeline, approval = create_approved_project_context(setup_db)
+    proj_id = project.id
+    p = setup_db.get(Project, proj_id)
+    p.budget_limit = 1.60
+    setup_db.commit()
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def submit_batch_1():
+        local_db = SessionLocal()
+        try:
+            barrier.wait()
+            for _ in range(20):
+                try:
+                    b = RenderJobService.submit_export_batch(
+                        db=local_db,
+                        project_id=proj_id,
+                        preset_ids=["YT_STANDARD_1080P", "TIKTOK_REELS_9X16", "INSTAGRAM_SQUARE"],
+                    )
+                    results.append(("SUCCESS_1", b.id))
+                    break
+                except Exception as e:
+                    local_db.rollback()
+                    if "database is locked" in str(e).lower():
+                        import time
+                        time.sleep(0.05)
+                        continue
+                    results.append(("FAILED_1", str(e)))
+                    break
+        finally:
+            local_db.close()
+
+    def submit_batch_2():
+        local_db = SessionLocal()
+        try:
+            barrier.wait()
+            for _ in range(20):
+                try:
+                    b = RenderJobService.submit_export_batch(
+                        db=local_db,
+                        project_id=proj_id,
+                        preset_ids=["LMS_WEB_720P", "YT_MASTER_4K"],
+                    )
+                    results.append(("SUCCESS_2", b.id))
+                    break
+                except Exception as e:
+                    local_db.rollback()
+                    if "database is locked" in str(e).lower():
+                        import time
+                        time.sleep(0.05)
+                        continue
+                    results.append(("FAILED_2", str(e)))
+                    break
+        finally:
+            local_db.close()
+
+    t1 = threading.Thread(target=submit_batch_1)
+    t2 = threading.Thread(target=submit_batch_2)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successes = [r for r in results if r[0].startswith("SUCCESS")]
+    failures = [r for r in results if r[0].startswith("FAILED")]
+
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert "budget" in failures[0][1].lower() or "limit" in failures[0][1].lower() or "exceeded" in failures[0][1].lower()
+
+    verify_db = SessionLocal()
+    batches = verify_db.query(RenderBatch).filter(RenderBatch.project_id == proj_id).all()
+    jobs = verify_db.query(RenderJob).filter(RenderJob.project_id == proj_id).all()
+    ledgers = verify_db.query(UsageLedger).filter(UsageLedger.project_id == proj_id).all()
+    verify_db.close()
+
+    assert len(batches) == 1
+    assert len(jobs) == batches[0].total_variants
+    assert len(ledgers) == len(jobs)
+    total_ledger_cost = sum(l.estimated_cost for l in ledgers)
+    assert total_ledger_cost <= 1.60
+
+
+
+def test_ffmpeg_render_executor_export_preset_dimensions(tmp_path):
+    import subprocess
+    import shutil
+
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        pytest.skip("FFmpeg/FFprobe binaries not available in environment")
+
+    executor = FFmpegRenderExecutor()
+
+    specs = [
+        ("YT_STANDARD_1080P", 1920, 1080),
+        ("TIKTOK_REELS_9X16", 1080, 1920),
+        ("INSTAGRAM_SQUARE", 1080, 1080),
+    ]
+
+    for preset_id, expected_w, expected_h in specs:
+        preset = ExportPresetService.get_preset(preset_id)
+        out_file = str(tmp_path / f"export_{preset_id}.mp4")
+
+        timeline_spec = {
+            "total_duration": 0.5,
+            "render_profile": preset_id,
+            "preset_snapshot": preset,
+            "placements": [],
+            "audio_clips": [],
+        }
+
+        res = executor.render_timeline(
+            timeline_spec=timeline_spec,
+            scratch_dir=str(tmp_path),
+            output_file_path=out_file,
+        )
+
+        assert res["width"] == expected_w
+        assert res["height"] == expected_h
+        assert os.path.exists(out_file)
+
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            out_file,
+        ]
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+        w_str, h_str = probe_res.stdout.strip().split(",")
+        assert int(w_str) == expected_w
+        assert int(h_str) == expected_h
+
+    yt_4k = ExportPresetService.get_preset("YT_MASTER_4K")
+    assert yt_4k["width"] == 3840
+    assert yt_4k["height"] == 2160
+    assert yt_4k["aspect_ratio"] == "16:9"
