@@ -701,8 +701,14 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
     meta2 = MetaData()
     meta2.reflect(bind=engine)
     assert "render_batches" in meta2.tables
-    render_jobs_tbl2 = Table("render_jobs", meta2, autoload_with=engine)
+    render_jobs_tbl2 = meta2.tables["render_jobs"]
     render_jobs_tbl2.c.id.type = Uuid()
+    render_jobs_tbl2.c.project_id.type = Uuid()
+    render_jobs_tbl2.c.timeline_id.type = Uuid()
+    render_jobs_tbl2.c.approval_id.type = Uuid()
+    if "batch_id" in render_jobs_tbl2.c:
+        render_jobs_tbl2.c.batch_id.type = Uuid()
+
     assert "render_variant_key" in render_jobs_tbl2.c
     assert "batch_id" in render_jobs_tbl2.c
 
@@ -714,7 +720,7 @@ def test_019_export_presets_and_variant_key_lifecycle(tmp_path, monkeypatch):
     # 3. C. BLOCKED DOWNGRADE: Add a second active variant for the same timeline
     rj_id_2 = uuid.uuid4()
     rb_id = uuid.uuid4()
-    render_batches_tbl2 = Table("render_batches", meta2, autoload_with=engine)
+    render_batches_tbl2 = meta2.tables["render_batches"]
     render_batches_tbl2.c.id.type = Uuid()
     render_batches_tbl2.c.project_id.type = Uuid()
     render_batches_tbl2.c.timeline_id.type = Uuid()
