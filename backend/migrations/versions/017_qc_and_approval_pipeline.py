@@ -69,13 +69,15 @@ def upgrade():
         sa.Column("reason", sa.Text(), nullable=True),
         sa.Column("actor", sa.String(length=100), nullable=False, server_default="USER"),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("decision_sequence", sa.Integer(), nullable=False, server_default="1"),
     )
     op.create_index("ix_qc_warning_decisions_project_id", "qc_warning_decisions", ["project_id"])
     op.create_index("ix_qc_warning_decisions_qc_run_id", "qc_warning_decisions", ["qc_run_id"])
     op.create_index("ix_qc_warning_decisions_finding_id", "qc_warning_decisions", ["finding_id"])
     op.create_index("ix_qc_warning_decisions_timeline_id", "qc_warning_decisions", ["timeline_id"])
+    op.create_index("ix_qc_warning_decisions_decision_sequence", "qc_warning_decisions", ["decision_sequence"])
 
-    # 4. Create production_approvals (with uniqueness constraint on project + timeline + qc_run)
+    # 4. Create production_approvals (with uniqueness constraint on project + timeline)
     op.create_table(
         "production_approvals",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -87,7 +89,7 @@ def upgrade():
         sa.Column("actor", sa.String(length=100), nullable=False, server_default="USER"),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("approved_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint("project_id", "timeline_id", "qc_run_id", name="uq_production_approvals_project_timeline_qc"),
+        sa.UniqueConstraint("project_id", "timeline_id", name="uq_production_approvals_project_timeline"),
     )
     op.create_index("ix_production_approvals_project_id", "production_approvals", ["project_id"])
     op.create_index("ix_production_approvals_timeline_id", "production_approvals", ["timeline_id"])

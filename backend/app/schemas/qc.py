@@ -37,6 +37,7 @@ class WarningDecisionRead(BaseModel):
     reason: Optional[str] = None
     actor: str
     decided_at: datetime
+    decision_sequence: int = 1
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,7 +58,7 @@ class QCFindingRead(BaseModel):
     action_type: Optional[str] = None
     created_at: datetime
     current_decision: Optional[WarningDecisionRead] = None
-    decision_history: List[WarningDecisionRead] = []
+    decision_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

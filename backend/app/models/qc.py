@@ -142,6 +142,7 @@ class WarningDecision(Base):
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+    decision_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
 
     qc_run: Mapped["QCRun"] = relationship("QCRun", back_populates="decisions")
     finding: Mapped["QCFinding"] = relationship("QCFinding", back_populates="decisions")
@@ -151,7 +152,7 @@ class WarningDecision(Base):
 class ApprovalRecord(Base):
     __tablename__ = "production_approvals"
     __table_args__ = (
-        UniqueConstraint("project_id", "timeline_id", "qc_run_id", name="uq_production_approvals_project_timeline_qc"),
+        UniqueConstraint("project_id", "timeline_id", name="uq_production_approvals_project_timeline"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

@@ -38,6 +38,7 @@ export const SimpleQCReview: React.FC<SimpleQCReviewProps> = ({
   const [reasonText, setReasonText] = useState<string>('');
   const [submittingDecision, setSubmittingDecision] = useState<boolean>(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [findingHistory, setFindingHistory] = useState<any[]>([]);
 
   // Approval notes state
   const [approvalNotes, setApprovalNotes] = useState<string>('');
@@ -72,17 +73,27 @@ export const SimpleQCReview: React.FC<SimpleQCReviewProps> = ({
     }
   };
 
-  const handleOpenDecisionModal = (finding: QCFinding) => {
+  const handleOpenDecisionModal = async (finding: QCFinding) => {
     setSelectedFinding(finding);
     setDecisionType('ACCEPTED_WITH_REASON');
     setReasonText('');
     setDecisionError(null);
+    setFindingHistory([]);
+    try {
+      if (apiClient && typeof apiClient.getFindingDecisionHistory === 'function') {
+        const hist = await apiClient.getFindingDecisionHistory(projectId, finding.id);
+        setFindingHistory(hist);
+      }
+    } catch (_err) {
+      // Optional history fetch
+    }
   };
 
   const handleCloseDecisionModal = () => {
     setSelectedFinding(null);
     setReasonText('');
     setDecisionError(null);
+    setFindingHistory([]);
   };
 
   const handleSubmitDecision = async () => {
@@ -458,6 +469,16 @@ export const SimpleQCReview: React.FC<SimpleQCReviewProps> = ({
                 <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
                   {selectedFinding.why_it_matters}
                 </p>
+              )}
+              {findingHistory && findingHistory.length > 0 && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(234, 179, 8, 0.2)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>Decision Audit History ({findingHistory.length}):</div>
+                  {findingHistory.map((h: any, idx: number) => (
+                    <div key={h.id || idx} style={{ marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 600 }}>#{h.decision_sequence || (findingHistory.length - idx)} {h.decision}:</span> {h.reason || '(No reason)'} <span style={{ opacity: 0.7 }}>— {h.actor}</span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

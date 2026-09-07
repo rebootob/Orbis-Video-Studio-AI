@@ -83,6 +83,20 @@ def record_warning_decision(
     )
 
 
+@router.get("/findings/{finding_id}/history", response_model=List[WarningDecisionRead])
+def get_finding_decision_history(
+    project_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Get bounded, paginated list of decision history for a specific warning finding."""
+    return QCService.get_finding_decision_history(
+        db=db, project_id=project_id, finding_id=finding_id, offset=offset, limit=limit
+    )
+
+
 @router.post("/approve", response_model=ApprovalRecordRead)
 def approve_production(
     project_id: uuid.UUID,

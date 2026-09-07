@@ -544,6 +544,8 @@ export interface QCFinding {
   target_id?: string | null;
   target_label?: string | null;
   action_type?: string | null;
+  current_decision?: WarningDecision | null;
+  decision_count?: number;
   created_at: string;
 }
 

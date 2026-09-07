@@ -408,6 +408,13 @@ class QCService:
         else:
             reason = reason.strip() if reason else None
 
+        # Compute next monotonic decision_sequence for this finding
+        max_seq = (
+            db.query(func.coalesce(func.max(WarningDecision.decision_sequence), 0))
+            .filter(WarningDecision.finding_id == finding_id)
+            .scalar()
+        ) or 0
+
         # Append new immutable WarningDecision audit event row (never overwrite prior history)
         target_dec = WarningDecision(
             id=uuid.uuid4(),
@@ -419,6 +426,7 @@ class QCService:
             reason=reason,
             actor=actor,
             decided_at=utc_now(),
+            decision_sequence=max_seq + 1,
         )
         db.add(target_dec)
         db.flush()
@@ -430,7 +438,7 @@ class QCService:
             decisions = (
                 db.query(WarningDecision)
                 .filter(WarningDecision.qc_run_id == qc_run.id)
-                .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+                .order_by(WarningDecision.decision_sequence.asc(), WarningDecision.id.asc())
                 .all()
             )
             latest_map = {wd.finding_id: wd.decision for wd in decisions}
@@ -516,7 +524,7 @@ class QCService:
         decisions = (
             db.query(WarningDecision)
             .filter(WarningDecision.qc_run_id == latest_qc.id)
-            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+            .order_by(WarningDecision.decision_sequence.asc(), WarningDecision.id.asc())
             .all()
         )
         decided_map = {wd.finding_id: wd for wd in decisions}
@@ -590,7 +598,7 @@ class QCService:
         decisions = (
             db.query(WarningDecision)
             .filter(WarningDecision.qc_run_id == qc_run.id)
-            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+            .order_by(WarningDecision.decision_sequence.asc(), WarningDecision.id.asc())
             .all()
         )
         decisions_map = {wd.finding_id: wd for wd in decisions}
@@ -731,7 +739,7 @@ class QCService:
         decisions = (
             db.query(WarningDecision)
             .filter(WarningDecision.finding_id.in_(finding_ids))
-            .order_by(WarningDecision.decided_at.asc(), WarningDecision.id.asc())
+            .order_by(WarningDecision.decision_sequence.asc(), WarningDecision.id.asc())
             .all()
         ) if finding_ids else []
 
@@ -760,7 +768,7 @@ class QCService:
                     action_type=f.action_type,
                     created_at=f.created_at,
                     current_decision=WarningDecisionRead.model_validate(latest_dec) if latest_dec else None,
-                    decision_history=[WarningDecisionRead.model_validate(d) for d in history],
+                    decision_count=len(history),
                 )
             )
 
@@ -770,3 +778,48 @@ class QCService:
             offset=offset,
             limit=eff_limit,
         )
+
+    @classmethod
+    def get_finding_decision_history(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        finding_id: uuid.UUID,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> List[WarningDecisionRead]:
+        """Get bounded, paginated list of decision history for a specific warning finding.
+        Fails closed with 404 if project does not exist or finding does not belong to project.
+        """
+        project = db.get(Project, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project '{project_id}' not found",
+            )
+
+        finding = (
+            db.query(QCFinding)
+            .filter(QCFinding.id == finding_id, QCFinding.project_id == project_id)
+            .first()
+        )
+        if not finding:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Finding '{finding_id}' not found for project '{project_id}'",
+            )
+
+        eff_limit = min(max(limit, 1), 100)
+        decisions = (
+            db.query(WarningDecision)
+            .filter(
+                WarningDecision.finding_id == finding_id,
+                WarningDecision.project_id == project_id,
+            )
+            .order_by(WarningDecision.decision_sequence.desc(), WarningDecision.id.desc())
+            .offset(offset)
+            .limit(eff_limit)
+            .all()
+        )
+
+        return [WarningDecisionRead.model_validate(d) for d in decisions]

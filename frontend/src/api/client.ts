@@ -758,6 +758,17 @@ export const api = {
     );
   },
 
+  async getFindingDecisionHistory(
+    projectId: string,
+    findingId: string,
+    offset: number = 0,
+    limit: number = 20
+  ): Promise<WarningDecision[]> {
+    return request<WarningDecision[]>(
+      `/projects/${projectId}/qc/findings/${findingId}/history?offset=${offset}&limit=${limit}`
+    );
+  },
+
   async approveProduction(
     projectId: string,
     payload: { timeline_id?: string; qc_run_id?: string; notes?: string } = {},
