@@ -28,6 +28,7 @@ P2-WP012 = PASS / CLOSED / MERGED
 P2-WP013 = PASS / CLOSED / MERGED
 P3-WP014 = PASS / CLOSED / MERGED
 P3-WP015 = PASS / CLOSED / MERGED
+P3-WP016 = PASS / CLOSED / MERGED
 ```
 
 Key reviewed/merge truth:
@@ -77,6 +78,13 @@ WP015 Reviewed HEAD: 640212f71182ba3f6a5024a442beb363868eabc1
 WP015 Merge commit: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
 WP015 Final Review: PASS / READY TO MERGE (Review ID 5127082342)
 WP015 Status: PASS / CLOSED / MERGED
+
+WP016 Issue: #40
+WP016 PR: #41 (MERGED / CLOSED)
+WP016 Reviewed HEAD: 5def41c8bba9b3004b7007f671899e045438a8c4
+WP016 Merge commit: 43e5221e7f39a19e8c6fde54c450324aa8333059
+WP016 Final Review: PASS / READY TO MERGE (Review ID 5127769635)
+WP016 Status: PASS / CLOSED / MERGED
 ```
 
 ---
@@ -85,16 +93,16 @@ WP015 Status: PASS / CLOSED / MERGED
 
 ```text
 ACTIVE WORK PACKAGE = NONE
-STATUS = POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION
+STATUS = POST-WP016 / READY FOR OWNER NEXT-WP AUTHORIZATION
 BRANCH = main
 ANTIGRAVITY = STOP / NONE (bounded low-credit Execution Plane when authorized)
 CODEX = STOP
 CLAUDE_CODE = STOP
 ```
 
-No active Work Package implementation. Await explicit Owner authorization before starting WP016.
+No active Work Package implementation. Await explicit Owner authorization before starting WP017.
 Do NOT merge without Owner approval.
-Do NOT start or implement WP016.
+Do NOT start or implement WP017.
 
 ### Performance & Scalability Guardrails Delivered in WP011
 
@@ -258,7 +266,7 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD (`35b31c3c41834209fcb9d63ad7ac52e9632d63d2`).
+1. Fresh-fetch current `main` HEAD (`43e5221e7f39a19e8c6fde54c450324aa8333059`).
 2. Read `START_HERE.md`.
 3. Read `CURRENT_STATE.md`.
 4. Read `ACTIVE_TASK.md`.
@@ -266,4 +274,4 @@ The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a 
 6. Read this handoff.
 7. Confirm `ACTIVE_WORK_PACKAGE = NONE` and wait for explicit Owner authorization before starting implementation.
 8. Do not repeat closed work.
-9. Do not start WP016 automatically. P3-WP016 remains PROPOSED / NOT AUTHORIZED.
+9. Do not start WP017 automatically. P3-WP017 remains PROPOSED / NOT AUTHORIZED.
