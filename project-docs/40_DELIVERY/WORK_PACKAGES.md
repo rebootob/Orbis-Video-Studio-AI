@@ -111,9 +111,9 @@ graph TD
   - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #35
   - **PR:** #36
-  - **Reviewed Head:** `cbbcea8c9a84bd9c08222dabf95d1788b2d3945e`
+  - **Reviewed Head:** `fb425feaec2dede3201e054d0b842b68820473d8`
   - **Merge Commit:** `f50e2568d197b3c4bab5e4303f31af817db6e1bf`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5125802846)
+  - **Final Review:** PASS / READY TO MERGE
   - **Scope Delivered:** Provider-neutral AudioProvider boundary, 3D audio taxonomy (source, type, generation mode), AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration.
 
 - **P3-WP015 — Simplified Assembly / Timeline Preview**
