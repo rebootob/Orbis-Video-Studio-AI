@@ -1327,3 +1327,122 @@ def test_current_usage_ledger_id_missing_fails_closed_without_guessing(db_sessio
     assert exc_info_cancel.value.status_code == 500
     db_session.refresh(job)
     assert job.status == "RECONCILIATION_REQUIRED"
+
+
+def test_atomic_expired_lease_reclaim_two_worker_race(tmp_path):
+    import threading
+    import os
+    from datetime import timedelta
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base_class import Base
+
+    db_file = os.path.join(str(tmp_path), "test_reclaim_race.db")
+    engine = create_engine(
+        f"sqlite:///{db_file}",
+        connect_args={"check_same_thread": False, "timeout": 30.0, "isolation_level": "IMMEDIATE"},
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    setup_db = SessionLocal()
+    project, timeline, _ = create_approved_project_context(setup_db)
+    p = setup_db.get(Project, project.id)
+    p.budget_limit = 2.00
+    setup_db.commit()
+
+    # Initial submit
+    job = RenderJobService.submit_render_job(setup_db, project.id, estimated_cost_usd=0.50)
+    assert job.status == "QUEUED"
+    target_job_id = job.id
+
+    # Worker 0 claims job and starts running
+    claimed0 = RenderJobService.claim_next_render_job(setup_db, worker_id="worker-0")
+    assert claimed0 is not None
+    claimed0.status = "RUNNING"
+    # Set lease to expired (in the past)
+    claimed0.claim_expires_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+    setup_db.commit()
+    setup_db.close()
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def worker_reclaim(worker_name: str):
+        barrier.wait()
+        local_db = SessionLocal()
+        try:
+            claimed = RenderJobService.claim_next_render_job(local_db, worker_id=worker_name)
+            if claimed:
+                results.append((worker_name, claimed.id, claimed.claim_token))
+            else:
+                results.append((worker_name, None, None))
+        finally:
+            local_db.close()
+
+    t1 = threading.Thread(target=worker_reclaim, args=("worker-A",))
+    t2 = threading.Thread(target=worker_reclaim, args=("worker-B",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    successful_claims = [r for r in results if r[1] is not None]
+    assert len(successful_claims) == 1, f"Expected exactly 1 worker to claim expired lease, got: {results}"
+
+    winner_worker, winner_job_id, winner_token = successful_claims[0]
+
+    # Verify DB authority state
+    check_db = SessionLocal()
+    try:
+        final_job = check_db.get(RenderJob, target_job_id)
+        assert final_job.claimed_by == winner_worker
+        assert final_job.claim_token == winner_token
+        assert final_job.status == "CLAIMED"
+
+        # Check ledgers: 1 initial attempt + 1 retry attempt from reclaim
+        ledgers = check_db.query(UsageLedger).filter(UsageLedger.render_job_id == target_job_id).all()
+        assert len(ledgers) == 2
+    finally:
+        check_db.close()
+        engine.dispose()
+
+
+def test_reconciliation_required_blocks_submit_and_retry_until_resolved(db_session: Session):
+    from fastapi import HTTPException
+
+    project, timeline, _ = create_approved_project_context(db_session)
+    job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+
+    # Transition job to RECONCILIATION_REQUIRED
+    job.status = "RECONCILIATION_REQUIRED"
+    job.error_message = "Ambiguous storage error requiring owner review"
+    db_session.commit()
+
+    initial_ledgers_count = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).count()
+    initial_jobs_count = db_session.query(RenderJob).filter(RenderJob.project_id == project.id).count()
+
+    # 1. submit_render_job must raise HTTP 400 and NOT create a new RenderJob or UsageLedger
+    with pytest.raises(HTTPException) as exc_submit:
+        RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    assert exc_submit.value.status_code == 400
+    assert "RECONCILIATION_REQUIRED" in exc_submit.value.detail
+
+    # Assert no new RenderJob or UsageLedger created
+    assert db_session.query(RenderJob).filter(RenderJob.project_id == project.id).count() == initial_jobs_count
+    assert db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).count() == initial_ledgers_count
+
+    # 2. retry_render_job on the reconciliation job must raise HTTP 400
+    with pytest.raises(HTTPException) as exc_retry:
+        RenderJobService.retry_render_job(db_session, project.id, job.id)
+    assert exc_retry.value.status_code == 400
+    assert "RECONCILIATION_REQUIRED" in exc_retry.value.detail
+
+    # 3. Explicit owner reconciliation: transition status to FAILED
+    job.status = "FAILED"
+    db_session.commit()
+
+    # 4. After explicit terminal resolution, a new render submit is authorized
+    new_job = RenderJobService.submit_render_job(db_session, project.id, estimated_cost_usd=0.50)
+    assert new_job.id != job.id
+    assert new_job.status == "QUEUED"

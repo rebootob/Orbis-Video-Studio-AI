@@ -55,8 +55,8 @@ def upgrade():
         "render_jobs",
         ["project_id", "timeline_id"],
         unique=True,
-        postgresql_where=sa.text("status IN ('QUEUED', 'CLAIMED', 'RUNNING')"),
-        sqlite_where=sa.text("status IN ('QUEUED', 'CLAIMED', 'RUNNING')"),
+        postgresql_where=sa.text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
+        sqlite_where=sa.text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
     )
 
     # 2. Add render_job_id column to usage_ledger

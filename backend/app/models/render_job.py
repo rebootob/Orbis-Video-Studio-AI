@@ -40,8 +40,8 @@ class RenderJob(Base):
             "project_id",
             "timeline_id",
             unique=True,
-            sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING')"),
-            postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING')"),
+            sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
+            postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
         ),
     )
 

@@ -18,6 +18,7 @@ from app.models.asset import Asset
 from app.services.budget import BudgetService
 
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 ALLOWED_WP017_RENDER_PROFILES = ("MASTER", "MASTER_HD")
@@ -97,7 +98,7 @@ class RenderJobService:
         target_key = custom_idempotency_key or base_idempotency_key
 
         # 4. DB Authority Idempotency Check (under project lock)
-        active_job = (
+        blocking_job = (
             db.query(RenderJob)
             .filter(
                 RenderJob.project_id == project_id,
@@ -106,13 +107,18 @@ class RenderJobService:
                     RenderJobStatus.QUEUED.value,
                     RenderJobStatus.CLAIMED.value,
                     RenderJobStatus.RUNNING.value,
+                    RenderJobStatus.RECONCILIATION_REQUIRED.value,
                 ]),
             )
             .first()
         )
-        if active_job:
-            # Active render job exists -> Return existing job (Idempotent NO_OP replay)
-            return active_job
+        if blocking_job:
+            if blocking_job.status == RenderJobStatus.RECONCILIATION_REQUIRED.value:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot submit new render job: prior render job {blocking_job.id} is in RECONCILIATION_REQUIRED state. Explicit reconciliation is required before submitting new renders for timeline v{timeline.version}.",
+                )
+            return blocking_job
 
         # Check if completed job exists with identical idempotency key
         completed_job = (
@@ -167,7 +173,7 @@ class RenderJobService:
             db.flush()
         except Exception:
             db.rollback()
-            active_job = (
+            blocking_job = (
                 db.query(RenderJob)
                 .filter(
                     RenderJob.project_id == project_id,
@@ -176,12 +182,18 @@ class RenderJobService:
                         RenderJobStatus.QUEUED.value,
                         RenderJobStatus.CLAIMED.value,
                         RenderJobStatus.RUNNING.value,
+                        RenderJobStatus.RECONCILIATION_REQUIRED.value,
                     ]),
                 )
                 .first()
             )
-            if active_job:
-                return active_job
+            if blocking_job:
+                if blocking_job.status == RenderJobStatus.RECONCILIATION_REQUIRED.value:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot submit new render job: prior render job {blocking_job.id} is in RECONCILIATION_REQUIRED state. Explicit reconciliation is required before submitting new renders for timeline v{timeline.version}.",
+                    )
+                return blocking_job
             raise
 
         # 7. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED) and bind current_usage_ledger_id
@@ -238,17 +250,80 @@ class RenderJobService:
         if not job:
             return None
 
-        # Handle expired lease transition if candidate was previously CLAIMED/RUNNING
+        # Handle expired lease transition if candidate was previously CLAIMED/RUNNING under the exact same row lock
         if job.status in (RenderJobStatus.CLAIMED.value, RenderJobStatus.RUNNING.value):
-            cls.fail_render_job(
-                db=db,
+            if not job.current_usage_ledger_id:
+                job.status = RenderJobStatus.RECONCILIATION_REQUIRED.value
+                job.error_message = "Expired lease missing current_usage_ledger_id reference"
+                db.commit()
+                db.refresh(job)
+                return None
+
+            target_ledger = db.get(UsageLedger, job.current_usage_ledger_id)
+            if not target_ledger:
+                job.status = RenderJobStatus.RECONCILIATION_REQUIRED.value
+                job.error_message = f"Expired lease current_usage_ledger_id {job.current_usage_ledger_id} not found"
+                db.commit()
+                db.refresh(job)
+                return None
+
+            if target_ledger.cost_status == "ESTIMATED":
+                target_ledger.cost_status = "ESTIMATED"
+                target_ledger.updated_at = now
+
+            job.retry_count += 1
+            if job.retry_count >= job.max_retries:
+                job.status = RenderJobStatus.FAILED.value
+                job.claimed_by = None
+                job.claim_token = None
+                job.claim_expires_at = None
+                job.error_message = f"Terminal failure after lease expiration ({job.retry_count}/{job.max_retries} attempts)"
+                db.commit()
+                db.refresh(job)
+                return None
+
+            # Verify project budget before creating NEW attempt reservation
+            try:
+                BudgetService.check_budget_before_dispatch(
+                    db=db,
+                    project_id=job.project_id,
+                    estimated_cost=job.estimated_cost_usd,
+                    lock_row=False,
+                )
+            except HTTPException as budget_err:
+                job.status = RenderJobStatus.FAILED.value
+                job.claimed_by = None
+                job.claim_token = None
+                job.claim_expires_at = None
+                job.error_message = f"Automatic retry blocked: {budget_err.detail}"
+                db.commit()
+                db.refresh(job)
+                return None
+
+            attempt_number = db.query(UsageLedger).filter(UsageLedger.render_job_id == job.id).count() + 1
+            operation_key = f"RENDER_RETRY_{job.id}_attempt_{attempt_number}"
+            idempotency_key = f"render_reserve_{job.id}_attempt_{attempt_number}"
+
+            new_ledger = UsageLedger(
+                project_id=job.project_id,
                 render_job_id=job.id,
-                claim_token=None,
-                error_message="Worker claim lease expired",
-                ambiguous=False,
+                provider="ORBIS_RENDER",
+                operation=operation_key,
+                estimated_cost=job.estimated_cost_usd,
+                actual_cost=None,
+                currency="USD",
+                cost_status="ESTIMATED",
+                idempotency_key=idempotency_key,
+                description=f"Pre-render compute cost reservation (attempt {attempt_number}) for timeline v{job.timeline_version}",
+                created_at=now,
+                updated_at=now,
             )
-            job = db.get(RenderJob, job.id)
-            if not job or job.status != RenderJobStatus.QUEUED.value:
+            try:
+                db.add(new_ledger)
+                db.flush()
+                job.current_usage_ledger_id = new_ledger.id
+            except IntegrityError:
+                db.rollback()
                 return None
 
         # Lock candidate and update claim token
@@ -585,7 +660,22 @@ class RenderJobService:
         if job.status not in (RenderJobStatus.FAILED.value, RenderJobStatus.CANCELLED.value):
             raise HTTPException(
                 status_code=400,
-                detail=f"Cannot retry render job in status {job.status}",
+                detail=f"Cannot retry render job in status {job.status}. Explicit owner reconciliation is required first if in RECONCILIATION_REQUIRED state.",
+            )
+
+        recon_job = (
+            db.query(RenderJob)
+            .filter(
+                RenderJob.project_id == project_id,
+                RenderJob.timeline_id == job.timeline_id,
+                RenderJob.status == RenderJobStatus.RECONCILIATION_REQUIRED.value,
+            )
+            .first()
+        )
+        if recon_job:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot retry render job: timeline has prior job {recon_job.id} in RECONCILIATION_REQUIRED state.",
             )
 
         # Verify estimated cost against budget limit under project lock
