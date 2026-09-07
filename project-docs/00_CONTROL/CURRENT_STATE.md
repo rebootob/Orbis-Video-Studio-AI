@@ -206,7 +206,7 @@ Beautiful but not distracting
 1. Keep WP001-WP017 closed unless a proven regression exists.
 2. `ACTIVE_WORK_PACKAGE = NONE`.
 3. `CURRENT_GATE = POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
-4. Await explicit Owner authorization before starting P4-WP018 (Production Export & Deliverables Engine) or any future Work Package.
+4. Await explicit Owner authorization before starting P4-WP018 (Multi-Output & Platform Export Presets) or any future Work Package.
 5. Antigravity = STOP / NONE until next WP authorization.
 6. Codex = STOP.
 7. Claude Code = STOP.
