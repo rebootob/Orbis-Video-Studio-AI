@@ -620,3 +620,199 @@ def test_approved_timeline_without_new_qc_replay(db_session: Session):
     # Existing ApprovalRecord is authoritative -> submit succeeds without re-evaluating QC
     job = RenderJobService.submit_render_job(db_session, project.id)
     assert job.status == "QUEUED"
+
+
+def test_same_identity_concurrent_submit_returns_single_job_and_reservation(db_session: Session):
+    project, timeline, _ = create_approved_project_context(db_session)
+    project.budget_limit = 0.60
+    db_session.commit()
+
+    # Submit 1
+    job1 = RenderJobService.submit_render_job(
+        db_session, project.id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
+    )
+    assert job1.status == "QUEUED"
+
+    # Submit 2 (same render identity / active job exists)
+    job2 = RenderJobService.submit_render_job(
+        db_session, project.id, custom_idempotency_key="same_identity_key", estimated_cost_usd=0.50
+    )
+
+    # Both return the exact same active RenderJob
+    assert job1.id == job2.id
+
+    # Single UsageLedger reservation entry
+    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == job1.id).all()
+    assert len(ledgers) == 1
+    assert ledgers[0].cost_status == "ESTIMATED"
+    assert ledgers[0].estimated_cost == 0.50
+
+
+def test_distinct_concurrent_submits_cannot_oversubscribe_budget(db_session: Session):
+    project, _, _ = create_approved_project_context(db_session)
+    project.budget_limit = 0.60
+    db_session.commit()
+
+    # Job 1 succeeds (estimated cost 0.50)
+    job1 = RenderJobService.submit_render_job(
+        db_session, project.id, custom_idempotency_key="distinct_key_1", estimated_cost_usd=0.50
+    )
+    assert job1.status == "QUEUED"
+
+    # Mark Job 1 as COMPLETED (preserving prior reservation in usage ledger)
+    job1.status = "COMPLETED"
+    db_session.commit()
+
+    # Distinct Job 2 submit request (estimated cost 0.50) -> total committed = 1.00 > limit 0.60 -> fails budget check
+    with pytest.raises(Exception) as exc_info:
+        RenderJobService.submit_render_job(
+            db_session, project.id, custom_idempotency_key="distinct_key_2", estimated_cost_usd=0.50
+        )
+    assert "budget" in str(exc_info.value).lower()
+
+
+def test_cut_assembly():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "placements": [
+            {"local_asset_path": "asset1.mp4", "effective_duration": 4.0, "transition_to_next": "CUT"},
+            {"local_asset_path": "asset2.mp4", "effective_duration": 4.0, "transition_to_next": "CUT"},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_cut.mp4")
+    try:
+        assert meta["duration_seconds"] == 8.0
+        assert meta["transition_overlap_seconds"] == 0.0
+        assert meta["placement_count"] == 2
+    finally:
+        if os.path.exists("./test_cut.mp4"):
+            os.remove("./test_cut.mp4")
+
+
+def test_fade_assembly():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "placements": [
+            {"local_asset_path": "asset1.mp4", "effective_duration": 4.0, "transition_to_next": "FADE"},
+            {"local_asset_path": "asset2.mp4", "effective_duration": 4.0, "transition_to_next": "CUT"},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_fade.mp4")
+    try:
+        assert meta["duration_seconds"] == 7.5
+        assert meta["transition_overlap_seconds"] == 0.5
+        assert meta["placement_count"] == 2
+    finally:
+        if os.path.exists("./test_fade.mp4"):
+            os.remove("./test_fade.mp4")
+
+
+def test_dissolve_assembly():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "placements": [
+            {"local_asset_path": "asset1.mp4", "effective_duration": 5.0, "transition_to_next": "DISSOLVE"},
+            {"local_asset_path": "asset2.mp4", "effective_duration": 3.0, "transition_to_next": "CUT"},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_dissolve.mp4")
+    try:
+        assert meta["duration_seconds"] == 7.5
+        assert meta["transition_overlap_seconds"] == 0.5
+        assert meta["placement_count"] == 2
+    finally:
+        if os.path.exists("./test_dissolve.mp4"):
+            os.remove("./test_dissolve.mp4")
+
+
+def test_transition_overlap_duration_truth():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "placements": [
+            {"local_asset_path": "asset1.mp4", "effective_duration": 4.0, "transition_to_next": "FADE"},
+            {"local_asset_path": "asset2.mp4", "effective_duration": 4.0, "transition_to_next": "DISSOLVE"},
+            {"local_asset_path": "asset3.mp4", "effective_duration": 4.0, "transition_to_next": "CUT"},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_overlap_truth.mp4")
+    try:
+        assert meta["duration_seconds"] == 11.0
+        assert meta["transition_overlap_seconds"] == 1.0
+    finally:
+        if os.path.exists("./test_overlap_truth.mp4"):
+            os.remove("./test_overlap_truth.mp4")
+
+
+def test_muted_audio_excluded():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "audio_clips": [
+            {"local_asset_path": "audio1.mp3", "start_time": 0.0, "volume": 1.0, "mute": False},
+            {"local_asset_path": "audio2.mp3", "start_time": 1.0, "volume": 1.0, "mute": True},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_muted.mp4")
+    try:
+        assert meta["audio_clip_count"] == 1
+    finally:
+        if os.path.exists("./test_muted.mp4"):
+            os.remove("./test_muted.mp4")
+
+
+def test_fade_out_occurs_at_clip_end():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "audio_clips": [
+            {"local_asset_path": "audio1.mp3", "start_time": 0.0, "duration_seconds": 6.0, "volume": 1.0, "fade_out": 1.5},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_fade_out.mp4")
+    try:
+        import json
+        with open("./test_fade_out.mp4", "rb") as f:
+            content = f.read()
+            mdat_index = content.find(b"mdat")
+            payload_str = content[mdat_index + 4:].decode("utf-8")
+            payload = json.loads(payload_str)
+            ac = payload["audio_clips"][0]
+            assert ac["calculated_fade_out_start"] == 4.5
+    finally:
+        if os.path.exists("./test_fade_out.mp4"):
+            os.remove("./test_fade_out.mp4")
+
+
+def test_audio_start_time_and_volume_preserved():
+    import os
+    mock_exec = MockRenderExecutor()
+    timeline_spec = {
+        "total_duration": 10.0,
+        "audio_clips": [
+            {"local_asset_path": "audio1.mp3", "start_time": 2.5, "volume": 0.75, "mute": False},
+        ],
+    }
+    meta = mock_exec.render_timeline(timeline_spec, scratch_dir=".", output_file_path="./test_audio_attrs.mp4")
+    try:
+        import json
+        with open("./test_audio_attrs.mp4", "rb") as f:
+            content = f.read()
+            mdat_index = content.find(b"mdat")
+            payload_str = content[mdat_index + 4:].decode("utf-8")
+            payload = json.loads(payload_str)
+            ac = payload["audio_clips"][0]
+            assert ac["start_time"] == 2.5
+            assert ac["volume"] == 0.75
+    finally:
+        if os.path.exists("./test_audio_attrs.mp4"):
+            os.remove("./test_audio_attrs.mp4")

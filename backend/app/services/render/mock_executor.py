@@ -34,14 +34,46 @@ class MockRenderExecutor(RenderExecutor):
         placements = timeline_spec.get("placements", [])
         audio_clips = timeline_spec.get("audio_clips", [])
 
+        # Compute placement transition overlaps
+        total_overlap = 0.0
+        transition_specs = []
+        if placements:
+            for i in range(len(placements) - 1):
+                trans = str(placements[i].get("transition_to_next", "CUT")).upper()
+                if trans in ("FADE", "DISSOLVE"):
+                    d1 = float(placements[i].get("effective_duration", 4.0))
+                    d2 = float(placements[i + 1].get("effective_duration", 4.0))
+                    overlap = min(0.5, d1 / 2.0, d2 / 2.0)
+                    total_overlap += overlap
+                    transition_specs.append((trans, overlap))
+                else:
+                    transition_specs.append(("CUT", 0.0))
+            raw_video_duration = sum(float(p.get("effective_duration", 4.0)) for p in placements)
+            final_timeline_duration = max(0.1, round(raw_video_duration - total_overlap, 4))
+        else:
+            final_timeline_duration = total_duration
+
+        audible_audio_clips = []
+        for ac in audio_clips:
+            if not bool(ac.get("mute", False)) and float(ac.get("volume", 1.0)) > 0:
+                fade_out = float(ac.get("fade_out", 0.0))
+                clip_dur = float(ac["duration_seconds"]) if ac.get("duration_seconds") is not None else None
+                effective_dur = clip_dur if clip_dur is not None else final_timeline_duration
+                fade_out_start = max(0.0, effective_dur - fade_out) if fade_out > 0 else 0.0
+                ac_copy = dict(ac)
+                ac_copy["calculated_fade_out_start"] = fade_out_start
+                audible_audio_clips.append(ac_copy)
+
         import json
         payload_data = {
-            "total_duration": total_duration,
+            "total_duration": final_timeline_duration,
             "placement_count": len(placements),
             "placements": placements,
-            "audio_clip_count": len(audio_clips),
-            "audio_clips": audio_clips,
-            "marker": f"ORBIS_SYNTHETIC_RENDER_DURATION_{total_duration}",
+            "audio_clip_count": len(audible_audio_clips),
+            "audio_clips": audible_audio_clips,
+            "transition_overlap_seconds": total_overlap,
+            "transition_specs": transition_specs,
+            "marker": f"ORBIS_SYNTHETIC_RENDER_DURATION_{final_timeline_duration}",
         }
         payload = json.dumps(payload_data).encode("utf-8")
         mdat_hdr = (len(payload) + 8).to_bytes(4, "big") + b"mdat"
@@ -57,7 +89,7 @@ class MockRenderExecutor(RenderExecutor):
         file_size = os.path.getsize(output_file_path)
 
         return {
-            "duration_seconds": total_duration,
+            "duration_seconds": final_timeline_duration,
             "file_size_bytes": file_size,
             "video_codec": "h264",
             "audio_codec": "aac",
@@ -66,5 +98,6 @@ class MockRenderExecutor(RenderExecutor):
             "frame_rate": 30.0,
             "render_profile": timeline_spec.get("render_profile", "MASTER_HD"),
             "placement_count": len(placements),
-            "audio_clip_count": len(audio_clips),
+            "audio_clip_count": len(audible_audio_clips),
+            "transition_overlap_seconds": total_overlap,
         }
