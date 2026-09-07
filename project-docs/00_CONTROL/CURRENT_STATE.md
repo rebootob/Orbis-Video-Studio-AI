@@ -7,9 +7,9 @@
 ## State Flags
 
 ```yaml
-PHASE: P2 — Generation & Multi-Mode Production Pipeline
+PHASE: P3 — Audio, Assembly, QC & Cloud Render
 CANONICAL_BRANCH: main
-MAIN_HEAD: f50e2568d197b3c4bab5e4303f31af817db6e1bf
+MAIN_HEAD: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
 
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
@@ -56,7 +56,8 @@ P2-WP013_ISSUE: "#33"
 P2-WP013_PR: "#34"
 P2-WP013_BRANCH: ai/p2-wp013-image-keyframe-pipeline
 P2-WP013_REVIEWED_HEAD: f9fd46b917390224a5ab58bad0d3be238edbd7b3
-P2-WP013_MERGE_COMMIT: f50e2568d197b3c4bab5e4303f31af817db6e1bf
+P2-WP013_MERGE_COMMIT: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
+P2-WP013_FINAL_REVIEW: PASS / READY TO MERGE
 
 P3-WP014: PASS / CLOSED / MERGED
 P3-WP014_ISSUE: "#35"
@@ -64,14 +65,19 @@ P3-WP014_PR: "#36"
 P3-WP014_BRANCH: ai/p3-wp014-audio-production
 P3-WP014_REVIEWED_HEAD: fb425feaec2dede3201e054d0b842b68820473d8
 P3-WP014_MERGE_COMMIT: f50e2568d197b3c4bab5e4303f31af817db6e1bf
+P3-WP014_FINAL_REVIEW: PASS / READY TO MERGE
 
-ACTIVE_WORK_PACKAGE: P3-WP015
-CURRENT_GATE: IMPLEMENTATION / IN PROGRESS
-
-P3-WP015: ACTIVE / AUTHORIZED
+P3-WP015: PASS / CLOSED / MERGED
 P3-WP015_ISSUE: "#37"
+P3-WP015_PR: "#38"
 P3-WP015_BRANCH: ai/p3-wp015-simplified-assembly
 P3-WP015_STARTING_HEAD: f50e2568d197b3c4bab5e4303f31af817db6e1bf
+P3-WP015_REVIEWED_HEAD: 640212f71182ba3f6a5024a442beb363868eabc1
+P3-WP015_MERGE_COMMIT: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
+P3-WP015_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127082342)
+
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -126,7 +132,9 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 | Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
 | Selective / Batch Regeneration & Resume Service (P2-WP011) | PASS / CLOSED / MERGED | Canonical candidate selection, shot deduplication, repeat-safe resume, set-based DB queries (no N+1), transactional job/audit persistence, bounded keyset execution, memory-bounded created_jobs accumulation, and BatchRun audit complete. PR #29 merged into main at 643614b089a295ea96be179e470707609cbe4b53. |
 | Production Orchestrator & Staged Approval State Machine (P2-WP012) | PASS / CLOSED / MERGED | Server-side orchestrator service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration. PR #32 merged at cdd79aaa80eaefa8be6c4e4894cb40db0b097a60. |
-| Storyboard Image / Keyframe Pipeline (P2-WP013) | ACTIVE / AUTHORIZED | Issue #33 authorized by Owner. Provider-neutral ImageProvider, storyboard keyframe generation, continuity/reference integration, and batch generation. |
+| Storyboard Image / Keyframe Pipeline (P2-WP013) | PASS / CLOSED / MERGED | Storyboard keyframe pipeline, ImageProvider abstraction, batch generation & continuity references complete. PR #34 merged at c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd. |
+| Core V1 Audio Production Automation (P3-WP014) | PASS / CLOSED / MERGED | Provider-neutral AudioProvider boundary, 3D audio taxonomy, AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration. PR #36 merged at f50e2568d197b3c4bab5e4303f31af817db6e1bf. |
+| Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
 | Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
 
 ---
@@ -174,15 +182,14 @@ Beautiful but not distracting
 
 ## Next Allowed Action
 
-1. Keep WP001-WP013 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = P3-WP014`.
-3. `CURRENT_GATE = IMPLEMENTATION / IN PROGRESS`.
-4. Branch: `ai/p3-wp014-audio-production`.
-5. Implement authorized P3-WP014 contract per Issue #35.
-6. Antigravity = bounded low-credit Execution Plane.
-7. Codex = STOP.
-8. Claude Code = STOP.
-9. Do NOT merge without Owner approval.
-10. Do NOT start WP015.
+1. Keep WP001-WP015 closed unless a proven regression exists.
+2. `ACTIVE_WORK_PACKAGE = NONE`.
+3. `CURRENT_GATE = POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION`.
+4. Await explicit Owner authorization before starting P3-WP016 (QC / Approval Pipeline) or any future Work Package.
+5. Antigravity = bounded low-credit Execution Plane when authorized.
+6. Codex = STOP.
+7. Claude Code = STOP.
+8. Do NOT merge without Owner approval.
+9. Do NOT start WP016.
 
 Live GitHub/repository truth newer than this document is authoritative.

@@ -89,23 +89,56 @@ graph TD
     - Migration `011_batch_resume_runs_and_indexes.py` with targeted indexes.
     - Full frontend integration removing client-side retry loops and guarding stage transitions.
 
+- **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #31
+  - **PR:** #32
+  - **Reviewed Head:** `a781926bbf607cad1b992d089920be6f094e41c9`
+  - **Merge Commit:** `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`
+  - **Final Review:** PASS / READY TO MERGE (Review ID 5125098674)
+  - **Scope Delivered:** Server-side Orchestrator Service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration.
+
+- **P2-WP013 — Storyboard Image / Keyframe Pipeline**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #33
+  - **PR:** #34
+  - **Reviewed Head:** `f9fd46b917390224a5ab58bad0d3be238edbd7b3`
+  - **Merge Commit:** `c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd`
+  - **Final Review:** PASS / READY TO MERGE
+  - **Scope Delivered:** Provider-neutral ImageProvider abstraction, storyboard keyframe generation, continuity/reference integration, batch image generation.
+
+- **P3-WP014 — Core V1 Audio Production Automation**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #35
+  - **PR:** #36
+  - **Reviewed Head:** `fb425feaec2dede3201e054d0b842b68820473d8`
+  - **Merge Commit:** `f50e2568d197b3c4bab5e4303f31af817db6e1bf`
+  - **Final Review:** PASS / READY TO MERGE
+  - **Scope Delivered:** Provider-neutral AudioProvider boundary, 3D audio taxonomy (source, type, generation mode), AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration.
+
+- **P3-WP015 — Simplified Assembly / Timeline Preview**
+  - **Status:** PASS / CLOSED / MERGED
+  - **Issue:** #37
+  - **PR:** #38
+  - **Reviewed Head:** `640212f71182ba3f6a5024a442beb363868eabc1`
+  - **Merge Commit:** `35b31c3c41834209fcb9d63ad7ac52e9632d63d2`
+  - **Final Review:** PASS / READY TO MERGE (Review ID 5127082342)
+  - **Scope Delivered:** Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, frontend timeline workspace.
+
 ---
 
 ## 3. Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P2-WP012
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
-- **Current Status:** IMPLEMENTED / AWAITING CHATGPT INDEPENDENT REVIEW
-- **Issue:** #31
-- **Branch:** `ai/p2-wp012-production-orchestrator`
-- **Scope:** Production Orchestrator & Staged Approval State Machine.
-- P2-WP013 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP013 without explicit Owner authorization.
+- **Current Status:** POST-WP015 / READY FOR OWNER NEXT-WP AUTHORIZATION
+- P3-WP016 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP016 without explicit Owner authorization.
 
 ---
 
-## 4. Remaining Roadmap — Direction After WP011
+## 4. Remaining Roadmap — Direction After WP015
 
 The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
 
@@ -115,15 +148,11 @@ The roadmap should prioritize end-to-end production automation rather than build
   - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #31
   - **PR:** #32 (Merged into `main` at `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`)
-  - **Branch:** `ai/p2-wp012-production-orchestrator`
-  - Coordinate Story -> Storyboard -> Shot Plan -> Images -> Video with pause/review/continue semantics and AUTO / ASSISTED / MANUAL behavior. Guard stage gates against arbitrary PATCH bypass, integrate append-only orchestration audit trail, and wire frontend state machine controls.
 
 - **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
   - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #33
-  - **PR:** #34
-  - **Branch:** `ai/p2-wp013-image-keyframe-pipeline`
-  - Dedicated ImageProvider abstraction, batch storyboard/keyframe generation, continuity/reference mapping and retry/resume.
+  - **PR:** #34 (Merged into `main` at `c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd`)
 
 ### Future Provider Planning Note — ComfyUI / Cloud GPU
 
@@ -155,15 +184,12 @@ Important product locks:
 - **P3-WP014 — Core V1 Audio Production Automation**
   - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #35
-  - **PR:** #36
-  - **Branch:** `ai/p3-wp014-audio-production`
-  - VO, BGM, SFX, ambience, batch audio planning/generation/assignment and basic mixing/ducking.
+  - **PR:** #36 (Merged into `main` at `f50e2568d197b3c4bab5e4303f31af817db6e1bf`)
 
 - **P3-WP015 — Simplified Assembly / Timeline Preview**
-  - **Status:** ACTIVE / AUTHORIZED
+  - **Status:** PASS / CLOSED / MERGED
   - **Issue:** #37
-  - **Branch:** `ai/p3-wp015-simplified-assembly`
-  - Shot ordering, duration, simple trim, basic audio layers and preview; not a Premiere-class editor.
+  - **PR:** #38 (Merged into `main` at `35b31c3c41834209fcb9d63ad7ac52e9632d63d2`)
 
 - **P3-WP016 — QC / Approval Pipeline**
   - **Status:** PROPOSED / NOT AUTHORIZED
