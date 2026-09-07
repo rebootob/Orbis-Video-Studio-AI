@@ -26,7 +26,7 @@ export const ExportPresetsModal: React.FC<ExportPresetsModalProps> = ({
   }, [projectId]);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setInterval>;
     if (activeBatch && activeBatch.status === 'PROCESSING') {
       timer = setInterval(async () => {
         try {

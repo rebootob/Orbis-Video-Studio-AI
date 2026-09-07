@@ -225,213 +225,6 @@ class RenderJobService:
         return render_job
 
     @classmethod
-    def submit_export_batch(
-        cls,
-        db: Session,
-        project_id: uuid.UUID,
-        preset_ids: List[str],
-        timeline_id: Optional[uuid.UUID] = None,
-    ) -> RenderBatch:
-        if not preset_ids:
-            raise HTTPException(status_code=400, detail="At least one export preset_id is required")
-
-        # Resolve requested presets and compute total estimated cost
-        requested_presets = []
-        total_estimated_cost = 0.0
-        for pid in preset_ids:
-            preset = ExportPresetService.get_preset(pid)
-            requested_presets.append(preset)
-            total_estimated_cost += float(preset.get("estimated_cost_usd", 0.50))
-
-        # 1. Lock Project Row under DB authority
-        query = db.query(Project).filter(Project.id == project_id).with_for_update()
-        project = query.first()
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
-        project.updated_at = datetime.now(timezone.utc)
-        flag_modified(project, "updated_at")
-        db.flush()
-
-        # 2. Resolve Timeline
-        if timeline_id:
-            timeline = (
-                db.query(AssemblyTimeline)
-                .filter(
-                    AssemblyTimeline.project_id == project_id,
-                    AssemblyTimeline.id == timeline_id,
-                )
-                .first()
-            )
-            if not timeline:
-                raise HTTPException(status_code=404, detail="Specified timeline not found for project")
-        else:
-            timeline = (
-                db.query(AssemblyTimeline)
-                .filter(AssemblyTimeline.project_id == project_id)
-                .order_by(AssemblyTimeline.version.desc())
-                .first()
-            )
-            if not timeline:
-                raise HTTPException(status_code=404, detail="No active timeline found for project")
-
-        # 3. Approval Gate Verification
-        approval = (
-            db.query(ApprovalRecord)
-            .filter(
-                ApprovalRecord.project_id == project_id,
-                ApprovalRecord.timeline_id == timeline.id,
-                ApprovalRecord.timeline_version == timeline.version,
-                ApprovalRecord.status == "APPROVED",
-            )
-            .first()
-        )
-        if not approval:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Timeline version {timeline.version} is not approved. Final approval is required before exporting.",
-            )
-
-        # 4. Check project budget for total batch estimated cost upfront
-        BudgetService.check_budget_before_dispatch(
-            db=db,
-            project_id=project_id,
-            estimated_cost=total_estimated_cost,
-            lock_row=False,
-        )
-
-        now = utc_now()
-        batch = RenderBatch(
-            project_id=project_id,
-            timeline_id=timeline.id,
-            timeline_version=timeline.version,
-            status="PROCESSING",
-            total_variants=len(requested_presets),
-            completed_variants=0,
-            failed_variants=0,
-            estimated_total_cost_usd=total_estimated_cost,
-            created_at=now,
-            updated_at=now,
-        )
-
-        try:
-            db.add(batch)
-            db.flush()
-
-            child_jobs = []
-            for preset in requested_presets:
-                pid = preset["preset_id"]
-                variant_key = ExportPresetService.compute_render_variant_key(pid, preset)
-                base_idempotency_key = f"{project_id}:{timeline.id}:{timeline.version}:{variant_key}"
-
-                # Check active blocking job for THIS SPECIFIC variant key
-                blocking_job = (
-                    db.query(RenderJob)
-                    .filter(
-                        RenderJob.project_id == project_id,
-                        RenderJob.timeline_id == timeline.id,
-                        RenderJob.render_variant_key == variant_key,
-                        RenderJob.status.in_([
-                            RenderJobStatus.QUEUED.value,
-                            RenderJobStatus.CLAIMED.value,
-                            RenderJobStatus.RUNNING.value,
-                            RenderJobStatus.RECONCILIATION_REQUIRED.value,
-                        ]),
-                    )
-                    .first()
-                )
-                if blocking_job:
-                    if blocking_job.status == RenderJobStatus.RECONCILIATION_REQUIRED.value:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Cannot submit export batch: variant '{pid}' is in RECONCILIATION_REQUIRED state. Explicit reconciliation is required.",
-                        )
-                    child_jobs.append(blocking_job)
-                    continue
-
-                # Check completed job for timestamping
-                completed_job = (
-                    db.query(RenderJob)
-                    .filter(
-                        RenderJob.project_id == project_id,
-                        RenderJob.idempotency_key == base_idempotency_key,
-                        RenderJob.status == RenderJobStatus.COMPLETED.value,
-                    )
-                    .first()
-                )
-                target_key = f"{base_idempotency_key}:{int(time.time())}" if completed_job else base_idempotency_key
-
-                job_est_cost = float(preset.get("estimated_cost_usd", 0.50))
-                render_job = RenderJob(
-                    project_id=project_id,
-                    timeline_id=timeline.id,
-                    timeline_version=timeline.version,
-                    approval_id=approval.id,
-                    render_profile=pid,
-                    render_variant_key=variant_key,
-                    batch_id=batch.id,
-                    status=RenderJobStatus.QUEUED.value,
-                    idempotency_key=target_key,
-                    progress=0.0,
-                    retry_count=0,
-                    max_retries=3,
-                    estimated_cost_usd=job_est_cost,
-                    render_metadata={
-                        "preset_id": pid,
-                        "render_variant_key": variant_key,
-                        "timeline_version": timeline.version,
-                        "approval_id": str(approval.id),
-                        "qc_run_id": str(approval.qc_run_id),
-                        "preset_snapshot": preset,
-                    },
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(render_job)
-                db.flush()
-
-                ledger_entry = UsageLedger(
-                    project_id=project_id,
-                    render_job_id=render_job.id,
-                    provider="ORBIS_RENDER",
-                    operation="EXPORT_VIDEO",
-                    estimated_cost=job_est_cost,
-                    actual_cost=None,
-                    currency="USD",
-                    cost_status="ESTIMATED",
-                    idempotency_key=f"export_reserve_{render_job.id}_attempt_1",
-                    description=f"Export compute reservation (attempt 1) for preset '{pid}' timeline v{timeline.version}",
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(ledger_entry)
-                db.flush()
-                render_job.current_usage_ledger_id = ledger_entry.id
-                child_jobs.append(render_job)
-
-            db.commit()
-            db.refresh(batch)
-            return batch
-        except Exception:
-            db.rollback()
-            raise
-
-    @classmethod
-    def get_render_batch(
-        cls,
-        db: Session,
-        project_id: uuid.UUID,
-        batch_id: uuid.UUID,
-    ) -> Optional[RenderBatch]:
-        return (
-            db.query(RenderBatch)
-            .filter(
-                RenderBatch.project_id == project_id,
-                RenderBatch.id == batch_id,
-            )
-            .first()
-        )
-
-    @classmethod
     def claim_next_render_job(
         cls,
         db: Session,
@@ -1054,15 +847,24 @@ class RenderJobService:
         if not preset_ids:
             raise HTTPException(status_code=400, detail="Must specify at least one export preset ID")
 
+        # 1. Deduplicate & normalize preset IDs (order-preserving)
+        unique_preset_ids = list(dict.fromkeys([pid.upper() for pid in preset_ids]))
+        if not unique_preset_ids:
+            raise HTTPException(status_code=400, detail="Must specify at least one valid export preset ID")
+
+        # Resolve requested preset definitions
+        presets = [ExportPresetService.get_preset(pid) for pid in unique_preset_ids]
+        total_estimated_cost = sum(float(p["estimated_cost_usd"]) for p in presets)
+
         # Single atomic DB transaction / savepoint for batch authorization
         sp = db.begin_nested()
         try:
-            # 1. Acquire DB lock on Project row
+            # 2. Acquire DB lock on Project row
             project = db.query(Project).filter(Project.id == project_id).with_for_update().first()
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
 
-            # 2. Get active/latest timeline & verify approval gate
+            # 3. Get active/latest timeline & verify approval gate
             if timeline_id:
                 timeline = db.query(AssemblyTimeline).filter(
                     AssemblyTimeline.id == timeline_id,
@@ -1089,11 +891,59 @@ class RenderJobService:
                     detail=f"Cannot render export presets for timeline v{timeline.version} without an APPROVED production approval gate.",
                 )
 
-            # 3. Resolve preset specifications and compute total cost
-            presets = [ExportPresetService.get_preset(pid) for pid in preset_ids]
-            total_estimated_cost = sum(float(p["estimated_cost_usd"]) for p in presets)
+            # 4. Compute variant keys and check active jobs on this timeline
+            preset_variant_keys = [
+                ExportPresetService.compute_render_variant_key(p["preset_id"], p)
+                for p in presets
+            ]
 
-            # 4. Concurrency-safe budget verification for total batch cost
+            active_jobs = db.query(RenderJob).filter(
+                RenderJob.project_id == project_id,
+                RenderJob.timeline_id == timeline.id,
+                RenderJob.status.in_([
+                    RenderJobStatus.QUEUED.value,
+                    RenderJobStatus.CLAIMED.value,
+                    RenderJobStatus.RUNNING.value,
+                    RenderJobStatus.RECONCILIATION_REQUIRED.value,
+                ]),
+            ).all()
+
+            active_variant_map = {j.render_variant_key: j for j in active_jobs}
+
+            # Check for RECONCILIATION_REQUIRED state
+            for v_key in preset_variant_keys:
+                if v_key in active_variant_map:
+                    job = active_variant_map[v_key]
+                    if job.status == RenderJobStatus.RECONCILIATION_REQUIRED.value:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Active render variant '{v_key}' is in RECONCILIATION_REQUIRED state. Explicit reconciliation is required.",
+                        )
+
+            # Check if any requested preset is already active
+            active_conflicts = [v_key for v_key in preset_variant_keys if v_key in active_variant_map]
+            if active_conflicts:
+                # Check if ALL requested presets belong to an existing active RenderBatch with status PROCESSING
+                matching_batch_ids = {active_variant_map[vk].batch_id for vk in active_conflicts if active_variant_map[vk].batch_id}
+                if len(matching_batch_ids) == 1:
+                    target_batch_id = list(matching_batch_ids)[0]
+                    existing_batch = db.get(RenderBatch, target_batch_id)
+                    if existing_batch and existing_batch.status == "PROCESSING" and existing_batch.total_variants == len(presets):
+                        batch_jobs = db.query(RenderJob).filter(RenderJob.batch_id == target_batch_id).all()
+                        batch_vkeys = {j.render_variant_key for j in batch_jobs}
+                        if set(preset_variant_keys) == batch_vkeys:
+                            sp.rollback()
+                            return existing_batch
+
+                # If no matching active batch can be replayed, raise 400 Bad Request
+                first_conflict = active_conflicts[0]
+                status_str = active_variant_map[first_conflict].status
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Active render job for variant '{first_conflict}' already exists in state '{status_str}'. Cannot create duplicate batch while variant is active.",
+                )
+
+            # 5. Concurrency-safe budget verification for total batch cost
             BudgetService.check_budget_before_dispatch(
                 db=db,
                 project_id=project_id,
@@ -1101,7 +951,7 @@ class RenderJobService:
                 lock_row=False,
             )
 
-            # 5. Create RenderBatch parent record
+            # 6. Create RenderBatch parent record
             now = utc_now()
             batch = RenderBatch(
                 project_id=project_id,
@@ -1118,34 +968,12 @@ class RenderJobService:
             db.add(batch)
             db.flush()
 
-            # 6. Create child RenderJobs and UsageLedger reservations
+            # 7. Create child RenderJobs and UsageLedger reservations
             child_jobs = []
             for preset in presets:
                 preset_id = preset["preset_id"]
                 variant_key = ExportPresetService.compute_render_variant_key(preset_id, preset)
                 idempotency_key = f"export_batch_{batch.id}_{preset_id}"
-
-                # Check if identical active variant job already exists
-                active_job = db.query(RenderJob).filter(
-                    RenderJob.project_id == project_id,
-                    RenderJob.timeline_id == timeline.id,
-                    RenderJob.render_variant_key == variant_key,
-                    RenderJob.status.in_([
-                        RenderJobStatus.QUEUED.value,
-                        RenderJobStatus.CLAIMED.value,
-                        RenderJobStatus.RUNNING.value,
-                        RenderJobStatus.RECONCILIATION_REQUIRED.value,
-                    ]),
-                ).first()
-
-                if active_job:
-                    if active_job.status == RenderJobStatus.RECONCILIATION_REQUIRED.value:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Active render variant '{variant_key}' is in RECONCILIATION_REQUIRED state. Reconciliation required before re-submitting.",
-                        )
-                    child_jobs.append(active_job)
-                    continue
 
                 job = RenderJob(
                     project_id=project_id,

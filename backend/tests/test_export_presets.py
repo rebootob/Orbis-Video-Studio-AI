@@ -355,3 +355,42 @@ def test_api_export_preset_endpoints(client: TestClient, db_session: Session):
     assert get_res.status_code == 200
     get_data = get_res.json()
     assert get_data["id"] == batch_id
+
+
+def test_duplicate_preset_ids_deduplicated(db_session: Session):
+    project, timeline, approval = create_approved_project_context(db_session)
+
+    # Submitting duplicate preset IDs in the same request deduplicates them
+    batch = RenderJobService.submit_export_batch(
+        db=db_session,
+        project_id=project.id,
+        preset_ids=["YT_STANDARD_1080P", "YT_STANDARD_1080P", "yt_standard_1080p"],
+    )
+
+    assert batch is not None
+    assert batch.total_variants == 1
+    jobs = db_session.query(RenderJob).filter(RenderJob.batch_id == batch.id).all()
+    assert len(jobs) == 1
+    ledgers = db_session.query(UsageLedger).filter(UsageLedger.render_job_id == jobs[0].id).all()
+    assert len(ledgers) == 1
+
+
+def test_conflict_active_variant_raises_400(db_session: Session):
+    project, timeline, approval = create_approved_project_context(db_session)
+
+    # Create active batch with 1 preset
+    batch1 = RenderJobService.submit_export_batch(
+        db=db_session,
+        project_id=project.id,
+        preset_ids=["YT_STANDARD_1080P"],
+    )
+    assert batch1 is not None
+
+    # Submitting active preset combined with a new preset raises exception (400 conflict)
+    with pytest.raises(Exception) as exc_info:
+        RenderJobService.submit_export_batch(
+            db=db_session,
+            project_id=project.id,
+            preset_ids=["YT_STANDARD_1080P", "INSTAGRAM_SQUARE"],
+        )
+    assert "already exists in state" in str(exc_info.value)

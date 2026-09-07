@@ -615,6 +615,8 @@ export interface RenderJob {
   timeline_version: number;
   approval_id: string;
   render_profile: string;
+  render_variant_key?: string;
+  batch_id?: string | null;
   status: RenderJobStatus;
   idempotency_key: string;
   output_asset_id?: string | null;
