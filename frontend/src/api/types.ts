@@ -645,3 +645,38 @@ export interface RenderJobListResponse {
   offset: number;
   limit: number;
 }
+
+export interface ExportPreset {
+  preset_id: string;
+  target_platform: string;
+  aspect_ratio: string;
+  width: number;
+  height: number;
+  video_codec: string;
+  video_profile: string;
+  audio_codec: string;
+  audio_bitrate_kbps: number;
+  video_bitrate_kbps: number;
+  estimated_cost_usd: number;
+  framing_mode: string;
+}
+
+export interface ExportBatchSubmitPayload {
+  timeline_id?: string;
+  preset_ids: string[];
+}
+
+export interface RenderBatch {
+  id: string;
+  project_id: string;
+  timeline_id: string;
+  timeline_version: number;
+  status: string;
+  total_variants: number;
+  completed_variants: number;
+  failed_variants: number;
+  estimated_total_cost_usd: number;
+  created_at: string;
+  updated_at: string;
+  child_jobs?: RenderJob[];
+}

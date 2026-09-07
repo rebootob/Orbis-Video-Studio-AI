@@ -40,18 +40,32 @@ class FFmpegRenderExecutor(RenderExecutor):
         audio_clips = timeline_spec.get("audio_clips", [])
         total_duration = float(timeline_spec.get("total_duration", 10.0))
         render_profile = str(timeline_spec.get("render_profile", "MASTER_HD")).upper()
+        render_meta = timeline_spec.get("render_metadata") or {}
+        preset_snapshot = timeline_spec.get("preset_snapshot") or render_meta.get("preset_snapshot") or {}
 
-        if render_profile not in ("MASTER", "MASTER_HD"):
-            raise ValueError(
-                f"Unsupported render_profile '{render_profile}'. WP017 supports MASTER render only. "
-                "Aspect/platform variants (VERTICAL_4K, SQUARE_SD, etc.) are deferred to WP018."
-            )
+        # Resolve width, height, bitrate, and framing mode
+        target_width = timeline_spec.get("target_width") or preset_snapshot.get("width")
+        target_height = timeline_spec.get("target_height") or preset_snapshot.get("height")
+        video_bitrate_kbps = timeline_spec.get("video_bitrate_kbps") or preset_snapshot.get("video_bitrate_kbps")
+        framing_mode = str(timeline_spec.get("framing_mode") or preset_snapshot.get("framing_mode") or "fit").lower()
+
+        if not target_width or not target_height:
+            if render_profile in ("YT_MASTER_4K", "3840X2160"):
+                target_width, target_height = 3840, 2160
+            elif render_profile in ("TIKTOK_REELS_9X16", "1080X1920"):
+                target_width, target_height = 1080, 1920
+            elif render_profile in ("INSTAGRAM_SQUARE", "1080X1080"):
+                target_width, target_height = 1080, 1080
+            elif render_profile in ("LMS_WEB_720P", "1280X720"):
+                target_width, target_height = 1280, 720
+            else:
+                target_width, target_height = 1920, 1080
+
+        width = int(target_width)
+        height = int(target_height)
 
         if progress_callback:
             progress_callback(30.0)
-
-        width = 1920
-        height = 1080
 
         cmd = [self.ffmpeg_path, "-y"]
 
@@ -85,11 +99,18 @@ class FFmpegRenderExecutor(RenderExecutor):
                 trim_in = float(p.get("trim_in", 0.0))
                 eff_dur = float(p.get("effective_duration", 4.0))
                 trim_out = trim_in + eff_dur
-                filter_parts.append(
-                    f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"trim=start={trim_in}:end={trim_out},setpts=PTS-STARTPTS[v{idx}]"
-                )
+                if any(kw in framing_mode for kw in ("crop", "fill")):
+                    filter_parts.append(
+                        f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                        f"crop={width}:{height},"
+                        f"trim=start={trim_in}:end={trim_out},setpts=PTS-STARTPTS[v{idx}]"
+                    )
+                else:
+                    filter_parts.append(
+                        f"[{idx}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                        f"trim=start={trim_in}:end={trim_out},setpts=PTS-STARTPTS[v{idx}]"
+                    )
 
             for i in range(len(valid_placements) - 1):
                 trans = str(valid_placements[i].get("transition_to_next", "CUT")).upper()
@@ -199,6 +220,11 @@ class FFmpegRenderExecutor(RenderExecutor):
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-tune", "zerolatency",
+        ])
+        if video_bitrate_kbps:
+            cmd.extend(["-b:v", f"{int(video_bitrate_kbps)}k"])
+
+        cmd.extend([
             "-c:a", "aac",
             "-t", str(final_timeline_duration),
             output_file_path,

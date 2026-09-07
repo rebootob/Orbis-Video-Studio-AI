@@ -16,8 +16,10 @@ import {
   ArrowDown,
   ChevronRight,
   Sparkles,
+  Share2,
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { ExportPresetsModal } from './ExportPresetsModal';
 import type {
   AssemblyTimeline,
   AssemblyScene,
@@ -53,6 +55,7 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
   // Checkpoint modal state
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [showCheckpointModal, setShowCheckpointModal] = useState(false);
+  const [showExportPresetsModal, setShowExportPresetsModal] = useState(false);
 
   // Move shot modal state
   const [moveShotTarget, setMoveShotTarget] = useState<AssemblyShotPlacement | null>(null);
@@ -331,6 +334,16 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
           >
             <Sparkles className="w-4 h-4 text-emerald-200" />
             {submittingRender ? 'Submitting Render...' : activeRenderJob ? `Render (${activeRenderJob.status})` : 'Render Master Video'}
+          </button>
+
+          <button
+            onClick={() => setShowExportPresetsModal(true)}
+            disabled={timeline?.status !== 'APPROVED'}
+            title={timeline?.status !== 'APPROVED' ? 'Timeline approval is required before exporting presets' : 'Export multi-output aspect ratio and platform presets'}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-medium rounded-xl shadow-lg shadow-blue-500/20 transition-all disabled:opacity-50"
+          >
+            <Share2 className="w-4 h-4 text-blue-200" />
+            Export Presets
           </button>
 
           <button
@@ -749,6 +762,13 @@ export const SimpleTimelinePanel: React.FC<SimpleTimelinePanelProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {showExportPresetsModal && (
+        <ExportPresetsModal
+          projectId={projectId}
+          onClose={() => setShowExportPresetsModal(false)}
+        />
       )}
     </div>
   );

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.assembly import AssemblyTimeline
     from app.models.qc import ApprovalRecord
     from app.models.asset import Asset
+    from app.models.render_batch import RenderBatch
 
 
 def utc_now() -> datetime:
@@ -35,10 +36,13 @@ class RenderJob(Base):
         Index("ix_render_jobs_idempotency_key", "idempotency_key"),
         Index("ix_render_jobs_project_id", "project_id"),
         Index("ix_render_jobs_timeline_id", "timeline_id"),
+        Index("ix_render_jobs_render_variant_key", "render_variant_key"),
+        Index("ix_render_jobs_batch_id", "batch_id"),
         Index(
-            "uq_render_jobs_active_timeline",
+            "uq_render_jobs_active_variant",
             "project_id",
             "timeline_id",
+            "render_variant_key",
             unique=True,
             sqlite_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
             postgresql_where=text("status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'RECONCILIATION_REQUIRED')"),
@@ -66,6 +70,14 @@ class RenderJob(Base):
     )
     render_profile: Mapped[str] = mapped_column(
         String(50), default="MASTER_HD", nullable=False
+    )
+    render_variant_key: Mapped[str] = mapped_column(
+        String(100), default="MASTER", nullable=False
+    )
+    batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("render_batches.id", ondelete="SET NULL"),
+        nullable=True,
     )
     status: Mapped[str] = mapped_column(
         String(50), default=RenderJobStatus.QUEUED.value, nullable=False
@@ -113,3 +125,4 @@ class RenderJob(Base):
     approval: Mapped["ApprovalRecord"] = relationship("ApprovalRecord")
     output_asset: Mapped[Optional["Asset"]] = relationship("Asset")
     current_usage_ledger: Mapped[Optional["UsageLedger"]] = relationship("UsageLedger", foreign_keys=[current_usage_ledger_id])
+    batch: Mapped[Optional["RenderBatch"]] = relationship("RenderBatch", back_populates="child_jobs")

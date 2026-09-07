@@ -163,6 +163,8 @@ class CloudRenderWorker:
                 "timeline_id": str(job.timeline_id),
                 "timeline_version": job.timeline_version,
                 "render_profile": job.render_profile,
+                "render_metadata": job.render_metadata or {},
+                "preset_snapshot": (job.render_metadata or {}).get("preset_snapshot"),
                 "total_duration": total_duration,
                 "placements": placements,
                 "audio_clips": audio_clips_list,
@@ -190,7 +192,14 @@ class CloudRenderWorker:
                     sha256_hash.update(chunk)
             checksum_sha256 = sha256_hash.hexdigest()
 
-            storage_key = f"projects/{job.project_id}/renders/render_{job.id}_v{job.timeline_version}.mp4"
+            is_export_variant = bool(job.render_variant_key and job.render_variant_key != "MASTER")
+            preset_id = (job.render_metadata or {}).get("preset_id", "export") if is_export_variant else None
+
+            if is_export_variant:
+                storage_key = f"projects/{job.project_id}/exports/v{job.timeline_version}/{preset_id}_{job.id}.mp4"
+            else:
+                storage_key = f"projects/{job.project_id}/renders/render_{job.id}_v{job.timeline_version}.mp4"
+
             bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-assets")
             self.storage_provider.ensure_bucket_exists(bucket)
 
@@ -204,15 +213,29 @@ class CloudRenderWorker:
             upload_succeeded = True
 
             # Create output Asset row
-            asset = RenderJobService.create_render_output_asset(
-                db=db,
-                project_id=job.project_id,
-                storage_bucket=bucket,
-                storage_key=storage_key,
-                duration_seconds=render_meta.get("duration_seconds", total_duration),
-                file_size_bytes=file_size,
-                checksum_sha256=checksum_sha256,
-            )
+            if is_export_variant:
+                asset = RenderJobService.create_render_output_asset(
+                    db=db,
+                    project_id=job.project_id,
+                    storage_bucket=bucket,
+                    storage_key=storage_key,
+                    duration_seconds=render_meta.get("duration_seconds", total_duration),
+                    file_size_bytes=file_size,
+                    checksum_sha256=checksum_sha256,
+                    name=f"export_{preset_id}_v{job.timeline_version}.mp4",
+                    asset_type="EXPORT_VIDEO",
+                    original_filename=f"{preset_id}.mp4",
+                )
+            else:
+                asset = RenderJobService.create_render_output_asset(
+                    db=db,
+                    project_id=job.project_id,
+                    storage_bucket=bucket,
+                    storage_key=storage_key,
+                    duration_seconds=render_meta.get("duration_seconds", total_duration),
+                    file_size_bytes=file_size,
+                    checksum_sha256=checksum_sha256,
+                )
 
             # Complete render job and reconcile usage ledger cost
             actual_cost = round(file_size / (1024 * 1024) * 0.01 + 0.05, 4)
