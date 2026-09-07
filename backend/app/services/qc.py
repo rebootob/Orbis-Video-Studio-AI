@@ -741,21 +741,46 @@ class QCService:
         findings = query.offset(offset).limit(eff_limit).all()
 
         finding_ids = [f.id for f in findings]
-        decisions = (
-            db.query(WarningDecision)
-            .filter(WarningDecision.finding_id.in_(finding_ids))
-            .order_by(WarningDecision.decision_sequence.asc(), WarningDecision.id.asc())
-            .all()
-        ) if finding_ids else []
+        latest_dec_map: Dict[uuid.UUID, Tuple[WarningDecision, int]] = {}
 
-        dec_history_map: Dict[uuid.UUID, List[WarningDecision]] = {}
-        for d in decisions:
-            dec_history_map.setdefault(d.finding_id, []).append(d)
+        if finding_ids:
+            # 1. Grouped subquery for MAX decision_sequence and COUNT per finding_id
+            stats_sub = (
+                db.query(
+                    WarningDecision.finding_id.label("finding_id"),
+                    func.max(WarningDecision.decision_sequence).label("max_seq"),
+                    func.count(WarningDecision.id).label("decision_count"),
+                )
+                .filter(WarningDecision.finding_id.in_(finding_ids))
+                .group_by(WarningDecision.finding_id)
+                .subquery()
+            )
+
+            # 2. Join to fetch ONLY the single latest WarningDecision row per finding
+            latest_rows = (
+                db.query(WarningDecision, stats_sub.c.decision_count)
+                .join(
+                    stats_sub,
+                    (WarningDecision.finding_id == stats_sub.c.finding_id)
+                    & (WarningDecision.decision_sequence == stats_sub.c.max_seq),
+                )
+                .all()
+            )
+
+            for wd, count in latest_rows:
+                latest_dec_map[wd.finding_id] = (wd, count)
 
         findings_read: List[QCFindingRead] = []
         for f in findings:
-            history = dec_history_map.get(f.id, [])
-            latest_dec = history[-1] if history else None
+            dec_info = latest_dec_map.get(f.id)
+            if dec_info:
+                latest_dec, count = dec_info
+                current_decision = WarningDecisionRead.model_validate(latest_dec)
+                decision_count = count
+            else:
+                current_decision = None
+                decision_count = 0
+
             findings_read.append(
                 QCFindingRead(
                     id=f.id,
@@ -772,8 +797,8 @@ class QCService:
                     target_label=f.target_label,
                     action_type=f.action_type,
                     created_at=f.created_at,
-                    current_decision=WarningDecisionRead.model_validate(latest_dec) if latest_dec else None,
-                    decision_count=len(history),
+                    current_decision=current_decision,
+                    decision_count=decision_count,
                 )
             )
 
