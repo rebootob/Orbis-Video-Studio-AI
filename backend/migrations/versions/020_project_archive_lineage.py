@@ -63,12 +63,22 @@ def upgrade():
         sqlite_where=sa.text("status IN ('PENDING', 'CLAIMED', 'SUBMITTING', 'SUBMITTED', 'POLLING', 'QUEUED', 'PROCESSING', 'CANCELLING', 'RECONCILIATION_REQUIRED') AND imported_historical IS NOT TRUE"),
     )
 
-    # 4. Usage ledger table lineage
+    # 4. Usage ledger table lineage and provider event index swap
     with op.batch_alter_table("usage_ledger") as batch_op:
         batch_op.add_column(
             sa.Column("imported_historical", sa.Boolean(), nullable=False, server_default=sa.text("false"))
         )
         batch_op.create_index("ix_usage_ledger_imported_historical", ["imported_historical"])
+
+    op.drop_index("uq_usage_ledger_provider_event", table_name="usage_ledger")
+    op.create_index(
+        "uq_usage_ledger_provider_event",
+        "usage_ledger",
+        ["provider", "provider_event_id"],
+        unique=True,
+        postgresql_where=sa.text("provider_event_id IS NOT NULL AND imported_historical IS NOT TRUE"),
+        sqlite_where=sa.text("provider_event_id IS NOT NULL AND imported_historical IS NOT TRUE"),
+    )
 
 
 def downgrade():
@@ -136,7 +146,16 @@ def downgrade():
         batch_op.drop_column("execution_disabled")
         batch_op.drop_column("imported_historical")
 
-    # Revert usage_ledger
+    # Revert usage_ledger index and columns
+    op.drop_index("uq_usage_ledger_provider_event", table_name="usage_ledger")
+    op.create_index(
+        "uq_usage_ledger_provider_event",
+        "usage_ledger",
+        ["provider", "provider_event_id"],
+        unique=True,
+        postgresql_where=sa.text("provider_event_id IS NOT NULL"),
+        sqlite_where=sa.text("provider_event_id IS NOT NULL"),
+    )
     with op.batch_alter_table("usage_ledger") as batch_op:
         batch_op.drop_index("ix_usage_ledger_imported_historical")
         batch_op.drop_column("imported_historical")

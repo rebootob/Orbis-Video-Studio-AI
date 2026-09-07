@@ -51,8 +51,8 @@ class UsageLedger(Base):
             "provider",
             "provider_event_id",
             unique=True,
-            postgresql_where=text("provider_event_id IS NOT NULL"),
-            sqlite_where=text("provider_event_id IS NOT NULL"),
+            postgresql_where=text("provider_event_id IS NOT NULL AND imported_historical IS NOT TRUE"),
+            sqlite_where=text("provider_event_id IS NOT NULL AND imported_historical IS NOT TRUE"),
         ),
     )
 

@@ -142,6 +142,554 @@ class RemapContext:
         return self.id_map.get(old_entity_id, old_entity_id)
 
 
+class ArchivePreflightError(ArchiveImportError):
+    """Raised when preflight entity graph validation or asset completeness checks fail."""
+    pass
+
+
+class ArchivePreflightValidator:
+    """Canonical Phase-3 Preflight Validator for .orbis archives.
+
+    Parses and validates the entire bounded entity graph and asset completeness
+    strictly BEFORE any database mutation or storage upload.
+    """
+
+    SUPPORTED_LOCK_TYPES = {
+        "PROJECT",
+        "STORY",
+        "SCENE",
+        "SHOT",
+        "ASSET",
+        "CHARACTER_BIBLE",
+        "LOCATION_BIBLE",
+        "STYLE_BIBLE",
+        "BRAND_BIBLE",
+        "AUDIO_PLAN",
+        "TIMELINE",
+        "ASSEMBLY_TIMELINE",
+        "ASSEMBLY_SCENE",
+        "ASSEMBLY_SHOT_PLACEMENT",
+    }
+
+    REQUIRED_ENTITY_FILES = [
+        "project.json",
+        "entities/story.json",
+        "entities/scenes.json",
+        "entities/shots.json",
+        "entities/assets.json",
+        "assets/manifest.json",
+    ]
+
+    def __init__(self, temp_dir: str):
+        self.temp_dir = temp_dir
+        self.seen_ids: Dict[uuid.UUID, str] = {}
+
+        # Known ID sets
+        self.project_id: Optional[uuid.UUID] = None
+        self.story_ids: Set[uuid.UUID] = set()
+        self.story_version_ids: Set[uuid.UUID] = set()
+        self.scene_ids: Set[uuid.UUID] = set()
+        self.shot_ids: Set[uuid.UUID] = set()
+        self.asset_ids: Set[uuid.UUID] = set()
+        self.doc_extraction_ids: Set[uuid.UUID] = set()
+        self.reference_ids: Set[uuid.UUID] = set()
+        self.bible_ids: Set[uuid.UUID] = set()
+        self.lock_ids: Set[uuid.UUID] = set()
+        self.audio_plan_ids: Set[uuid.UUID] = set()
+        self.audio_plan_version_ids: Set[uuid.UUID] = set()
+        self.audio_clip_ids: Set[uuid.UUID] = set()
+        self.audio_clip_history_ids: Set[uuid.UUID] = set()
+        self.timeline_ids: Set[uuid.UUID] = set()
+        self.assembly_scene_ids: Set[uuid.UUID] = set()
+        self.assembly_placement_ids: Set[uuid.UUID] = set()
+        self.checkpoint_ids: Set[uuid.UUID] = set()
+        self.qc_run_ids: Set[uuid.UUID] = set()
+        self.qc_finding_ids: Set[uuid.UUID] = set()
+        self.warning_decision_ids: Set[uuid.UUID] = set()
+        self.approval_ids: Set[uuid.UUID] = set()
+        self.render_batch_ids: Set[uuid.UUID] = set()
+        self.render_job_ids: Set[uuid.UUID] = set()
+        self.generation_job_ids: Set[uuid.UUID] = set()
+        self.batch_run_ids: Set[uuid.UUID] = set()
+        self.batch_run_item_ids: Set[uuid.UUID] = set()
+        self.usage_ledger_ids: Set[uuid.UUID] = set()
+        self.ledger_adjustment_ids: Set[uuid.UUID] = set()
+
+    def _read_json(self, rel_path: str, required: bool = True) -> Any:
+        full_path = os.path.join(self.temp_dir, rel_path)
+        if not os.path.exists(full_path):
+            if required:
+                raise ArchivePreflightError(f"Required archive file missing: '{rel_path}'")
+            return None
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            raise ArchivePreflightError(f"Invalid JSON in '{rel_path}': {str(e)}") from e
+
+    def _register_id(self, entity_type: str, raw_id: Any) -> uuid.UUID:
+        uid = parse_uuid(raw_id)
+        if not uid:
+            raise ArchivePreflightError(f"Missing or invalid UUID '{raw_id}' in entity '{entity_type}'")
+        if uid in self.seen_ids:
+            raise ArchivePreflightError(
+                f"Duplicate entity ID '{uid}' detected in '{entity_type}' (already defined in '{self.seen_ids[uid]}')"
+            )
+        self.seen_ids[uid] = entity_type
+        return uid
+
+    def validate_graph(self) -> None:
+        """Runs the complete Phase-3 graph validation and asset completeness inspection."""
+        # 1. Check required entity files
+        for req_f in self.REQUIRED_ENTITY_FILES:
+            full_p = os.path.join(self.temp_dir, req_f)
+            if not os.path.exists(full_p):
+                raise ArchivePreflightError(f"Required archive file missing: '{req_f}'")
+
+        # 2. Project
+        project_raw = self._read_json("project.json", required=True)
+        if not isinstance(project_raw, dict):
+            raise ArchivePreflightError("project.json must contain a JSON object")
+        self.project_id = self._register_id("PROJECT", project_raw.get("id"))
+
+        # 3. Read and register IDs across all entities
+        # Story
+        story_data = self._read_json("entities/story.json", required=True)
+        if isinstance(story_data, dict):
+            st = story_data.get("story")
+            if st and isinstance(st, dict):
+                self.story_ids.add(self._register_id("STORY", st.get("id")))
+            for sv in story_data.get("story_versions", []):
+                self.story_version_ids.add(self._register_id("STORY_VERSION", sv.get("id")))
+
+        # Scenes
+        scenes_data = self._read_json("entities/scenes.json", required=True)
+        if not isinstance(scenes_data, list):
+            raise ArchivePreflightError("entities/scenes.json must contain a list")
+        for sc in scenes_data:
+            self.scene_ids.add(self._register_id("SCENE", sc.get("id")))
+
+        # Shots
+        shots_data = self._read_json("entities/shots.json", required=True)
+        if not isinstance(shots_data, list):
+            raise ArchivePreflightError("entities/shots.json must contain a list")
+        for sh in shots_data:
+            self.shot_ids.add(self._register_id("SHOT", sh.get("id")))
+
+        # Assets
+        assets_data = self._read_json("entities/assets.json", required=True)
+        if not isinstance(assets_data, list):
+            raise ArchivePreflightError("entities/assets.json must contain a list")
+        for a in assets_data:
+            self.asset_ids.add(self._register_id("ASSET", a.get("id")))
+
+        # Document Extractions
+        doc_data = self._read_json("entities/document_extractions.json", required=False) or []
+        for d in doc_data:
+            self.doc_extraction_ids.add(self._register_id("DOCUMENT_EXTRACTION", d.get("id")))
+
+        # Reference Library
+        ref_data = self._read_json("entities/reference_library.json", required=False) or {}
+        for pr in ref_data.get("project_references", []):
+            self.reference_ids.add(self._register_id("PROJECT_REFERENCE", pr.get("id")))
+        for cb in ref_data.get("character_bibles", []):
+            self.bible_ids.add(self._register_id("CHARACTER_BIBLE", cb.get("id")))
+        for lb in ref_data.get("location_bibles", []):
+            self.bible_ids.add(self._register_id("LOCATION_BIBLE", lb.get("id")))
+        for sb in ref_data.get("style_bibles", []):
+            self.bible_ids.add(self._register_id("STYLE_BIBLE", sb.get("id")))
+        for bb in ref_data.get("brand_bibles", []):
+            self.bible_ids.add(self._register_id("BRAND_BIBLE", bb.get("id")))
+
+        # Asset Locks
+        locks_data = self._read_json("entities/asset_locks.json", required=False) or []
+        for lk in locks_data:
+            self.lock_ids.add(self._register_id("ASSET_LOCK", lk.get("id")))
+
+        # Audio
+        audio_data = self._read_json("entities/audio.json", required=False) or {}
+        for ap in audio_data.get("audio_plans", []):
+            self.audio_plan_ids.add(self._register_id("AUDIO_PLAN", ap.get("id")))
+        for apv in audio_data.get("audio_plan_versions", []):
+            self.audio_plan_version_ids.add(self._register_id("AUDIO_PLAN_VERSION", apv.get("id")))
+        for ac in audio_data.get("audio_clips", []):
+            self.audio_clip_ids.add(self._register_id("AUDIO_CLIP", ac.get("id")))
+        for ach in audio_data.get("audio_clip_histories", []):
+            self.audio_clip_history_ids.add(self._register_id("AUDIO_CLIP_HISTORY", ach.get("id")))
+
+        # Assembly
+        assembly_data = self._read_json("entities/assembly.json", required=False) or {}
+        for tm in assembly_data.get("timelines", []):
+            self.timeline_ids.add(self._register_id("TIMELINE", tm.get("id")))
+        for asc in assembly_data.get("assembly_scenes", []):
+            self.assembly_scene_ids.add(self._register_id("ASSEMBLY_SCENE", asc.get("id")))
+        for asp in assembly_data.get("assembly_shot_placements", []):
+            self.assembly_placement_ids.add(self._register_id("ASSEMBLY_SHOT_PLACEMENT", asp.get("id")))
+        for chk in assembly_data.get("checkpoints", []):
+            self.checkpoint_ids.add(self._register_id("TIMELINE_CHECKPOINT", chk.get("id")))
+
+        # QC
+        qc_data = self._read_json("entities/qc.json", required=False) or {}
+        for qr in qc_data.get("qc_runs", []):
+            self.qc_run_ids.add(self._register_id("QC_RUN", qr.get("id")))
+        for qf in qc_data.get("qc_findings", []):
+            self.qc_finding_ids.add(self._register_id("QC_FINDING", qf.get("id")))
+        for wd in qc_data.get("warning_decisions", []):
+            self.warning_decision_ids.add(self._register_id("WARNING_DECISION", wd.get("id")))
+        for app in qc_data.get("approvals", []):
+            self.approval_ids.add(self._register_id("APPROVAL_RECORD", app.get("id")))
+
+        # Render Jobs
+        rj_data = self._read_json("entities/render_jobs.json", required=False) or {}
+        for rb in rj_data.get("render_batches", []):
+            self.render_batch_ids.add(self._register_id("RENDER_BATCH", rb.get("id")))
+        for rj in rj_data.get("render_jobs", []):
+            self.render_job_ids.add(self._register_id("RENDER_JOB", rj.get("id")))
+
+        # Generation Jobs
+        gj_data = self._read_json("entities/generation_jobs.json", required=False) or {}
+        for gj in gj_data.get("generation_jobs", []):
+            self.generation_job_ids.add(self._register_id("GENERATION_JOB", gj.get("id")))
+        for br in gj_data.get("batch_runs", []):
+            self.batch_run_ids.add(self._register_id("BATCH_RUN", br.get("id")))
+        for bri in gj_data.get("batch_run_items", []):
+            self.batch_run_item_ids.add(self._register_id("BATCH_RUN_ITEM", bri.get("id")))
+
+        # Usage Ledger
+        ul_data = self._read_json("history/usage_ledger.json", required=False) or {}
+        for ul in ul_data.get("entries", []):
+            self.usage_ledger_ids.add(self._register_id("USAGE_LEDGER", ul.get("id")))
+        for adj in ul_data.get("adjustments", []):
+            self.ledger_adjustment_ids.add(self._register_id("LEDGER_ADJUSTMENT", adj.get("id")))
+
+        # 4. Check project_id integrity across all entities
+        def assert_project_id(rec: Dict[str, Any], entity_name: str) -> None:
+            if "project_id" in rec and rec["project_id"] is not None:
+                pid = parse_uuid(rec["project_id"])
+                if pid != self.project_id:
+                    raise ArchivePreflightError(
+                        f"Foreign project_id '{pid}' in {entity_name} does not match archive project_id '{self.project_id}'"
+                    )
+
+        if isinstance(story_data, dict):
+            st = story_data.get("story")
+            if st and isinstance(st, dict):
+                assert_project_id(st, "Story")
+            for sv in story_data.get("story_versions", []):
+                assert_project_id(sv, "StoryVersion")
+        for sc in scenes_data:
+            assert_project_id(sc, "Scene")
+        for a in assets_data:
+            assert_project_id(a, "Asset")
+        for pr in ref_data.get("project_references", []):
+            assert_project_id(pr, "ProjectReference")
+        for cb in ref_data.get("character_bibles", []):
+            assert_project_id(cb, "CharacterBible")
+        for lb in ref_data.get("location_bibles", []):
+            assert_project_id(lb, "LocationBible")
+        for sb in ref_data.get("style_bibles", []):
+            assert_project_id(sb, "StyleBible")
+        for bb in ref_data.get("brand_bibles", []):
+            assert_project_id(bb, "BrandBible")
+        for lk in locks_data:
+            assert_project_id(lk, "AssetLock")
+        for ap in audio_data.get("audio_plans", []):
+            assert_project_id(ap, "AudioPlan")
+        for ac in audio_data.get("audio_clips", []):
+            assert_project_id(ac, "AudioClip")
+        for tm in assembly_data.get("timelines", []):
+            assert_project_id(tm, "AssemblyTimeline")
+        for qr in qc_data.get("qc_runs", []):
+            assert_project_id(qr, "QCRun")
+        for app in qc_data.get("approvals", []):
+            assert_project_id(app, "ApprovalRecord")
+        for rb in rj_data.get("render_batches", []):
+            assert_project_id(rb, "RenderBatch")
+        for rj in rj_data.get("render_jobs", []):
+            assert_project_id(rj, "RenderJob")
+        for br in gj_data.get("batch_runs", []):
+            assert_project_id(br, "BatchRun")
+        for ul in ul_data.get("entries", []):
+            assert_project_id(ul, "UsageLedger")
+
+        # 5. Check Foreign Key graph integrity
+        # StoryVersion -> Story
+        if isinstance(story_data, dict):
+            for sv in story_data.get("story_versions", []):
+                sid = parse_uuid(sv.get("story_id"))
+                if sid and sid not in self.story_ids:
+                    raise ArchivePreflightError(f"StoryVersion '{sv.get('id')}' references nonexistent Story '{sid}'")
+
+        # Shots -> Scene, Assets
+        for sh in shots_data:
+            scid = parse_uuid(sh.get("scene_id"))
+            if not scid or scid not in self.scene_ids:
+                raise ArchivePreflightError(f"Shot '{sh.get('id')}' references nonexistent Scene '{sh.get('scene_id')}'")
+            if sh.get("source_asset_id"):
+                aid = parse_uuid(sh["source_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"Shot '{sh.get('id')}' references nonexistent source Asset '{sh['source_asset_id']}'")
+            if sh.get("keyframe_asset_id"):
+                aid = parse_uuid(sh["keyframe_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"Shot '{sh.get('id')}' references nonexistent keyframe Asset '{sh['keyframe_asset_id']}'")
+
+        # DocumentExtractions -> Asset
+        for d in doc_data:
+            aid = parse_uuid(d.get("asset_id"))
+            if not aid or aid not in self.asset_ids:
+                raise ArchivePreflightError(f"DocumentExtraction '{d.get('id')}' references nonexistent Asset '{d.get('asset_id')}'")
+
+        # Reference Library -> Assets
+        for pr in ref_data.get("project_references", []):
+            aid = parse_uuid(pr.get("asset_id"))
+            if not aid or aid not in self.asset_ids:
+                raise ArchivePreflightError(f"ProjectReference '{pr.get('id')}' references nonexistent Asset '{pr.get('asset_id')}'")
+        for bible_name, items in [
+            ("CharacterBible", ref_data.get("character_bibles", [])),
+            ("LocationBible", ref_data.get("location_bibles", [])),
+            ("StyleBible", ref_data.get("style_bibles", [])),
+        ]:
+            for item in items:
+                for ref_aid in (item.get("reference_asset_ids") or []):
+                    aid = parse_uuid(ref_aid)
+                    if not aid or aid not in self.asset_ids:
+                        raise ArchivePreflightError(f"{bible_name} '{item.get('id')}' references nonexistent Asset '{ref_aid}'")
+        for bb in ref_data.get("brand_bibles", []):
+            if bb.get("logo_asset_id"):
+                aid = parse_uuid(bb["logo_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"BrandBible '{bb.get('id')}' references nonexistent logo Asset '{bb['logo_asset_id']}'")
+
+        # Asset Locks -> polymorphic target
+        for lk in locks_data:
+            ent_type = (lk.get("entity_type") or "").upper()
+            if ent_type not in self.SUPPORTED_LOCK_TYPES:
+                raise ArchivePreflightError(f"AssetLock '{lk.get('id')}' specifies unsupported entity_type '{ent_type}'")
+            eid = parse_uuid(lk.get("entity_id"))
+            if not eid:
+                raise ArchivePreflightError(f"AssetLock '{lk.get('id')}' has invalid entity_id '{lk.get('entity_id')}'")
+            valid_target = False
+            if ent_type == "PROJECT" and eid == self.project_id:
+                valid_target = True
+            elif ent_type == "STORY" and eid in self.story_ids:
+                valid_target = True
+            elif ent_type == "SCENE" and eid in self.scene_ids:
+                valid_target = True
+            elif ent_type == "SHOT" and eid in self.shot_ids:
+                valid_target = True
+            elif ent_type == "ASSET" and eid in self.asset_ids:
+                valid_target = True
+            elif ent_type in ("CHARACTER_BIBLE", "LOCATION_BIBLE", "STYLE_BIBLE", "BRAND_BIBLE") and eid in self.bible_ids:
+                valid_target = True
+            elif ent_type == "AUDIO_PLAN" and eid in self.audio_plan_ids:
+                valid_target = True
+            elif ent_type in ("TIMELINE", "ASSEMBLY_TIMELINE") and eid in self.timeline_ids:
+                valid_target = True
+            elif ent_type == "ASSEMBLY_SCENE" and eid in self.assembly_scene_ids:
+                valid_target = True
+            elif ent_type == "ASSEMBLY_SHOT_PLACEMENT" and eid in self.assembly_placement_ids:
+                valid_target = True
+
+            if not valid_target:
+                raise ArchivePreflightError(f"AssetLock '{lk.get('id')}' references nonexistent {ent_type} '{eid}'")
+
+        # Audio -> plans, scenes, shots, assets
+        for apv in audio_data.get("audio_plan_versions", []):
+            pid = parse_uuid(apv.get("audio_plan_id"))
+            if not pid or pid not in self.audio_plan_ids:
+                raise ArchivePreflightError(f"AudioPlanVersion '{apv.get('id')}' references nonexistent AudioPlan '{pid}'")
+        for ac in audio_data.get("audio_clips", []):
+            if ac.get("scene_id"):
+                scid = parse_uuid(ac["scene_id"])
+                if not scid or scid not in self.scene_ids:
+                    raise ArchivePreflightError(f"AudioClip '{ac.get('id')}' references nonexistent Scene '{scid}'")
+            if ac.get("shot_id"):
+                shid = parse_uuid(ac["shot_id"])
+                if not shid or shid not in self.shot_ids:
+                    raise ArchivePreflightError(f"AudioClip '{ac.get('id')}' references nonexistent Shot '{shid}'")
+            if ac.get("asset_id"):
+                aid = parse_uuid(ac["asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"AudioClip '{ac.get('id')}' references nonexistent Asset '{aid}'")
+        for ach in audio_data.get("audio_clip_histories", []):
+            cid = parse_uuid(ach.get("audio_clip_id"))
+            if not cid or cid not in self.audio_clip_ids:
+                raise ArchivePreflightError(f"AudioClipHistory '{ach.get('id')}' references nonexistent AudioClip '{cid}'")
+            if ach.get("asset_id"):
+                aid = parse_uuid(ach["asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"AudioClipHistory '{ach.get('id')}' references nonexistent Asset '{aid}'")
+
+        # Assembly -> timelines, scenes, shots, assets
+        for asc in assembly_data.get("assembly_scenes", []):
+            tid = parse_uuid(asc.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"AssemblyScene '{asc.get('id')}' references nonexistent Timeline '{tid}'")
+            scid = parse_uuid(asc.get("scene_id"))
+            if not scid or scid not in self.scene_ids:
+                raise ArchivePreflightError(f"AssemblyScene '{asc.get('id')}' references nonexistent Scene '{scid}'")
+        for asp in assembly_data.get("assembly_shot_placements", []):
+            tid = parse_uuid(asp.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent Timeline '{tid}'")
+            asid = parse_uuid(asp.get("assembly_scene_id"))
+            if not asid or asid not in self.assembly_scene_ids:
+                raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent AssemblyScene '{asid}'")
+            shid = parse_uuid(asp.get("shot_id"))
+            if not shid or shid not in self.shot_ids:
+                raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent Shot '{shid}'")
+            if asp.get("asset_id"):
+                aid = parse_uuid(asp["asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent Asset '{aid}'")
+        for chk in assembly_data.get("checkpoints", []):
+            tid = parse_uuid(chk.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"TimelineCheckpoint '{chk.get('id')}' references nonexistent Timeline '{tid}'")
+
+        # QC -> runs, findings, decisions, approvals
+        for qr in qc_data.get("qc_runs", []):
+            tid = parse_uuid(qr.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"QCRun '{qr.get('id')}' references nonexistent Timeline '{tid}'")
+        for qf in qc_data.get("qc_findings", []):
+            qrid = parse_uuid(qf.get("qc_run_id"))
+            if not qrid or qrid not in self.qc_run_ids:
+                raise ArchivePreflightError(f"QCFinding '{qf.get('id')}' references nonexistent QCRun '{qrid}'")
+        for wd in qc_data.get("warning_decisions", []):
+            fid = parse_uuid(wd.get("finding_id"))
+            if not fid or fid not in self.qc_finding_ids:
+                raise ArchivePreflightError(f"WarningDecision '{wd.get('id')}' references nonexistent QCFinding '{fid}'")
+        for app in qc_data.get("approvals", []):
+            tid = parse_uuid(app.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"ApprovalRecord '{app.get('id')}' references nonexistent Timeline '{tid}'")
+            qrid = parse_uuid(app.get("qc_run_id"))
+            if not qrid or qrid not in self.qc_run_ids:
+                raise ArchivePreflightError(f"ApprovalRecord '{app.get('id')}' references nonexistent QCRun '{qrid}'")
+
+        # Render Jobs
+        for rb in rj_data.get("render_batches", []):
+            tid = parse_uuid(rb.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"RenderBatch '{rb.get('id')}' references nonexistent Timeline '{tid}'")
+        for rj in rj_data.get("render_jobs", []):
+            tid = parse_uuid(rj.get("timeline_id"))
+            if not tid or tid not in self.timeline_ids:
+                raise ArchivePreflightError(f"RenderJob '{rj.get('id')}' references nonexistent Timeline '{tid}'")
+            if rj.get("approval_id"):
+                appid = parse_uuid(rj["approval_id"])
+                if not appid or appid not in self.approval_ids:
+                    raise ArchivePreflightError(f"RenderJob '{rj.get('id')}' references nonexistent ApprovalRecord '{appid}'")
+            if rj.get("batch_id"):
+                bid = parse_uuid(rj["batch_id"])
+                if not bid or bid not in self.render_batch_ids:
+                    raise ArchivePreflightError(f"RenderJob '{rj.get('id')}' references nonexistent RenderBatch '{bid}'")
+            if rj.get("output_asset_id"):
+                aid = parse_uuid(rj["output_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"RenderJob '{rj.get('id')}' references nonexistent output Asset '{aid}'")
+            if rj.get("current_usage_ledger_id"):
+                lid = parse_uuid(rj["current_usage_ledger_id"])
+                if not lid or lid not in self.usage_ledger_ids:
+                    raise ArchivePreflightError(f"RenderJob '{rj.get('id')}' references nonexistent UsageLedger '{lid}'")
+
+        # Generation Jobs
+        for gj in gj_data.get("generation_jobs", []):
+            shid = parse_uuid(gj.get("shot_id"))
+            if not shid or shid not in self.shot_ids:
+                raise ArchivePreflightError(f"GenerationJob '{gj.get('id')}' references nonexistent Shot '{shid}'")
+            if gj.get("output_asset_id"):
+                aid = parse_uuid(gj["output_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"GenerationJob '{gj.get('id')}' references nonexistent output Asset '{aid}'")
+        for bri in gj_data.get("batch_run_items", []):
+            brid = parse_uuid(bri.get("batch_run_id"))
+            if not brid or brid not in self.batch_run_ids:
+                raise ArchivePreflightError(f"BatchRunItem '{bri.get('id')}' references nonexistent BatchRun '{brid}'")
+            shid = parse_uuid(bri.get("shot_id"))
+            if not shid or shid not in self.shot_ids:
+                raise ArchivePreflightError(f"BatchRunItem '{bri.get('id')}' references nonexistent Shot '{shid}'")
+            if bri.get("job_id"):
+                jid = parse_uuid(bri["job_id"])
+                if not jid or jid not in self.generation_job_ids:
+                    raise ArchivePreflightError(f"BatchRunItem '{bri.get('id')}' references nonexistent GenerationJob '{jid}'")
+
+        # Usage Ledger
+        for ul in ul_data.get("entries", []):
+            if ul.get("shot_id"):
+                shid = parse_uuid(ul["shot_id"])
+                if not shid or shid not in self.shot_ids:
+                    raise ArchivePreflightError(f"UsageLedger '{ul.get('id')}' references nonexistent Shot '{shid}'")
+            if ul.get("job_id"):
+                jid = parse_uuid(ul["job_id"])
+                if not jid or jid not in self.generation_job_ids:
+                    raise ArchivePreflightError(f"UsageLedger '{ul.get('id')}' references nonexistent GenerationJob '{jid}'")
+            if ul.get("render_job_id"):
+                rjid = parse_uuid(ul["render_job_id"])
+                if not rjid or rjid not in self.render_job_ids:
+                    raise ArchivePreflightError(f"UsageLedger '{ul.get('id')}' references nonexistent RenderJob '{rjid}'")
+        for adj in ul_data.get("adjustments", []):
+            lid = parse_uuid(adj.get("ledger_id") or adj.get("ledger_entry_id"))
+            if not lid or lid not in self.usage_ledger_ids:
+                raise ArchivePreflightError(f"LedgerAdjustment '{adj.get('id')}' references nonexistent UsageLedger '{lid}'")
+
+        # 6. Asset Completeness (Requirement 3)
+        assets_manifest_raw = self._read_json("assets/manifest.json", required=True)
+        if not isinstance(assets_manifest_raw, dict):
+            raise ArchivePreflightError("assets/manifest.json must contain a JSON object catalog")
+
+        for a_raw in assets_data:
+            aid_str = str(a_raw["id"])
+            if aid_str not in assets_manifest_raw:
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' declared in assets.json has no entry in assets/manifest.json"
+                )
+            cat_entry = assets_manifest_raw[aid_str]
+            rel_path = cat_entry.get("relative_path")
+            if not rel_path:
+                raise ArchivePreflightError(f"Asset '{aid_str}' catalog entry missing relative_path")
+
+            payload_path = os.path.join(self.temp_dir, rel_path)
+            if not os.path.isfile(payload_path):
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' binary payload missing at relative path '{rel_path}'"
+                )
+
+            actual_size = os.path.getsize(payload_path)
+            cat_size = cat_entry.get("file_size_bytes")
+            row_size = a_raw.get("file_size_bytes")
+            if cat_size is not None and actual_size != cat_size:
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' size mismatch: payload ({actual_size} bytes) != manifest ({cat_size} bytes)"
+                )
+            if row_size is not None and actual_size != row_size:
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' size mismatch: payload ({actual_size} bytes) != asset row ({row_size} bytes)"
+                )
+
+            actual_sha = ArchiveChecksumService.compute_sha256_file(payload_path)
+            cat_sha = cat_entry.get("sha256")
+            row_sha = a_raw.get("checksum_sha256")
+            if cat_sha and actual_sha.lower() != cat_sha.lower():
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' checksum mismatch: payload ({actual_sha}) != manifest ({cat_sha})"
+                )
+            if row_sha and actual_sha.lower() != row_sha.lower():
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' checksum mismatch: payload ({actual_sha}) != asset row ({row_sha})"
+                )
+
+        # Check that manifest entries all correspond to declared assets
+        for aid_str, cat_entry in assets_manifest_raw.items():
+            aid = parse_uuid(aid_str)
+            if not aid or aid not in self.asset_ids:
+                raise ArchivePreflightError(
+                    f"Asset '{aid_str}' in assets/manifest.json is not declared in entities/assets.json"
+                )
+
+
 class ProjectImportService:
     """Orchestrates safe validation and atomic execution of project imports."""
 
@@ -177,7 +725,11 @@ class ProjectImportService:
                     f"Archive format version '{archive_version_str}' is not supported (supported: 1.x)"
                 )
 
-            # Phase 3: Collision check
+            # Phase 3: Canonical Graph & Asset Completeness Preflight
+            preflight = ArchivePreflightValidator(temp_dir)
+            preflight.validate_graph()
+
+            # Collision check
             orig_proj_id_str = manifest.get("project", {}).get("original_project_id")
             orig_proj_id = parse_uuid(orig_proj_id_str)
             collision = False
@@ -254,6 +806,11 @@ class ProjectImportService:
                     f"Cannot restore: project '{orig_proj_id}' already exists in database. "
                     "Use CLONE mode to import as a new project."
                 )
+
+            # Phase 3: Canonical Graph & Asset Completeness Preflight
+            # Strictly executed BEFORE any DB or storage mutation
+            preflight = ArchivePreflightValidator(temp_dir)
+            preflight.validate_graph()
 
             # Phase 4: Staged DB mutation & storage upload
             return self._stage_and_commit(
@@ -639,7 +1196,6 @@ class ProjectImportService:
                         version=tm.get("version", 1),
                         is_active=tm.get("is_active", False),
                         status=tm.get("status", "DRAFT"),
-                        total_duration_seconds=tm.get("total_duration_seconds", 0.0),
                         created_at=parse_datetime(tm.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(tm.get("updated_at")) or datetime.now(timezone.utc),
                     ))
@@ -691,7 +1247,9 @@ class ProjectImportService:
                         timeline_id=remap.get_or_create(parse_uuid(qr["timeline_id"]), "TIMELINE"),
                         timeline_version=qr.get("timeline_version", 1),
                         status=qr.get("status", "PASSED"),
-                        findings_count=qr.get("findings_count", 0),
+                        blocker_count=qr.get("blocker_count", 0),
+                        warning_count=qr.get("warning_count", 0),
+                        actor=qr.get("actor", "system"),
                         created_at=parse_datetime(qr.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(qr.get("updated_at")) or datetime.now(timezone.utc),
                     ))
@@ -723,11 +1281,9 @@ class ProjectImportService:
                         timeline_version=app.get("timeline_version", 1),
                         qc_run_id=remap.get_or_create(parse_uuid(app["qc_run_id"]), "QC_RUN"),
                         status=app.get("status", "APPROVED"),
-                        approved_by=app.get("approved_by", "operator"),
+                        actor=app.get("actor") or app.get("approved_by", "USER"),
                         notes=app.get("notes"),
                         approved_at=parse_datetime(app.get("approved_at")) or datetime.now(timezone.utc),
-                        created_at=parse_datetime(app.get("created_at")) or datetime.now(timezone.utc),
-                        updated_at=parse_datetime(app.get("updated_at")) or datetime.now(timezone.utc),
                     ))
 
             # 12. Render Batches & Render Jobs (PRESERVE STATUS, FENCE WITH imported_historical=True)
@@ -750,29 +1306,29 @@ class ProjectImportService:
                         updated_at=parse_datetime(rb.get("updated_at")) or datetime.now(timezone.utc),
                     ))
                 for rj in rjd.get("render_jobs", []):
-                    # Preserve original status, but mark execution_disabled and clear worker leases
+                    # Preserve original status and values, clear worker leases and tag historical
                     db.add(RenderJob(
                         id=remap.get_or_create(parse_uuid(rj["id"]), "RENDER_JOB"),
                         project_id=new_project_id,
                         timeline_id=remap.get_or_create(parse_uuid(rj["timeline_id"]), "TIMELINE"),
                         timeline_version=rj.get("timeline_version", 1),
-                        approval_id=remap.get_or_create(parse_uuid(rj["approval_id"]), "APPROVAL_RECORD"),
+                        approval_id=remap.get_or_create(parse_uuid(rj.get("approval_id")), "APPROVAL_RECORD"),
                         batch_id=remap.get_or_create(parse_uuid(rj.get("batch_id")), "RENDER_BATCH"),
                         render_profile=rj.get("render_profile", "MASTER_HD"),
                         render_variant_key=rj.get("render_variant_key", "MASTER"),
                         status=rj.get("status", "COMPLETED"),
-                        idempotency_key=f"imported_{rj.get('idempotency_key') or uuid.uuid4()}",
+                        idempotency_key=rj["idempotency_key"],
                         output_asset_id=remap.get_or_create(parse_uuid(rj.get("output_asset_id")), "ASSET"),
-                        progress=rj.get("progress", 1.0),
+                        progress=float(rj.get("progress", 1.0)),
                         claimed_by=None,
                         claim_token=None,
                         claim_expires_at=None,
                         retry_count=rj.get("retry_count", 0),
                         max_retries=rj.get("max_retries", 3),
-                        estimated_cost_usd=rj.get("estimated_cost_usd", 0.0),
-                        actual_cost_usd=rj.get("actual_cost_usd"),
+                        estimated_cost_usd=float(rj.get("estimated_cost_usd", 0.0)),
+                        actual_cost_usd=float(rj["actual_cost_usd"]) if rj.get("actual_cost_usd") is not None else None,
                         error_message=rj.get("error_message"),
-                        current_usage_ledger_id=None,
+                        current_usage_ledger_id=remap.get_or_create(parse_uuid(rj.get("current_usage_ledger_id")), "USAGE_LEDGER") if rj.get("current_usage_ledger_id") else None,
                         render_metadata=rj.get("render_metadata"),
                         imported_historical=True,
                         execution_disabled=True,
@@ -795,14 +1351,19 @@ class ProjectImportService:
                         provider_name=gj.get("provider_name", "vidu"),
                         provider_job_id=gj.get("provider_job_id"),
                         status=gj.get("status", "COMPLETED"),
-                        idempotency_key=f"imported_{gj.get('idempotency_key') or uuid.uuid4()}",
+                        idempotency_key=gj.get("idempotency_key"),
+                        cost_usd=float(gj["cost_usd"]) if gj.get("cost_usd") is not None else None,
                         error_message=gj.get("error_message"),
                         retry_count=gj.get("retry_count", 0),
                         max_retries=gj.get("max_retries", 3),
+                        poll_count=gj.get("poll_count", 0),
+                        max_polls=gj.get("max_polls", 60),
                         claimed_by=None,
                         claim_token=None,
                         claim_expires_at=None,
-                        submission_attempt_id=None,
+                        next_retry_at=parse_datetime(gj.get("next_retry_at")),
+                        next_poll_at=parse_datetime(gj.get("next_poll_at")),
+                        submission_attempt_id=gj.get("submission_attempt_id"),
                         payload=gj.get("payload"),
                         result=gj.get("result"),
                         output_asset_id=remap.get_or_create(parse_uuid(gj.get("output_asset_id")), "ASSET"),
@@ -848,12 +1409,12 @@ class ProjectImportService:
                         operation=ul.get("operation", "VIDEO_GENERATION"),
                         model=ul.get("model"),
                         usage_units=ul.get("usage_units"),
-                        estimated_cost=ul.get("estimated_cost"),
-                        actual_cost=ul.get("actual_cost"),
+                        estimated_cost=float(ul["estimated_cost"]) if ul.get("estimated_cost") is not None else None,
+                        actual_cost=float(ul["actual_cost"]) if ul.get("actual_cost") is not None else None,
                         currency=ul.get("currency", "USD"),
                         cost_status=ul.get("cost_status", "CONFIRMED"),
                         provider_event_id=ul.get("provider_event_id"),
-                        idempotency_key=f"imported_{ul.get('idempotency_key') or uuid.uuid4()}",
+                        idempotency_key=ul.get("idempotency_key"),
                         description=ul.get("description"),
                         imported_historical=True,
                         created_at=parse_datetime(ul.get("created_at")) or datetime.now(timezone.utc),

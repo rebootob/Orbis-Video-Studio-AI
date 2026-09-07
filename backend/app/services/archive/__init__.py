@@ -18,6 +18,8 @@ from app.services.archive.export_service import (
 from app.services.archive.import_service import (
     ProjectImportService,
     ArchiveImportError,
+    ArchivePreflightError,
+    ArchivePreflightValidator,
     ProjectCollisionError,
     VersionIncompatibilityError,
 )
@@ -34,6 +36,8 @@ __all__ = [
     "ArchiveExportError",
     "ProjectImportService",
     "ArchiveImportError",
+    "ArchivePreflightError",
+    "ArchivePreflightValidator",
     "ProjectCollisionError",
     "VersionIncompatibilityError",
 ]
