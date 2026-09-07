@@ -18,6 +18,11 @@ from app.models.asset import Asset
 from app.services.budget import BudgetService
 
 
+from sqlalchemy.orm.attributes import flag_modified
+
+ALLOWED_WP017_RENDER_PROFILES = ("MASTER", "MASTER_HD")
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -34,19 +39,20 @@ class RenderJobService:
         estimated_cost_usd: float = 0.50,
     ) -> RenderJob:
         # Validate render_profile (WP017 supports MASTER render only)
-        if render_profile.upper() not in ("MASTER", "MASTER_HD"):
+        if render_profile.upper() not in ALLOWED_WP017_RENDER_PROFILES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported render profile '{render_profile}'. WP017 supports MASTER render only. Aspect/platform variants are deferred to WP018.",
             )
 
-        # 1. Lock Project Row and check budget under DB authority
-        BudgetService.check_budget_before_dispatch(
-            db=db,
-            project_id=project_id,
-            estimated_cost=estimated_cost_usd,
-            lock_row=True,
-        )
+        # 1. Lock Project Row under DB authority
+        query = db.query(Project).filter(Project.id == project_id).with_for_update()
+        project = query.first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project.updated_at = datetime.now(timezone.utc)
+        flag_modified(project, "updated_at")
+        db.flush()
 
         # 2. Resolve Timeline for project
         if timeline_id:
@@ -124,7 +130,15 @@ class RenderJobService:
             # User triggers new render for approved timeline without custom key -> generate timestamped key
             target_key = f"{base_idempotency_key}:{int(time.time())}"
 
-        # 5. Create RenderJob Entity with IntegrityError fallback for DB authority race conditions
+        # 5. Check project budget before authorizing NEW render job reservation
+        BudgetService.check_budget_before_dispatch(
+            db=db,
+            project_id=project_id,
+            estimated_cost=estimated_cost_usd,
+            lock_row=False,
+        )
+
+        # 6. Create RenderJob Entity with IntegrityError fallback for DB authority race conditions
         now = utc_now()
         render_job = RenderJob(
             project_id=project_id,
@@ -170,7 +184,7 @@ class RenderJobService:
                 return active_job
             raise
 
-        # 6. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED) and bind current_usage_ledger_id
+        # 7. Create UsageLedger Pre-Compute Cost Reservation (ESTIMATED) and bind current_usage_ledger_id
         ledger_entry = UsageLedger(
             project_id=project_id,
             render_job_id=render_job.id,

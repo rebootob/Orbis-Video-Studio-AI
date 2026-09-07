@@ -2,7 +2,9 @@
 import uuid
 from typing import Optional, Dict, Any
 from fastapi import HTTPException
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.project import Project
 from app.models.usage_ledger import UsageLedger
@@ -114,9 +116,9 @@ class BudgetService:
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         if lock_row:
-            project.updated_at = project.updated_at
+            project.updated_at = datetime.now(timezone.utc)
+            flag_modified(project, "updated_at")
             db.flush()
-            db.expire_all()
         if project.budget_limit is None:
             return
 
