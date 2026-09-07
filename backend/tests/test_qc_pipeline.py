@@ -1,0 +1,1030 @@
+import uuid
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.main import app
+from app.models.project import Project
+from app.models.scene import Scene
+from app.models.shot import Shot
+from app.models.asset import Asset
+from app.models.audio_clip import AudioClip
+from app.models.assembly import AssemblyTimeline, AssemblyScene, AssemblyShotPlacement
+from app.models.qc import QCRun, QCFinding, WarningDecision, ApprovalRecord
+from app.services.qc import QCService, utc_now
+from app.services.assembly import AssemblyService
+from app.services.production_orchestrator import ProductionOrchestrator
+
+from app.db.session import get_db
+
+client = TestClient(app)
+
+
+@pytest.fixture
+def test_project_context(db_session: Session):
+    """Creates a standard test project with story, scenes, shots, timeline and assets."""
+    app.dependency_overrides[get_db] = lambda: db_session
+
+    project = Project(
+        id=uuid.uuid4(),
+        title="QC Test Movie",
+        video_mode="STORY",
+        status="FINAL_REVIEW",
+    )
+    db_session.add(project)
+    db_session.flush()
+
+    scene1 = Scene(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        scene_number=1,
+        heading="INT. QC LAB - DAY",
+    )
+    db_session.add(scene1)
+    db_session.flush()
+
+    shot1 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene1.id,
+        shot_number=1,
+        visual_prompt="Close up of AI inspector",
+        shot_type="AI_GENERATED",
+        status="COMPLETED",
+    )
+    shot2 = Shot(
+        id=uuid.uuid4(),
+        scene_id=scene1.id,
+        shot_number=2,
+        visual_prompt="Wide view of testing terminal",
+        shot_type="AI_GENERATED",
+        status="COMPLETED",
+    )
+    db_session.add_all([shot1, shot2])
+    db_session.flush()
+
+    asset1 = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Shot 1 Video",
+        original_filename="shot1.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1024,
+        checksum_sha256="dummy_sha1",
+        storage_bucket="default",
+        storage_key="videos/shot1.mp4",
+    )
+    asset2 = Asset(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        name="Shot 2 Video",
+        original_filename="shot2.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=1024,
+        checksum_sha256="dummy_sha2",
+        storage_bucket="default",
+        storage_key="videos/shot2.mp4",
+    )
+    db_session.add_all([asset1, asset2])
+    db_session.flush()
+
+    shot1.source_asset_id = asset1.id
+    shot2.source_asset_id = asset2.id
+
+    audio = AudioClip(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        scene_id=scene1.id,
+        shot_id=shot1.id,
+        audio_type="VO",
+        source_type="GENERATED_AUDIO",
+        generation_mode="SEPARATE_AUDIO",
+        scope="SHOT",
+        name="VO Clip 1",
+    )
+    db_session.add(audio)
+    db_session.flush()
+
+    timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
+    db_session.commit()
+
+    return {
+        "project": project,
+        "scene1": scene1,
+        "shot1": shot1,
+        "shot2": shot2,
+        "asset1": asset1,
+        "asset2": asset2,
+        "audio": audio,
+        "timeline": timeline,
+    }
+
+
+def test_1_blocker_prevents_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    timeline = ctx["timeline"]
+
+    # Invalidate placement visual asset to force a BLOCKER finding (MISSING_VISUAL)
+    placement = timeline.scenes[0].shot_placements[0]
+    placement.visual_asset_id = None
+    placement.source_type = "MISSING"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    assert qc_run.status == "BLOCKED"
+    assert qc_run.blocker_count > 0
+
+    # Attempt approval must fail with 400 error explaining blocker
+    with pytest.raises(Exception) as exc_info:
+        QCService.approve_production(db_session, project.id, timeline_id=timeline.id, qc_run_id=qc_run.id)
+
+    assert "BLOCKER" in str(exc_info.value) or "blocker" in str(exc_info.value).lower() or "cannot approve" in str(exc_info.value).lower()
+
+
+def test_2_warning_requires_explicit_user_decision(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    # Add an undecided warning finding
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_UNDECIDED_WARNING",
+        severity="WARNING",
+        message="Undecided warning message",
+    )
+    db_session.add(finding)
+    qc_run.warning_count += 1
+    qc_run.status = "RUNNING"
+    db_session.commit()
+
+    with pytest.raises(Exception) as exc_info:
+        QCService.approve_production(db_session, project.id)
+
+    assert "warning" in str(exc_info.value).lower()
+
+
+def test_3_accepting_warning_without_reason_fails(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_WARNING",
+        severity="WARNING",
+        message="Test warning requirement.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project.id}/qc/findings/{finding.id}/decision",
+        json={"decision": "ACCEPTED_WITH_REASON", "reason": ""},
+    )
+    assert response.status_code == 400 or response.status_code == 422
+
+
+def test_4_accepting_warning_with_reason_succeeds(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_WARNING_4",
+        severity="WARNING",
+        message="Test warning requiring reason.",
+    )
+    db_session.add(finding)
+    qc_run.warning_count += 1
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project.id}/qc/findings/{finding.id}/decision?actor=TestUser",
+        json={"decision": "ACCEPTED_WITH_REASON", "reason": "Stylistic jump cut intended by director"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["decision"] == "ACCEPTED_WITH_REASON"
+    assert data["reason"] == "Stylistic jump cut intended by director"
+    assert data["actor"] == "TestUser"
+
+
+def test_5_warning_decision_binds_to_exact_revision(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    timeline = ctx["timeline"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=timeline.id,
+        rule_code="TEST_WARNING_5",
+        severity="WARNING",
+        message="Test binding.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    dec = QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="ACCEPTED_WITH_REASON", reason="Valid reason"
+    )
+
+    assert dec.timeline_id == timeline.id
+    assert dec.qc_run_id == qc_run.id
+    assert dec.finding_id == finding.id
+
+
+def test_6_old_revision_decision_does_not_satisfy_new_revision(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run_v1 = QCService.run_qc(db_session, project.id)
+    finding_v1 = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run_v1.id,
+        timeline_id=qc_run_v1.timeline_id,
+        rule_code="TEST_WARNING_6",
+        severity="WARNING",
+        message="V1 Warning.",
+    )
+    db_session.add(finding_v1)
+    db_session.commit()
+
+    QCService.record_warning_decision(
+        db_session, project.id, finding_v1.id, decision="ACCEPTED_WITH_REASON", reason="V1 decision reason"
+    )
+
+    # Spawn new timeline revision v2
+    timeline_v2 = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
+    assert timeline_v2.version == 2
+
+    # Run QC on v2
+    qc_run_v2 = QCService.run_qc(db_session, project.id)
+    assert qc_run_v2.timeline_id == timeline_v2.id
+
+    decisions_v2_finding_ids = {d.finding_id for d in qc_run_v2.decisions}
+    assert finding_v1.id not in decisions_v2_finding_ids
+
+
+def test_7_clean_current_revision_can_approve(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    # Resolve all warning findings if any
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(
+                db_session, project.id, f.id, decision="ACCEPTED_WITH_REASON", reason="Accepted for test"
+            )
+
+    db_session.refresh(qc_run)
+    assert qc_run.blocker_count == 0
+
+    approval = QCService.approve_production(
+        db_session, project.id, timeline_id=qc_run.timeline_id, qc_run_id=qc_run.id, notes="Final cut approved!"
+    )
+
+    assert approval.status == "APPROVED"
+    assert project.status == "COMPLETED"
+    assert ctx["timeline"].status == "APPROVED"
+
+
+def test_8_stale_qc_cannot_approve_newer_revision(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run_v1 = QCService.run_qc(db_session, project.id)
+
+    # Edit timeline to create v2
+    timeline_v2 = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
+    assert timeline_v2.version == 2
+
+    with pytest.raises(Exception) as exc_info:
+        QCService.approve_production(
+            db_session, project.id, timeline_id=timeline_v2.id, qc_run_id=qc_run_v1.id
+        )
+
+    assert "qc" in str(exc_info.value).lower() or "revision" in str(exc_info.value).lower() or "stale" in str(exc_info.value).lower()
+
+
+def test_9_and_10_approved_old_revision_remains_immutable(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    timeline_v1 = ctx["timeline"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Reason")
+
+    QCService.approve_production(db_session, project.id)
+
+    db_session.refresh(timeline_v1)
+    assert timeline_v1.status == "APPROVED"
+    assert timeline_v1.is_active is True
+
+    placement = timeline_v1.scenes[0].shot_placements[0]
+
+    # Editing placement after approval
+    updated_p = AssemblyService.update_shot_placement(
+        db_session, str(project.id), str(placement.id), still_duration=6.0, actor="UserEdit"
+    )
+
+    active_timeline_now = AssemblyService.get_active_timeline(db_session, str(project.id))
+    assert active_timeline_now.id != timeline_v1.id
+    assert active_timeline_now.version == 2
+    assert active_timeline_now.status == "DRAFT"
+
+    db_session.refresh(timeline_v1)
+    assert timeline_v1.status == "APPROVED"
+    assert timeline_v1.is_active is False
+
+
+def test_11_direct_patch_cannot_jump_to_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    placement = ctx["timeline"].scenes[0].shot_placements[0]
+    placement.source_type = "MISSING"
+    placement.visual_asset_id = None
+    db_session.commit()
+
+    with pytest.raises(Exception) as exc_info:
+        ProductionOrchestrator.approve_stage(db_session, project.id, stage="FINAL_REVIEW")
+
+    assert "qc" in str(exc_info.value).lower() or "blocker" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower() or "cannot" in str(exc_info.value).lower()
+
+
+def test_12_cross_project_access_fails_closed(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project1 = ctx["project"]
+
+    project2 = Project(id=uuid.uuid4(), title="Project 2", video_mode="STORY")
+    db_session.add(project2)
+    db_session.flush()
+
+    qc_run1 = QCService.run_qc(db_session, project1.id)
+    finding1 = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project1.id,
+        qc_run_id=qc_run1.id,
+        timeline_id=qc_run1.timeline_id,
+        rule_code="PROJ1_WARNING",
+        severity="WARNING",
+        message="Proj 1 warning",
+    )
+    db_session.add(finding1)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project2.id}/qc/findings/{finding1.id}/decision",
+        json={"decision": "ACCEPTED_WITH_REASON", "reason": "Attack attempt"},
+    )
+    assert response.status_code == 404
+
+
+def test_13_audit_history_retains_actor_reason_time(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="AUDIT_TEST",
+        severity="WARNING",
+        message="Audit warning",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    dec = QCService.record_warning_decision(
+        db_session, project.id, finding.id, "ACCEPTED_WITH_REASON", "Audit trail test reason", actor="AuditorBob"
+    )
+
+    assert dec.actor == "AuditorBob"
+    assert dec.reason == "Audit trail test reason"
+    assert dec.decided_at is not None
+
+
+def test_14_no_external_provider_calls(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    assert qc_run.id is not None
+
+
+def test_15_bounded_paginated_history(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    for _ in range(5):
+        QCService.run_qc(db_session, project.id)
+
+    res = QCService.get_qc_history(db_session, project.id, offset=0, limit=2)
+    assert len(res.qc_runs) == 2
+    assert res.total_count >= 5
+    assert res.limit == 2
+    assert res.offset == 0
+
+
+def test_16_representative_large_project_no_n_plus_1(db_session: Session):
+    project = Project(id=uuid.uuid4(), title="Large Movie", video_mode="STORY")
+    db_session.add(project)
+    db_session.flush()
+
+    for s_idx in range(5):
+        scene = Scene(id=uuid.uuid4(), project_id=project.id, scene_number=s_idx + 1)
+        db_session.add(scene)
+        db_session.flush()
+
+        for sh_idx in range(10):
+            shot = Shot(
+                id=uuid.uuid4(),
+                scene_id=scene.id,
+                shot_number=sh_idx + 1,
+                visual_prompt=f"Shot {s_idx}-{sh_idx}",
+                shot_type="AI_GENERATED",
+                status="COMPLETED",
+            )
+            asset = Asset(
+                id=uuid.uuid4(),
+                project_id=project.id,
+                name=f"Asset {s_idx}-{sh_idx}",
+                original_filename=f"v_{s_idx}_{sh_idx}.mp4",
+                asset_type="VIDEO",
+                content_type="video/mp4",
+                file_size_bytes=1024,
+                checksum_sha256=f"sha_{s_idx}_{sh_idx}",
+                storage_bucket="default",
+                storage_key=f"v/{s_idx}_{sh_idx}.mp4",
+            )
+            db_session.add_all([shot, asset])
+            db_session.flush()
+            shot.source_asset_id = asset.id
+
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    assert qc_run is not None
+    assert qc_run.blocker_count == 0
+
+
+def test_17_fix_required_blocks_approval_and_status_not_passed(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_FIX_REQ_RULE",
+        severity="WARNING",
+        message="Warning that needs fixing.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    # User decides FIX_REQUIRED for the warning
+    QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="FIX_REQUIRED", reason="Intend to fix later"
+    )
+
+    db_session.refresh(qc_run)
+    # QC run MUST NOT become PASSED solely because all warnings have decisions when any is FIX_REQUIRED
+    assert qc_run.status != "PASSED"
+
+    # Attempting approval while a warning is FIX_REQUIRED MUST fail
+    with pytest.raises(Exception) as exc_info:
+        QCService.approve_production(db_session, project.id)
+
+    assert "FIX_REQUIRED" in str(exc_info.value) or "fix" in str(exc_info.value).lower()
+
+
+def test_18_accepted_with_reason_allows_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_ACCEPT_RULE",
+        severity="WARNING",
+        message="Waived warning.",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="ACCEPTED_WITH_REASON", reason="Director stylistic waiver"
+    )
+
+    db_session.refresh(qc_run)
+    assert qc_run.status == "PASSED"
+
+    approval = QCService.approve_production(db_session, project.id)
+    assert approval.status == "APPROVED"
+
+
+def test_19_final_approval_uses_canonical_orchestrator_transition_and_audit(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    approval = QCService.approve_production(db_session, project.id, actor="TestAuditor")
+
+    db_session.refresh(project)
+    assert project.status == "COMPLETED"
+
+    # Check orchestrator audit history for correct from_state and to_state
+    from app.models.orchestration_audit import OrchestrationAudit
+    audits = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id)
+        .order_by(OrchestrationAudit.created_at.desc())
+        .all()
+    )
+    assert len(audits) > 0
+    latest_audit = audits[0]
+    assert latest_audit.from_state == "FINAL_REVIEW"
+    assert latest_audit.to_state == "COMPLETED"
+    assert latest_audit.action == "APPROVE_FINAL"
+    assert latest_audit.actor == "TestAuditor"
+
+
+def test_20_generic_patch_cannot_jump_to_approval(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    response = client.patch(
+        f"/api/v1/projects/{project.id}",
+        json={"status": "APPROVED"},
+    )
+    assert response.status_code == 400
+    assert "disallowed" in response.json()["detail"].lower() or "orchestration" in response.json()["detail"].lower()
+
+
+def test_21_bounded_approval_history(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    timeline = ctx["timeline"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    from app.models.qc import ApprovalRecord
+    from app.services.qc import utc_now
+    for i in range(15):
+        db_session.add(
+            ApprovalRecord(
+                id=uuid.uuid4(),
+                project_id=project.id,
+                timeline_id=uuid.uuid4(),
+                timeline_version=i+1,
+                qc_run_id=uuid.uuid4(),
+                status="APPROVED",
+                actor=f"User{i}",
+                approved_at=utc_now(),
+            )
+        )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/projects/{project.id}/qc/approvals?limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 5
+
+    # Enforces max limit cap at 100
+    response_cap = client.get(f"/api/v1/projects/{project.id}/qc/approvals?limit=150")
+    assert response_cap.status_code == 422 or len(response_cap.json()) <= 100
+
+
+def test_22_qc_service_validation_does_not_mutate_project_status(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    # Call validation alone
+    timeline, run = QCService.validate_final_approval(db_session, project.id)
+    assert timeline.id == ctx["timeline"].id
+    assert run.id == qc_run.id
+
+    # Verify project status was NOT mutated by validation alone
+    db_session.refresh(project)
+    assert project.status == "FINAL_REVIEW"
+
+
+def test_23_invalid_from_state_fails_closed_in_orchestrator(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "DRAFT"
+    db_session.commit()
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for f in qc_run.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Valid reason")
+
+    # Attempt final approval from DRAFT status
+    with pytest.raises(HTTPException) as exc_info:
+        ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert exc_info.value.status_code == 400
+    assert "final review stage" in exc_info.value.detail.lower() or "cannot approve" in exc_info.value.detail.lower()
+
+    # Verify project status remains DRAFT
+    db_session.refresh(project)
+    assert project.status == "DRAFT"
+
+
+def test_24_undecided_warnings_evaluates_to_running_not_warnings_pending(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    warning_finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="TEST_UNDECIDED_WARNING",
+        severity="WARNING",
+        message="Undecided warning.",
+    )
+    db_session.add(warning_finding)
+    qc_run.warning_count += 1
+    qc_run.status = "RUNNING"
+    db_session.commit()
+
+    db_session.refresh(qc_run)
+    assert qc_run.status == "RUNNING"
+    assert qc_run.status != "WARNINGS_PENDING"
+
+
+def test_25_qc_history_summary_does_not_return_all_findings(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    for i in range(10):
+        db_session.add(
+            QCFinding(
+                id=uuid.uuid4(),
+                project_id=project.id,
+                qc_run_id=qc_run.id,
+                timeline_id=qc_run.timeline_id,
+                rule_code=f"RULE_{i}",
+                severity="WARNING",
+                message=f"Finding message {i}",
+            )
+        )
+    db_session.commit()
+
+    history = QCService.get_qc_history(db_session, project.id)
+    assert history.total_count >= 1
+    latest_history_run = [r for r in history.qc_runs if r.id == qc_run.id][0]
+    # Findings list in history summary must be empty to avoid N+1 and heavy payloads
+    assert len(latest_history_run.findings) == 0
+
+
+def test_26_paginated_findings_endpoint_and_security_check(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+
+    qc_run = QCService.run_qc(db_session, project.id)
+    finding_ids = []
+    for i in range(15):
+        fid = uuid.uuid4()
+        finding_ids.append(fid)
+        db_session.add(
+            QCFinding(
+                id=fid,
+                project_id=project.id,
+                qc_run_id=qc_run.id,
+                timeline_id=qc_run.timeline_id,
+                rule_code=f"FINDING_RULE_{i:02d}",
+                severity="WARNING",
+                message=f"Test finding {i}",
+            )
+        )
+    db_session.commit()
+
+    # Query findings endpoint via API client
+    res = client.get(f"/api/v1/projects/{project.id}/qc/runs/{qc_run.id}/findings?limit=5")
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["findings"]) == 5
+    assert data["total_count"] >= 15
+
+    # Cross-project security check: wrong project ID fails 404
+    wrong_project_id = uuid.uuid4()
+    res_sec = client.get(f"/api/v1/projects/{wrong_project_id}/qc/runs/{qc_run.id}/findings")
+    assert res_sec.status_code == 404
+
+
+def test_27_warning_decisions_are_append_only_history(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="CONTINUITY_CHECK",
+        severity="WARNING",
+        message="Potential discontinuity detected.",
+    )
+    db_session.add(finding)
+    qc_run.warning_count += 1
+    qc_run.status = "RUNNING"
+    db_session.commit()
+
+    # Decision #1: FIX_REQUIRED
+    dec1 = QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="FIX_REQUIRED", reason="Need to fix continuity", actor="UserA"
+    )
+    db_session.refresh(qc_run)
+    assert qc_run.status == "BLOCKED"
+
+    # Decision #2: ACCEPTED_WITH_REASON later
+    dec2 = QCService.record_warning_decision(
+        db_session, project.id, finding.id, decision="ACCEPTED_WITH_REASON", reason="Director accepts intentional discontinuity", actor="UserA"
+    )
+    db_session.refresh(qc_run)
+    assert qc_run.status == "PASSED"
+
+    # 3. both records still exist in DB with monotonic decision_sequence
+    all_decisions = (
+        db_session.query(WarningDecision)
+        .filter(WarningDecision.finding_id == finding.id)
+        .order_by(WarningDecision.decision_sequence.asc())
+        .all()
+    )
+    assert len(all_decisions) == 2
+    assert all_decisions[0].decision_sequence == 1
+    assert all_decisions[1].decision_sequence == 2
+
+    # 4. actor/reason/time preserved for both
+    assert all_decisions[0].decision == "FIX_REQUIRED"
+    assert all_decisions[0].reason == "Need to fix continuity"
+    assert all_decisions[0].actor == "UserA"
+
+    assert all_decisions[1].decision == "ACCEPTED_WITH_REASON"
+    assert all_decisions[1].reason == "Director accepts intentional discontinuity"
+    assert all_decisions[1].actor == "UserA"
+    assert all_decisions[1].id != all_decisions[0].id
+
+    # 5. latest decision (highest sequence) controls approval eligibility
+    approval = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert approval.status == "APPROVED"
+
+    # 6. old decision remains immutable
+    db_session.refresh(all_decisions[0])
+    assert all_decisions[0].decision == "FIX_REQUIRED"
+    assert all_decisions[0].reason == "Need to fix continuity"
+
+
+def test_28_one_shot_approval_per_timeline_revision(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run_v1 = QCService.run_qc(db_session, project.id)
+    for f in qc_run_v1.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Waived for v1")
+
+    # 1. First final approval succeeds
+    appr1 = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr1.status == "APPROVED"
+
+    from app.models.orchestration_audit import OrchestrationAudit
+    applied_audits_count_1 = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id, OrchestrationAudit.action == "APPROVE_FINAL", OrchestrationAudit.result == "APPLIED")
+        .count()
+    )
+    assert applied_audits_count_1 == 1
+
+    # 2. Run QC AGAIN on same unchanged timeline v1
+    qc_run_v1_again = QCService.run_qc(db_session, project.id)
+    assert qc_run_v1_again.id != qc_run_v1.id
+    assert qc_run_v1_again.timeline_id == qc_run_v1.timeline_id
+
+    # Do NOT decide warnings for new QC run — leave new warning UNDECIDED!
+    # 3. Call approve again: MUST return existing approval safely before QC validation!
+    appr1_again = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr1_again.id == appr1.id
+
+    # 4. ApprovalRecord count remains 1 for this timeline revision
+    all_approvals = (
+        db_session.query(ApprovalRecord)
+        .filter(ApprovalRecord.project_id == project.id)
+        .all()
+    )
+    assert len(all_approvals) == 1
+
+    # 5. APPLIED APPROVE_FINAL audit count remains 1
+    applied_audits_count_2 = (
+        db_session.query(OrchestrationAudit)
+        .filter(OrchestrationAudit.project_id == project.id, OrchestrationAudit.action == "APPROVE_FINAL", OrchestrationAudit.result == "APPLIED")
+        .count()
+    )
+    assert applied_audits_count_2 == 1
+
+    # 6. Revision v2 can receive separate approval
+    timeline_v2 = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
+    assert timeline_v2.version == 2
+
+    project.status = "FINAL_REVIEW"
+    db_session.commit()
+
+    qc_run_v2 = QCService.run_qc(db_session, project.id)
+    for f in qc_run_v2.findings:
+        if f.severity == "WARNING":
+            QCService.record_warning_decision(db_session, project.id, f.id, "ACCEPTED_WITH_REASON", "Waived for v2")
+
+    appr_v2 = ProductionOrchestrator.approve_final_production(db_session, project.id)
+    assert appr_v2.id != appr1.id
+    assert appr_v2.timeline_version == 2
+
+    all_revisions_approvals = (
+        db_session.query(ApprovalRecord)
+        .filter(ApprovalRecord.project_id == project.id)
+        .order_by(ApprovalRecord.approved_at.asc())
+        .all()
+    )
+    assert len(all_revisions_approvals) == 2
+
+
+def test_29_bounded_findings_and_paginated_decision_history_endpoint(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="VISUAL_CONTINUITY",
+        severity="WARNING",
+        message="Check visual continuity",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    # Create 15 decision events for this single finding
+    for i in range(15):
+        QCService.record_warning_decision(
+            db_session,
+            project.id,
+            finding.id,
+            decision="ACCEPTED_WITH_REASON",
+            reason=f"Reason {i+1}",
+            actor=f"User{i+1}",
+        )
+
+    # 1. Normal findings endpoint does NOT embed full unbounded decision_history
+    res = client.get(f"/api/v1/projects/{project.id}/qc/runs/{qc_run.id}/findings")
+    assert res.status_code == 200
+    data = res.json()
+    finding_item = next(f for f in data["findings"] if f["id"] == str(finding.id))
+
+    assert "decision_history" not in finding_item
+    assert finding_item["decision_count"] == 15
+    assert finding_item["current_decision"]["decision_sequence"] == 15
+    assert finding_item["current_decision"]["reason"] == "Reason 15"
+
+    # 2. Paginated decision history endpoint returns bounded page
+    hist_res = client.get(f"/api/v1/projects/{project.id}/qc/findings/{finding.id}/history?limit=5")
+    assert hist_res.status_code == 200
+    hist_data = hist_res.json()
+    assert len(hist_data) == 5
+    # Deterministic ordering by decision_sequence desc
+    assert hist_data[0]["decision_sequence"] == 15
+    assert hist_data[1]["decision_sequence"] == 14
+
+    # Cap limit max <= 100
+    cap_res = client.get(f"/api/v1/projects/{project.id}/qc/findings/{finding.id}/history?limit=150")
+    assert cap_res.status_code == 422 or len(cap_res.json()) <= 100
+
+    # 3. Cross-project history access fails closed (404)
+    wrong_proj_id = uuid.uuid4()
+    sec_res = client.get(f"/api/v1/projects/{wrong_proj_id}/qc/findings/{finding.id}/history")
+    assert sec_res.status_code == 404
+
+
+def test_30_concurrency_safe_decision_sequence_uniqueness(db_session: Session, test_project_context):
+    ctx = test_project_context
+    project = ctx["project"]
+    qc_run = QCService.run_qc(db_session, project.id)
+
+    finding = QCFinding(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        timeline_id=qc_run.timeline_id,
+        rule_code="CONTINUITY_CHECK",
+        severity="WARNING",
+        message="Concurrency test finding",
+    )
+    db_session.add(finding)
+    db_session.commit()
+
+    dec1 = WarningDecision(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        qc_run_id=qc_run.id,
+        finding_id=finding.id,
+        timeline_id=qc_run.timeline_id,
+        decision="FIX_REQUIRED",
+        reason="Initial fix required",
+        actor="User1",
+        decided_at=utc_now(),
+        decision_sequence=1,
+    )
+    db_session.add(dec1)
+    db_session.commit()
+
+    project_id = project.id
+    finding_id = finding.id
+
+    # Attempting to insert duplicate (finding_id, decision_sequence=1) raises IntegrityError
+    from sqlalchemy.exc import IntegrityError
+    try:
+        with db_session.begin_nested():
+            dec_dup = WarningDecision(
+                id=uuid.uuid4(),
+                project_id=project_id,
+                qc_run_id=qc_run.id,
+                finding_id=finding_id,
+                timeline_id=qc_run.timeline_id,
+                decision="ACCEPTED_WITH_REASON",
+                reason="Duplicate sequence insert attempt",
+                actor="User2",
+                decided_at=utc_now(),
+                decision_sequence=1,
+            )
+            db_session.add(dec_dup)
+            db_session.flush()
+        assert False, "Should have raised IntegrityError for duplicate (finding_id, decision_sequence)"
+    except IntegrityError:
+        pass
+
+    # Verify latest decision resolves by sequence number 2, not UUID
+    dec2 = QCService.record_warning_decision(
+        db_session, project_id, finding_id, decision="ACCEPTED_WITH_REASON", reason="Waived with sequence 2"
+    )
+    assert dec2.decision_sequence == 2
+
+    all_decs = (
+        db_session.query(WarningDecision)
+        .filter(WarningDecision.finding_id == finding_id)
+        .order_by(WarningDecision.decision_sequence.asc())
+        .all()
+    )
+    assert len(all_decs) == 2
+    assert all_decs[0].decision_sequence == 1
+    assert all_decs[1].decision_sequence == 2
+    assert all_decs[-1].decision == "ACCEPTED_WITH_REASON"

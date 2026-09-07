@@ -30,6 +30,12 @@ import type {
   AssemblyShotPlacement,
   TimelineCheckpoint,
   AssemblyBlocker,
+  QCRun,
+  QCSimpleSummary,
+  QCHistoryResponse,
+  WarningDecision,
+  WarningDecisionType,
+  ApprovalRecord,
 } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
@@ -716,4 +722,66 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+
+  // QC & Approval Pipeline
+  async runQC(projectId: string, actor: string = 'user'): Promise<QCRun> {
+    return request<QCRun>(`/projects/${projectId}/qc/run?actor=${encodeURIComponent(actor)}`, {
+      method: 'POST',
+    });
+  },
+
+  async getQCSummary(projectId: string): Promise<QCSimpleSummary> {
+    return request<QCSimpleSummary>(`/projects/${projectId}/qc/summary`);
+  },
+
+  async getQCHistory(projectId: string, offset: number = 0, limit: number = 20): Promise<QCHistoryResponse> {
+    return request<QCHistoryResponse>(`/projects/${projectId}/qc/history?offset=${offset}&limit=${limit}`);
+  },
+
+  async getQCRunFindings(projectId: string, runId: string, offset: number = 0, limit: number = 50): Promise<any> {
+    return request<any>(`/projects/${projectId}/qc/runs/${runId}/findings?offset=${offset}&limit=${limit}`);
+  },
+
+  async recordWarningDecision(
+    projectId: string,
+    findingId: string,
+    decision: WarningDecisionType,
+    reason?: string,
+    actor: string = 'user'
+  ): Promise<WarningDecision> {
+    return request<WarningDecision>(
+      `/projects/${projectId}/qc/findings/${findingId}/decision?actor=${encodeURIComponent(actor)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ decision, reason }),
+      }
+    );
+  },
+
+  async getFindingDecisionHistory(
+    projectId: string,
+    findingId: string,
+    offset: number = 0,
+    limit: number = 20
+  ): Promise<WarningDecision[]> {
+    return request<WarningDecision[]>(
+      `/projects/${projectId}/qc/findings/${findingId}/history?offset=${offset}&limit=${limit}`
+    );
+  },
+
+  async approveProduction(
+    projectId: string,
+    payload: { timeline_id?: string; qc_run_id?: string; notes?: string } = {},
+    actor: string = 'user'
+  ): Promise<ApprovalRecord> {
+    return request<ApprovalRecord>(
+      `/projects/${projectId}/qc/approve?actor=${encodeURIComponent(actor)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
 };
+
+export const apiClient = api;

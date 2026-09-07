@@ -17,6 +17,18 @@ from app.schemas.reference_library import (
     BrandBibleCreate, BrandBibleUpdate, BrandBibleResponse,
 )
 
+from app.schemas.qc import (
+    QCFindingRead,
+    WarningDecisionCreate,
+    WarningDecisionRead,
+    QCRunRead,
+    SimpleFindingRead,
+    QCRunSummaryRead,
+    FinalApprovalCreate,
+    ApprovalRecordRead,
+    QCHistoryPagination,
+)
+
 __all__ = [
     "HealthCheck",
     "AssetResponse",
@@ -34,6 +46,15 @@ __all__ = [
     "LocationBibleCreate", "LocationBibleUpdate", "LocationBibleResponse",
     "StyleBibleCreate", "StyleBibleUpdate", "StyleBibleResponse",
     "BrandBibleCreate", "BrandBibleUpdate", "BrandBibleResponse",
+    "QCFindingRead",
+    "WarningDecisionCreate",
+    "WarningDecisionRead",
+    "QCRunRead",
+    "SimpleFindingRead",
+    "QCRunSummaryRead",
+    "FinalApprovalCreate",
+    "ApprovalRecordRead",
+    "QCHistoryPagination",
 ]
 
 

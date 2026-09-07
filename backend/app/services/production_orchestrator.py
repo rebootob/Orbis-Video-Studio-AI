@@ -13,6 +13,7 @@ from app.models.generation_job import GenerationJob
 from app.models.asset_lock import AssetLock
 from app.models.batch_run import BatchRun, BatchRunItem
 from app.models.orchestration_audit import OrchestrationAudit
+from app.models.qc import ApprovalRecord
 from app.schemas.orchestrator import (
     AutomationMode,
     OrchestrationActionType,
@@ -1133,19 +1134,268 @@ class ProductionOrchestrator:
             )
 
         # Apply approval
-        project.status = target_stage
+        if current in ("FINAL_REVIEW", "READY_FOR_REVIEW") or target_stage in ("COMPLETED", "APPROVED"):
+            approval_rec = cls.approve_final_production(
+                db=db,
+                project_id=project_id,
+                notes=notes,
+                actor=actor,
+            )
+            updated_state = cls.evaluate_state(db, project_id)
+            return ApproveStageResponse(
+                success=True,
+                from_stage=current,
+                to_stage=project.status,
+                result=OrchestrationActionResult.APPLIED,
+                message=f"Final production cut approved successfully (Approval {approval_rec.id}).",
+                orchestration_state=updated_state,
+            )
+        else:
+            project.status = target_stage
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=current,
+                to_state=target_stage,
+                action=f"APPROVE_{target_stage}",
+                actor=actor,
+                result=OrchestrationActionResult.APPLIED,
+                reason_code="APPROVAL_GRANTED",
+                detail=notes,
+            )
+            db.commit()
+
+        # Real AUTO mode behavior:
+        # GENERATE_STORY / GENERATE_STORYBOARD / GENERATE_SHOT_PLAN are chargeable provider actions.
+        # AUTO must NOT silently execute a chargeable action after approval.
+        # Unless explicit persisted or one-shot cost authorization exists, AUTO must STOP and recommend the chargeable next action.
+        # Video generation gates always require explicit human confirmation.
+        default_cfg = getattr(project, "default_config", None) or {}
+        mode_cfg = getattr(project, "mode_config", None) or {}
+        has_persisted_cost_auth = False
+        if isinstance(default_cfg, dict):
+            has_persisted_cost_auth = bool(
+                default_cfg.get("auto_cost_authorized") or default_cfg.get("cost_authorized")
+            )
+        if not has_persisted_cost_auth and isinstance(mode_cfg, dict):
+            has_persisted_cost_auth = bool(
+                mode_cfg.get("auto_cost_authorized") or mode_cfg.get("cost_authorized")
+            )
+        has_cost_authorization = cost_authorized or has_persisted_cost_auth
+
+        auto_mode = getattr(project, "automation_mode", "MANUAL")
+        if auto_mode == "AUTO":
+            b_summary = BudgetService.get_budget_status(db, project_id)
+            if b_summary.get("is_hard_limit_exceeded"):
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=target_stage,
+                    to_state=target_stage,
+                    action="AUTO_HALTED",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.BLOCKED,
+                    reason_code="HARD_BUDGET_LIMIT_EXCEEDED",
+                    detail="Auto-cascade halted: project hard budget limit exceeded.",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ApproveStageResponse(
+                    success=True,
+                    from_stage=current,
+                    to_stage=project.status,
+                    result=OrchestrationActionResult.APPLIED,
+                    message=f"Stage successfully approved: transitioned to '{project.status}'. Auto-cascade halted: hard budget limit exceeded.",
+                    orchestration_state=updated_state,
+                )
+
+            if not has_cost_authorization:
+                # AUTO must NOT silently execute a chargeable action after approval.
+                # It must STOP and recommend the chargeable next action.
+                cls.record_audit(
+                    db=db,
+                    project_id=project_id,
+                    from_state=target_stage,
+                    to_state=target_stage,
+                    action="AUTO_STOPPED_AWAITING_COST_AUTHORIZATION",
+                    actor="AUTO",
+                    result=OrchestrationActionResult.NO_OP,
+                    reason_code="CHARGEABLE_ACTION_REQUIRES_AUTHORIZATION",
+                    detail=f"Auto-cascade stopped after '{target_stage}': next action is chargeable and requires explicit cost authorization.",
+                )
+                db.commit()
+                updated_state = cls.evaluate_state(db, project_id)
+                return ApproveStageResponse(
+                    success=True,
+                    from_stage=current,
+                    to_stage=project.status,
+                    result=OrchestrationActionResult.APPLIED,
+                    message=f"Stage successfully approved: transitioned to '{project.status}'. Auto-cascade stopped: next action is chargeable and requires cost authorization.",
+                    orchestration_state=updated_state,
+                )
+
+            # Explicit cost authorization exists: execute the downstream creative stage
+            if target_stage == "STORY_APPROVED":
+                cls.execute_action(
+                    db=db,
+                    project_id=project_id,
+                    action="GENERATE_STORYBOARD",
+                    actor="AUTO",
+                    provider=provider,
+                )
+            elif target_stage == "STORYBOARD_APPROVED":
+                cls.execute_action(
+                    db=db,
+                    project_id=project_id,
+                    action="GENERATE_SHOT_PLAN",
+                    actor="AUTO",
+                    provider=provider,
+                )
+            elif target_stage == "SHOT_PLAN_APPROVED":
+                # Mandatory STOP: Keyframe and video generation require explicit execution / authorization
+                pass
+            elif target_stage == "IMAGES_APPROVED":
+                # Mandatory STOP: Video generation ALWAYS requires explicit human confirmation!
+                pass
+
+        updated_state = cls.evaluate_state(db, project_id)
+        return ApproveStageResponse(
+            success=True,
+            from_stage=current,
+            to_stage=project.status,
+            result=OrchestrationActionResult.APPLIED,
+            message=f"Stage successfully approved: transitioned to '{project.status}'.",
+            orchestration_state=updated_state,
+        )
+
+    @classmethod
+    def approve_final_production(
+        cls,
+        db: Session,
+        project_id: uuid.UUID,
+        timeline_id: Optional[uuid.UUID] = None,
+        qc_run_id: Optional[uuid.UUID] = None,
+        notes: Optional[str] = None,
+        actor: str = "USER",
+    ) -> ApprovalRecord:
+        """Canonical orchestrator method owning final production approval, workflow transition guard,
+        status mutation, and audit logging.
+        """
+        project = db.get(Project, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project '{project_id}' not found",
+            )
+
+        # 1. Resolve active timeline revision
+        from app.services.assembly import AssemblyService
+        active_timeline = AssemblyService.get_active_timeline(db, str(project_id))
+        if not active_timeline:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active timeline assembly available for production approval",
+            )
+
+        if timeline_id and timeline_id != active_timeline.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Specified timeline ID '{timeline_id}' does not match the active current timeline revision (v{active_timeline.version}). Stale revisions cannot be approved.",
+            )
+
+        # 2. Look up existing ApprovalRecord for project_id + timeline_id FIRST (idempotent replay)
+        existing_approval = (
+            db.query(ApprovalRecord)
+            .filter(
+                ApprovalRecord.project_id == project_id,
+                ApprovalRecord.timeline_id == active_timeline.id,
+            )
+            .first()
+        )
+        if existing_approval:
+            from_state = project.status or "COMPLETED"
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=from_state,
+                to_state=from_state,
+                action="APPROVE_FINAL",
+                actor=actor,
+                result=OrchestrationActionResult.NO_OP,
+                reason_code="ALREADY_APPROVED",
+                detail=f"Production cut v{active_timeline.version} is already approved.",
+            )
+            db.commit()
+            return existing_approval
+
+        # 3. Only if no existing approval exists for this revision, enforce allowed workflow source state
+        from_state = project.status or "FINAL_REVIEW"
+        ALLOWED_APPROVAL_FROM_STATES = {
+            "FINAL_REVIEW",
+            "READY_FOR_REVIEW",
+            "AUDIO_APPROVED",
+            "READY_FOR_ASSEMBLY",
+        }
+        if from_state not in ALLOWED_APPROVAL_FROM_STATES:
+            cls.record_audit(
+                db=db,
+                project_id=project_id,
+                from_state=from_state,
+                to_state=from_state,
+                action="APPROVE_FINAL",
+                actor=actor,
+                result=OrchestrationActionResult.BLOCKED,
+                reason_code="INVALID_STAGE_FOR_APPROVAL",
+                detail=f"Cannot approve production from stage '{from_state}'. Expected review stage.",
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot approve production from stage '{from_state}'. Project must be in final review stage.",
+            )
+
+        # 4. Validate latest QC for new unapproved timeline revision
+        from app.services.qc import QCService
+        active_timeline, latest_qc = QCService.validate_final_approval(
+            db=db,
+            project_id=project_id,
+            timeline_id=timeline_id,
+            qc_run_id=qc_run_id,
+        )
+
+        target_state = "COMPLETED"
+
+        approval = ApprovalRecord(
+            id=uuid.uuid4(),
+            project_id=project_id,
+            timeline_id=active_timeline.id,
+            timeline_version=active_timeline.version,
+            qc_run_id=latest_qc.id,
+            status="APPROVED",
+            actor=actor,
+            notes=notes,
+            approved_at=datetime.now(timezone.utc),
+        )
+        db.add(approval)
+
+        active_timeline.status = "APPROVED"
+        project.status = target_state
+
         cls.record_audit(
             db=db,
             project_id=project_id,
-            from_state=current,
-            to_state=target_stage,
-            action=f"APPROVE_{target_stage}",
+            from_state=from_state,
+            to_state=target_state,
+            action="APPROVE_FINAL",
             actor=actor,
             result=OrchestrationActionResult.APPLIED,
-            reason_code="APPROVAL_GRANTED",
-            detail=notes,
+            reason_code="QC_PASSED_AND_APPROVED",
+            detail=notes or f"Production approved for timeline revision v{active_timeline.version} with QC Run {latest_qc.id}",
         )
+
         db.commit()
+        db.refresh(approval)
+        return approval
 
         # Real AUTO mode behavior:
         # GENERATE_STORY / GENERATE_STORYBOARD / GENERATE_SHOT_PLAN are chargeable provider actions.
