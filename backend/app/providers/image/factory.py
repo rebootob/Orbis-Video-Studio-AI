@@ -2,12 +2,13 @@
 from typing import Dict, Any, Type, Optional
 from app.providers.image.base import IImageGenerationProviderAdapter
 from app.providers.image.mock_adapter import MockImageProviderAdapter
+from app.providers.image.gemini_adapter import GeminiImageProviderAdapter
 
 
 class ImageProviderFactory:
     _registry: Dict[str, Type[IImageGenerationProviderAdapter]] = {
         "mock_image": MockImageProviderAdapter,
-        "default": MockImageProviderAdapter,
+        "gemini_image": GeminiImageProviderAdapter,
     }
 
     @classmethod
@@ -17,7 +18,7 @@ class ImageProviderFactory:
     @classmethod
     def get_default_provider_name(cls) -> str:
         from app.core.config import settings
-        return getattr(settings, "DEFAULT_IMAGE_PROVIDER", "mock_image")
+        return getattr(settings, "DEFAULT_IMAGE_PROVIDER", "gemini_image")
 
     @classmethod
     def get_provider(
