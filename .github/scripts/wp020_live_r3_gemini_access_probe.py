@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from typing import Any, Callable, Dict, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -81,7 +80,8 @@ def run_probe(opener: Callable[..., Any] = urlopen) -> int:
 
     try:
         response = opener(request, timeout=TIMEOUT_SECONDS)
-        status_code = int(getattr(response, "status", response.getcode()))
+        response_status = getattr(response, "status", None)
+        status_code = int(response_status if response_status is not None else response.getcode())
         payload = response.read(65536)
     except HTTPError as exc:
         status_code = int(exc.code)
