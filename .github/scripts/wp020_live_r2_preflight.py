@@ -160,14 +160,7 @@ def main() -> None:
 
         ledger_count = db.query(UsageLedger).filter(UsageLedger.project_id == project.id).count()
         require(ledger_count == 0, "UAT project did not start at zero ledger events")
-
-        job_count = (
-            db.query(GenerationJob)
-            .join(GenerationJob.shot)
-            .join(GenerationJob.shot.property.mapper.class_.scene)
-            .count()
-        )
-        require(job_count == 0, "ephemeral UAT database unexpectedly contains generation jobs")
+        require(db.query(GenerationJob).count() == 0, "ephemeral UAT database unexpectedly contains generation jobs")
     finally:
         db.close()
 
