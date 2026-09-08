@@ -867,7 +867,28 @@ def test_soft_archived_scenes_and_shots_excluded_from_counts(client, db_session)
     db_session.add_all([sh1, sh_archived, sh3])
     db_session.commit()
 
-    j1 = GenerationJob(id=uuid.uuid4(), shot_id=sh1.id, provider_name="vidu", status="COMPLETED")
+    video_asset = Asset(
+        id=uuid.uuid4(),
+        project_id=p.id,
+        name="Archived count durable output",
+        original_filename="archived-count.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=32,
+        checksum_sha256="a" * 64,
+        storage_bucket="test",
+        storage_key=f"projects/{p.id}/archived-count.mp4",
+    )
+    db_session.add(video_asset)
+    db_session.flush()
+    sh1.source_asset_id = video_asset.id
+    j1 = GenerationJob(
+        id=uuid.uuid4(),
+        shot_id=sh1.id,
+        provider_name="vidu",
+        status="COMPLETED",
+        output_asset_id=video_asset.id,
+    )
     db_session.add(j1)
     db_session.commit()
 

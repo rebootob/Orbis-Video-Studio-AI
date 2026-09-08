@@ -1512,11 +1512,13 @@ class ProjectImportService:
                     db.add(OrchestrationAudit(
                         id=remap.get_or_create(parse_uuid(oa["id"]), "ORCHESTRATION_AUDIT"),
                         project_id=new_project_id,
-                        from_stage=oa.get("from_stage"),
-                        to_stage=oa.get("to_stage", "DRAFT"),
-                        actor=oa.get("actor", "system"),
-                        event_type=oa.get("event_type", "STAGE_TRANSITION"),
-                        meta_info=oa.get("meta_info"),
+                        from_state=oa.get("from_state", oa.get("from_stage", "DRAFT")),
+                        to_state=oa.get("to_state", oa.get("to_stage")),
+                        action=oa.get("action", oa.get("event_type", "IMPORTED_EVENT")),
+                        actor=oa.get("actor", "SYSTEM"),
+                        result=oa.get("result", "APPLIED"),
+                        reason_code=oa.get("reason_code"),
+                        detail=oa.get("detail"),
                         created_at=parse_datetime(oa.get("created_at")) or datetime.now(timezone.utc),
                     ))
 
