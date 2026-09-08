@@ -18,8 +18,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.render import RenderExecutor, FFmpegRenderExecutor
+from app.services.render.subtitle_burnin import FFmpegSubtitleBurnInProcessor
 from app.services.storage import get_storage_provider, ObjectStorageProvider
 from app.services.render_job import RenderJobService
+from app.services.subtitle_control import SubtitleService
 from app.models.assembly import AssemblyTimeline
 from app.models.asset import Asset
 from app.models.audio_clip import AudioClip
@@ -39,10 +41,12 @@ class CloudRenderWorker:
         worker_id: Optional[str] = None,
         storage_provider: Optional[ObjectStorageProvider] = None,
         render_executor: Optional[RenderExecutor] = None,
+        subtitle_burnin: Optional[FFmpegSubtitleBurnInProcessor] = None,
     ):
         self.worker_id = worker_id or f"worker-{socket.gethostname()}-{os.getpid()}"
         self.storage_provider = storage_provider or get_storage_provider()
         self.render_executor = render_executor or FFmpegRenderExecutor()
+        self.subtitle_burnin = subtitle_burnin or FFmpegSubtitleBurnInProcessor()
 
     def validate_runtime(self) -> None:
         """Fail fast before polling when required render runtime/config is unavailable."""
@@ -174,6 +178,35 @@ class CloudRenderWorker:
                     except Exception as e:
                         logger.warning(f"Could not download audio clip asset {audio_asset.id}: {e}")
 
+            # Resolve subtitle state only from the exact timeline bound to this RenderJob.
+            # OFF is the truthful default. BURN_IN requires an explicitly reviewed, non-stale track.
+            subtitle_track = SubtitleService.get_active(db, job.project_id, str(timeline.id))
+            subtitle_srt_path: Optional[str] = None
+            subtitle_evidence: Dict[str, Any] = {"mode": "OFF"}
+            if subtitle_track and bool(subtitle_track.get("enabled", True)) and str(subtitle_track.get("render_mode", "OFF")).upper() == "BURN_IN":
+                if not bool(subtitle_track.get("is_reviewed", False)):
+                    raise RuntimeError("Burn-in subtitle track is not reviewed. Fail closed.")
+                if bool(subtitle_track.get("is_stale", True)):
+                    raise RuntimeError("Burn-in subtitle track is stale for the exact render timeline. Fail closed.")
+                srt_content = str(subtitle_track.get("srt_content") or "")
+                if not srt_content.strip():
+                    raise RuntimeError("Burn-in subtitle track has empty SRT content. Fail closed.")
+                expected_sha = str(subtitle_track.get("srt_sha256") or "")
+                actual_sha = hashlib.sha256(srt_content.encode("utf-8")).hexdigest()
+                if not expected_sha or expected_sha != actual_sha:
+                    raise RuntimeError("Burn-in subtitle SRT checksum mismatch. Fail closed.")
+                subtitle_srt_path = os.path.join(scratch_dir, f"subtitle_{subtitle_track['id']}.srt")
+                with open(subtitle_srt_path, "w", encoding="utf-8", newline="\n") as subtitle_file:
+                    subtitle_file.write(srt_content)
+                subtitle_evidence = {
+                    "mode": "BURN_IN",
+                    "track_id": str(subtitle_track["id"]),
+                    "track_version": int(subtitle_track.get("version_number", 1)),
+                    "timeline_fingerprint": str(subtitle_track.get("timeline_fingerprint") or ""),
+                    "srt_sha256": expected_sha,
+                    "language": str(subtitle_track.get("language") or "und"),
+                }
+
             timeline_spec = {
                 "project_id": str(job.project_id),
                 "timeline_id": str(job.timeline_id),
@@ -184,6 +217,7 @@ class CloudRenderWorker:
                 "total_duration": total_duration,
                 "placements": placements,
                 "audio_clips": audio_clips_list,
+                "subtitle": subtitle_evidence,
             }
 
             def progress_cb(pct: float):
@@ -196,8 +230,15 @@ class CloudRenderWorker:
                 progress_callback=progress_cb,
             )
 
+            if subtitle_srt_path:
+                burn_output_path = os.path.join(scratch_dir, f"render_{job.id}_subtitled.mp4")
+                self.subtitle_burnin.burn_in(output_file_path, subtitle_srt_path, burn_output_path)
+                os.replace(burn_output_path, output_file_path)
+
             if not os.path.exists(output_file_path):
                 raise RuntimeError(f"Render output file not found at {output_file_path}")
+
+            render_meta = {**render_meta, "subtitle": subtitle_evidence}
 
             sha256_hash = hashlib.sha256()
             file_size = os.path.getsize(output_file_path)

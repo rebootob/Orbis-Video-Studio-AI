@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     qc,
     renders,
     project_archive,
+    subtitles,
 )
 
 api_router = APIRouter()
@@ -33,6 +34,7 @@ api_router.include_router(locks.router, tags=["locks"])
 api_router.include_router(cost_ledger.router, tags=["costs"])
 api_router.include_router(audio.router, tags=["audio"])
 api_router.include_router(assembly.router, tags=["assembly"])
+api_router.include_router(subtitles.router, tags=["subtitles"])
 api_router.include_router(qc.router, prefix="/projects/{project_id}/qc", tags=["qc"])
 api_router.include_router(renders.router, prefix="/projects/{project_id}/renders", tags=["renders"])
 
