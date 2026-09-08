@@ -1,0 +1,40 @@
+name: Render Runtime Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backend/Dockerfile"
+      - "backend/app/services/render/**"
+      - "backend/app/services/render_worker.py"
+      - "docker-compose.yml"
+      - ".github/workflows/render-runtime-smoke.yml"
+
+jobs:
+  render-runtime-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR diff whitespace
+        run: git diff --check "origin/${{ github.base_ref }}...HEAD"
+
+      - name: Build render runtime image
+        run: docker build -t orbis-render-runtime-smoke ./backend
+
+      - name: Verify FFmpeg runtime
+        run: docker run --rm orbis-render-runtime-smoke ffmpeg -version
+
+      - name: Validate Compose render-worker wiring
+        env:
+          POSTGRES_PASSWORD: ci-placeholder
+          OBJECT_STORAGE_ACCESS_KEY: ci-placeholder
+          OBJECT_STORAGE_SECRET_KEY: ci-placeholder
+        run: |
+          docker compose config --quiet
+          docker compose config --services | grep -Fx "render-worker"
