@@ -1,0 +1,64 @@
+name: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wp020-live-r3-pre1-gemini-access
+  cancel-in-progress: false
+
+jobs:
+  gemini_access_probe:
+    name: Gemini metadata access probe only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PRE1_BASE_SHA: d706acacd1f51224c955fb9c8d0d9eab3deda186
+      GEMINI_IMAGE_MODEL: gemini-3.1-flash-image
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout canonical main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard manual canonical-main PRE1 execution
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "STOP: PRE1 probe may run only by workflow_dispatch" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "STOP: PRE1 probe must run on canonical main" >&2
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$PRE1_BASE_SHA" HEAD
+          echo "PRE1 canonical-main guard PASS at $GITHUB_SHA"
+
+      - name: Static no-generation guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('.github/scripts/wp020_live_r3_gemini_access_probe.py').read_text(encoding='utf-8')
+          forbidden = ('/interactions', 'generateContent', 'client.post(', 'requests.post(', 'httpx.post(')
+          hits = [token for token in forbidden if token in source]
+          if hits:
+              raise SystemExit(f"STOP: generation-capable token found in PRE1 probe: {hits}")
+          print('Static no-generation guard PASS')
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Gemini metadata-only access probe
+        shell: bash
+        run: python .github/scripts/wp020_live_r3_gemini_access_probe.py
