@@ -21,6 +21,31 @@ class FFmpegRenderExecutor(RenderExecutor):
     def _has_ffmpeg(self) -> bool:
         return shutil.which(self.ffmpeg_path) is not None
 
+    def validate_runtime(self) -> str:
+        """Fail fast if the configured FFmpeg runtime is not executable."""
+        resolved_path = shutil.which(self.ffmpeg_path)
+        if not resolved_path:
+            raise RuntimeError(f"FFmpeg binary '{self.ffmpeg_path}' not found on worker host system.")
+
+        try:
+            result = subprocess.run(
+                [resolved_path, "-version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"FFmpeg runtime validation failed for '{resolved_path}': {exc}") from exc
+
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "unknown FFmpeg error").strip()
+            raise RuntimeError(
+                f"FFmpeg runtime validation failed for '{resolved_path}' with code {result.returncode}: {detail}"
+            )
+
+        return resolved_path
+
     def render_timeline(
         self,
         timeline_spec: Dict[str, Any],
@@ -43,7 +68,6 @@ class FFmpegRenderExecutor(RenderExecutor):
         render_meta = timeline_spec.get("render_metadata") or {}
         preset_snapshot = timeline_spec.get("preset_snapshot") or render_meta.get("preset_snapshot") or {}
 
-        # Resolve width, height, bitrate, and framing mode
         target_width = timeline_spec.get("target_width") or preset_snapshot.get("width")
         target_height = timeline_spec.get("target_height") or preset_snapshot.get("height")
         video_bitrate_kbps = timeline_spec.get("video_bitrate_kbps") or preset_snapshot.get("video_bitrate_kbps")
@@ -90,7 +114,6 @@ class FFmpegRenderExecutor(RenderExecutor):
         has_video_map = False
         has_audio_map = False
 
-        # Calculate placement durations and transition overlaps
         total_overlap = 0.0
         transition_specs = []
         if valid_placements:
@@ -153,7 +176,6 @@ class FFmpegRenderExecutor(RenderExecutor):
                         )
                         curr_offset = curr_offset + next_dur - overlap
                     else:
-                        # CUT transition within mixed xfade chain
                         offset = curr_offset
                         filter_parts.append(
                             f"{curr_stream}{next_stream}xfade=transition=fade:duration=0.001:offset={offset:.2f}{out_stream}"
