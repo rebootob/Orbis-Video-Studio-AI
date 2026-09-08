@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../api/client';
 import type { ExportPreset, RenderBatch } from '../../api/types';
+import { SubtitleControls } from './SubtitleControls';
 
 interface ExportPresetsModalProps {
   projectId: string;
@@ -105,8 +106,10 @@ export const ExportPresetsModal: React.FC<ExportPresetsModalProps> = ({
           color: '#cdd6f4',
           padding: '24px',
           borderRadius: '12px',
-          width: '560px',
-          maxWidth: '90vw',
+          width: '640px',
+          maxWidth: '92vw',
+          maxHeight: '92vh',
+          overflowY: 'auto',
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
           border: '1px solid #313244',
         }}
@@ -144,6 +147,8 @@ export const ExportPresetsModal: React.FC<ExportPresetsModalProps> = ({
             ⚠️ {error}
           </div>
         )}
+
+        <SubtitleControls projectId={projectId} />
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '32px 0', color: '#a6adc8' }}>
