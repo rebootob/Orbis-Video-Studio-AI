@@ -191,6 +191,17 @@ def test_e2e_01_story_video_materialization_and_assembly_lineage_close(db_sessio
     assert all(p.source_type == "VIDEO" for p in timeline.shot_placements)
     assert all(p.visual_asset_id is not None for p in timeline.shot_placements)
 
+    # S1-LIVE-01 regression: the same canonical STORY-linked scenes/shots must
+    # continue into Core V1 AudioPlan without a noncanonical Scene.project_id fixture.
+    audio_plan = AudioProductionService.generate_audio_plan(db_session, project.id)
+    summary = audio_plan.plan_data["summary"]
+    tracks = audio_plan.plan_data["tracks"]
+    assert summary["total_scenes"] == len(story_scenes)
+    assert summary["total_shots"] == len(shots)
+    assert tracks["bgm_count"] == 1
+    assert tracks["ambience_count"] == len(story_scenes)
+    assert tracks["vo_count"] + tracks["dialogue_count"] >= 1
+
 
 def _seed_materialized_video_project(db, mock_storage):
     project = Project(

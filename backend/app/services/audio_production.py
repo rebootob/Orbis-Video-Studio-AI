@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.services.storage.factory import get_storage_provider
 from app.models.project import Project
+from app.models.story import Story
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.asset import Asset
@@ -338,20 +339,31 @@ class AudioProductionService:
         if not project:
             raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-        scenes = (
-            db.query(Scene)
-            .filter(Scene.project_id == project_id)
-            .order_by(Scene.scene_number.asc())
-            .all()
-        )
+        # Canonical project scene resolution must support both direct Project -> Scene
+        # lineage (SHORT/SCENE/LOOP) and STORY -> Scene lineage.  Generated STORY
+        # scenes intentionally carry story_id without duplicating project_id.
+        story = db.query(Story).filter(Story.project_id == project_id).first()
+        scene_query = db.query(Scene)
+        if story is not None:
+            scene_query = scene_query.filter(
+                (Scene.project_id == project_id) | (Scene.story_id == story.id)
+            )
+        else:
+            scene_query = scene_query.filter(Scene.project_id == project_id)
+
+        scenes = scene_query.order_by(Scene.scene_number.asc(), Scene.id.asc()).all()
+        scenes = [s for s in scenes if not (s.scene_config or {}).get("archived")]
         scene_ids = [s.id for s in scenes]
 
         shots: List[Shot] = []
         if scene_ids:
             shots = (
                 db.query(Shot)
-                .filter(Shot.scene_id.in_(scene_ids))
-                .order_by(Shot.shot_number.asc())
+                .filter(
+                    Shot.scene_id.in_(scene_ids),
+                    Shot.status != "ARCHIVED",
+                )
+                .order_by(Shot.shot_number.asc(), Shot.id.asc())
                 .all()
             )
 
