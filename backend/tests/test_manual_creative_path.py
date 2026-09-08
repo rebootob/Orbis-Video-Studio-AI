@@ -58,6 +58,7 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
     initial_state = initial.json()
     assert initial_state["automation_mode"] == "MANUAL"
     assert initial_state["recommended_action"]["action"] == "SUBMIT_MANUAL_STORY"
+    assert initial_state["recommended_action"]["action_type"] == "GENERATION"
     assert initial_state["recommended_action"]["is_chargeable"] is False
     assert initial_state["recommended_action"]["is_blocked"] is True
 
@@ -120,6 +121,7 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
 
     storyboard_state = client.get(f"/api/v1/projects/{project_id}/orchestration").json()
     assert storyboard_state["recommended_action"]["action"] == "SUBMIT_MANUAL_STORYBOARD"
+    assert storyboard_state["recommended_action"]["action_type"] == "GENERATION"
     assert storyboard_state["recommended_action"]["is_chargeable"] is False
 
     submit_storyboard = client.post(
@@ -146,6 +148,7 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
 
     shot_state = client.get(f"/api/v1/projects/{project_id}/orchestration").json()
     assert shot_state["recommended_action"]["action"] == "SUBMIT_MANUAL_SHOT_PLAN"
+    assert shot_state["recommended_action"]["action_type"] == "GENERATION"
     assert shot_state["recommended_action"]["is_chargeable"] is False
 
     submit_plan = client.post(
@@ -184,6 +187,7 @@ def test_manual_scene_mode_reaches_shot_plan_approved_without_story_or_provider(
 
     initial = client.get(f"/api/v1/projects/{project_id}/orchestration").json()
     assert initial["recommended_action"]["action"] == "SUBMIT_MANUAL_STORYBOARD"
+    assert initial["recommended_action"]["action_type"] == "GENERATION"
     assert initial["recommended_action"]["is_blocked"] is True
 
     scene = client.post(
