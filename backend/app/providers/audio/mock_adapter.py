@@ -17,20 +17,19 @@ def _generate_deterministic_wav_bytes(duration_sec: float, tag: str = "ORBIS") -
     bits_per_sample = 16
     byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
     block_align = num_channels * (bits_per_sample // 8)
-    
+
     num_samples = int(sample_rate * max(0.5, min(duration_sec, 60.0)))
     data_size = num_samples * block_align
     chunk_size = 36 + data_size
-    
-    # 44-byte WAV header
+
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF",
         chunk_size,
         b"WAVE",
         b"fmt ",
-        16,  # Subchunk1Size for PCM
-        1,   # AudioFormat (1 = PCM)
+        16,
+        1,
         num_channels,
         sample_rate,
         byte_rate,
@@ -39,13 +38,12 @@ def _generate_deterministic_wav_bytes(duration_sec: float, tag: str = "ORBIS") -
         b"data",
         data_size,
     )
-    
-    # Embed deterministic pattern
+
     tag_bytes = tag.encode("utf-8")[:16].ljust(16, b"\x00")
     sample_data = bytearray(data_size)
     for i in range(min(len(tag_bytes), data_size)):
         sample_data[i] = tag_bytes[i]
-        
+
     return header + bytes(sample_data)
 
 
@@ -74,13 +72,15 @@ class MockAudioProviderAdapter(IAudioProviderAdapter):
     def validate_config(self, config: Dict[str, Any]) -> bool:
         return True
 
+    def estimate_cost(self, params: AudioGenerationParams) -> Optional[float]:
+        return 0.05 if params.audio_type == "BGM" else 0.02
+
     async def generate_audio(self, params: AudioGenerationParams) -> AudioJobResult:
         job_id = f"mock-audio-job-{uuid.uuid4().hex[:12]}"
         duration = params.duration_seconds or 4.0
-        
-        cost = 0.05 if params.audio_type == "BGM" else 0.02
 
-        # Check for simulated async
+        cost = self.estimate_cost(params) or 0.0
+
         extra = params.provider_specific_params or {}
         if extra.get("simulate_async"):
             self._jobs[job_id] = {
@@ -100,7 +100,6 @@ class MockAudioProviderAdapter(IAudioProviderAdapter):
                 raw_response={"mock_provider": self._provider_id, "mode": "async"},
             )
 
-        # Check for simulated provider failure
         if extra.get("simulate_failure"):
             return AudioJobResult(
                 provider_job_id=job_id,
@@ -111,7 +110,6 @@ class MockAudioProviderAdapter(IAudioProviderAdapter):
                 cost_usd=0.0,
             )
 
-        # Check for simulated ambiguous submission
         if extra.get("simulate_uncertain"):
             return AudioJobResult(
                 provider_job_id=job_id,
@@ -165,7 +163,7 @@ class MockAudioProviderAdapter(IAudioProviderAdapter):
                 cost_usd=cost,
                 raw_response={"mock_provider": self._provider_id, "polls": job_info["polls"]},
             )
-        
+
         return AudioJobResult(
             provider_job_id=provider_job_id,
             status="PROCESSING",
