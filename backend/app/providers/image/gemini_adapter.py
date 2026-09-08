@@ -119,6 +119,15 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         if len(refs) > self._max_reference_count:
             raise ValueError("REFERENCE_COUNT_UNSUPPORTED")
 
+        character_count = sum(1 for ref in refs if ref.type == "character")
+        location_count = sum(1 for ref in refs if ref.type == "location")
+        if character_count > 4:
+            raise ValueError("CHARACTER_REFERENCE_COUNT_UNSUPPORTED")
+        if location_count > 10:
+            raise ValueError("LOCATION_REFERENCE_COUNT_UNSUPPORTED")
+        if character_count + location_count != len(refs):
+            raise ValueError("REFERENCE_TYPE_UNSUPPORTED")
+
         if self._reference_resolver is not None:
             resolver = self._reference_resolver
         else:
