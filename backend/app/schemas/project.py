@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+VALID_AUTOMATION_MODES = {"MANUAL", "ASSISTED", "AUTO"}
 
 
 class ProjectCreateRequest(BaseModel):
@@ -15,6 +18,25 @@ class ProjectCreateRequest(BaseModel):
     preferred_aspect_ratio: Optional[str] = None
     mode_config: Optional[Any] = None
     default_config: Optional[Any] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_automation_mode(cls, data):
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        raw_mode = normalized.get("automation_mode")
+        if raw_mode is None:
+            mode_config = normalized.get("mode_config")
+            if isinstance(mode_config, dict):
+                raw_mode = mode_config.get("automation_level")
+        mode = str(raw_mode or "MANUAL").strip().upper()
+        if mode not in VALID_AUTOMATION_MODES:
+            raise ValueError(
+                f"Invalid automation_mode '{raw_mode}'. Allowed: {sorted(VALID_AUTOMATION_MODES)}"
+            )
+        normalized["automation_mode"] = mode
+        return normalized
 
 
 VALID_PROJECT_STATUSES = {
@@ -54,6 +76,17 @@ class ProjectUpdateRequest(BaseModel):
     mode_config: Optional[Any] = None
     default_config: Optional[Any] = None
 
+    @model_validator(mode="after")
+    def validate_automation_mode(self):
+        if self.automation_mode is not None:
+            mode = self.automation_mode.strip().upper()
+            if mode not in VALID_AUTOMATION_MODES:
+                raise ValueError(
+                    f"Invalid automation_mode '{self.automation_mode}'. Allowed: {sorted(VALID_AUTOMATION_MODES)}"
+                )
+            self.automation_mode = mode
+        return self
+
     def validate_and_normalize_status(self) -> Optional[str]:
         if self.status is not None:
             norm = self.status.strip().upper()
@@ -63,7 +96,6 @@ class ProjectUpdateRequest(BaseModel):
                 )
             return norm
         return None
-
 
 
 class ProjectResponse(BaseModel):

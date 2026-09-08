@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.production_orchestrator import ProductionOrchestrator
+from app.services.manual_creative import ManualCreativeService
 from app.schemas.orchestrator import (
     OrchestrationStateResponse,
     ExecuteActionRequest,
@@ -15,11 +16,24 @@ from app.schemas.orchestrator import (
     PaginatedOrchestrationAuditResponse,
     OrchestrationAuditResponse,
 )
-
 from app.services.creative_generation.base import CreativeGenerationProvider
 from app.services.creative_generation.factory import get_creative_provider
 
 router = APIRouter()
+
+
+def _overlay_state(db: Session, state: OrchestrationStateResponse) -> OrchestrationStateResponse:
+    return ManualCreativeService.overlay_state(db, state)
+
+
+def _overlay_execute_response(db: Session, response: ExecuteActionResponse) -> ExecuteActionResponse:
+    response.orchestration_state = _overlay_state(db, response.orchestration_state)
+    return response
+
+
+def _overlay_approve_response(db: Session, response: ApproveStageResponse) -> ApproveStageResponse:
+    response.orchestration_state = _overlay_state(db, response.orchestration_state)
+    return response
 
 
 @router.get(
@@ -31,8 +45,9 @@ def get_orchestration_state(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
 ):
-    """Read canonical orchestration state, current stage, and next recommended action."""
-    return ProductionOrchestrator.evaluate_state(db=db, project_id=project_id)
+    """Read canonical orchestration state with MANUAL next-best-action overlay where applicable."""
+    state = ProductionOrchestrator.evaluate_state(db=db, project_id=project_id)
+    return _overlay_state(db, state)
 
 
 @router.post(
@@ -46,8 +61,16 @@ def execute_orchestration_action(
     db: Session = Depends(get_db),
     provider: CreativeGenerationProvider = Depends(get_creative_provider),
 ):
-    """Execute an allowed production orchestration action with precondition validation."""
-    return ProductionOrchestrator.execute_action(
+    """Execute an allowed action; MANUAL submissions bypass provider dispatch."""
+    if ManualCreativeService.handles_action(request.action):
+        return ManualCreativeService.execute_submission(
+            db=db,
+            project_id=project_id,
+            action=request.action,
+            actor="USER",
+        )
+
+    response = ProductionOrchestrator.execute_action(
         db=db,
         project_id=project_id,
         action=request.action,
@@ -55,6 +78,7 @@ def execute_orchestration_action(
         actor="USER",
         provider=provider,
     )
+    return _overlay_execute_response(db, response)
 
 
 @router.post(
@@ -70,7 +94,7 @@ def approve_production_stage(
 ):
     """Approve current production stage gate and advance to next stage."""
     req = request or ApproveStageRequest()
-    return ProductionOrchestrator.approve_stage(
+    response = ProductionOrchestrator.approve_stage(
         db=db,
         project_id=project_id,
         stage=req.stage,
@@ -79,6 +103,7 @@ def approve_production_stage(
         actor="USER",
         provider=provider,
     )
+    return _overlay_approve_response(db, response)
 
 
 @router.patch(
@@ -92,13 +117,14 @@ def update_orchestration_settings(
     db: Session = Depends(get_db),
 ):
     """Update project orchestration preferences, including automation mode (MANUAL, ASSISTED, AUTO)."""
-    return ProductionOrchestrator.update_settings(
+    state = ProductionOrchestrator.update_settings(
         db=db,
         project_id=project_id,
         automation_mode=request.automation_mode,
         auto_cost_authorized=request.auto_cost_authorized,
         actor="USER",
     )
+    return _overlay_state(db, state)
 
 
 @router.get(

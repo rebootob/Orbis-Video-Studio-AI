@@ -4,6 +4,7 @@ from app.api.v1.endpoints import (
     assets,
     document_extraction,
     story_generation,
+    manual_creative,
     reference_library,
     generation_queue,
     projects,
@@ -27,6 +28,7 @@ api_router.include_router(orchestration.router, tags=["orchestration"])
 api_router.include_router(assets.router, tags=["assets"])
 api_router.include_router(document_extraction.router, tags=["document-extraction"])
 api_router.include_router(story_generation.router, tags=["story-generation"])
+api_router.include_router(manual_creative.router, tags=["manual-creative"])
 api_router.include_router(reference_library.router, tags=["reference-library"])
 api_router.include_router(generation_queue.router, tags=["generation-queue"])
 api_router.include_router(shots.router, tags=["shots"])
@@ -37,5 +39,3 @@ api_router.include_router(assembly.router, tags=["assembly"])
 api_router.include_router(subtitles.router, tags=["subtitles"])
 api_router.include_router(qc.router, prefix="/projects/{project_id}/qc", tags=["qc"])
 api_router.include_router(renders.router, prefix="/projects/{project_id}/renders", tags=["renders"])
-
-
