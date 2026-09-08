@@ -1,0 +1,131 @@
+name: WP020 LIVE R2 No-Paid Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: orbis_uat
+          POSTGRES_PASSWORD: orbis_uat_password
+          POSTGRES_DB: orbis_live_r2_preflight
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbis_uat -d orbis_live_r2_preflight"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PREFLIGHT_MINIMUM_MAIN_SHA: 6d4cfad3c87d17eddc2af459828610720a477875
+      PREFLIGHT_MAIN_SHA: ${{ github.sha }}
+      ENVIRONMENT: uat
+      DEBUG: "false"
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: orbis_uat
+      POSTGRES_PASSWORD: orbis_uat_password
+      POSTGRES_DB: orbis_live_r2_preflight
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_BUCKET: orbis-live-r2-preflight
+      OBJECT_STORAGE_ACCESS_KEY: orbisminio
+      OBJECT_STORAGE_SECRET_KEY: orbisminiosecret
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_SECURE: "false"
+
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_CREATIVE_MODEL: gpt-4o
+      OPENAI_MAX_RETRIES: "0"
+      DEFAULT_CREATIVE_PROFILE: FAST
+
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_IMAGE_MODEL: gemini-3.1-flash-image
+      GEMINI_IMAGE_SIZE: 1K
+
+      VIDU_API_KEY: ${{ secrets.VIDU_API_KEY }}
+      VIDU_DEFAULT_MODEL: viduq2
+
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      ELEVENLABS_DEFAULT_VOICE_ID: ${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}
+
+      DEFAULT_IMAGE_PROVIDER: gemini_image
+      DEFAULT_VIDEO_PROVIDER: vidu
+      DEFAULT_AUDIO_PROVIDER: elevenlabs_audio
+
+      PROVIDER_PRICING_CONFIG: >-
+        {"openai:STORY_GENERATION:gpt-4o":{"provider":"openai","operation":"STORY_GENERATION","model":"gpt-4o","cost_per_1k_prompt_tokens":0.0025,"cost_per_1k_completion_tokens":0.0100,"currency":"USD"},"gemini_image:IMAGE_GENERATION:gemini-3.1-flash-image":{"provider":"gemini_image","operation":"IMAGE_GENERATION","model":"gemini-3.1-flash-image","cost_per_generation":0.08,"currency":"USD"},"vidu:VIDEO_GENERATION:viduq2":{"provider":"vidu","operation":"VIDEO_GENERATION","model":"viduq2","cost_per_generation":0.05,"cost_per_second":0.025,"currency":"USD"}}
+
+    steps:
+      - name: Checkout canonical main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard canonical main ancestry
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "PREFLIGHT_FAIL: workflow must be dispatched on main; got $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$PREFLIGHT_MINIMUM_MAIN_SHA" HEAD
+          echo "Canonical main contains the post-S1-CV1-MANUAL-01 baseline"
+
+      - name: Start ephemeral MinIO
+        shell: bash
+        run: |
+          docker run -d --rm --name orbis-live-r2-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER="$OBJECT_STORAGE_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$OBJECT_STORAGE_SECRET_KEY" \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              echo "Ephemeral object storage ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "PREFLIGHT_FAIL: ephemeral object storage failed health check" >&2
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Static no-paid execution guard
+        shell: bash
+        run: |
+          if grep -En '\.(generate_story|generate_image|generate_video|generate_audio|submit_generation|create_task)\(' .github/scripts/wp020_live_r2_preflight.py; then
+            echo "PREFLIGHT_FAIL: provider execution entrypoint found in no-paid preflight script" >&2
+            exit 1
+          fi
+          echo "No provider generation entrypoint found in preflight script"
+
+      - name: Run R2 no-paid LIVE preflight
+        working-directory: backend
+        run: PYTHONPATH=. python ../.github/scripts/wp020_live_r2_preflight.py
+
+      - name: Confirm fence untouched and no paid execution
+        run: |
+          echo "PREFLIGHT_ONLY_COMPLETE"
+          echo "No EXECUTION_STARTED marker is written by this workflow."
+          echo "No provider-generation invocation exists in this workflow."
+          echo "Paid provider calls: 0"
