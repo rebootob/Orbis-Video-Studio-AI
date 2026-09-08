@@ -19,19 +19,7 @@ ROLE MODEL
 - Claude Code = STOP by default
 - Repository truth is authoritative
 
-CURRENT CANONICAL TRUTH
-- main HEAD after P4-WP019 merge: a09fcab835515679bf4f0bbfce8aec84f7e15062
-- P4-WP019 = PASS / CLOSED / MERGED
-- P4-WP019 PR #50 = MERGED / CLOSED
-- P4-WP019 final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-- P4-WP019 final review ID: 5135969695
-- P4-WP019 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
-- ACTIVE_WORK_PACKAGE = NONE
-- IMPLEMENTATION_AUTHORIZED = NONE
-- P4-WP020 = PROPOSED / NOT AUTHORIZED
-- Completed Core V1 work packages = 19 / 20 (95% by WP count)
-
-MANDATORY STARTUP — BEFORE STATUS OR WORK
+MANDATORY STARTUP
 1. Fresh-fetch current main HEAD.
 2. Read in this exact order:
    project-docs/00_CONTROL/START_HERE.md
@@ -41,92 +29,92 @@ MANDATORY STARTUP — BEFORE STATUS OR WORK
    project-docs/00_CONTROL/CHAT_HANDOFF.md
    project-docs/00_CONTROL/NEXT_CHAT_PROMPT.md
    project-docs/40_DELIVERY/WORK_PACKAGES.md
-3. Read routed product/architecture documents only when relevant.
-4. Live repository truth newer than these documents overrides stale text.
+   project-docs/40_DELIVERY/P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md
+   project-docs/40_DELIVERY/P4_WP020_LIVE_R2_C1.md
+3. Inspect Issue #63 and recent P4-WP020 workflow evidence when making any live/status decision.
+4. Newer repository/workflow/Issue #63 truth overrides stale text.
 
-KNOWN COMPLETED STATE
-P0-WP001 = PASS / CLOSED / MERGED
-P1-WP002 = PASS / CLOSED / MERGED
-P1-WP003 = PASS / CLOSED / MERGED
-P1-WP004 = PASS / CLOSED / MERGED
-P1-WP005 = PASS / CLOSED / MERGED
-P2-WP006 = PASS / CLOSED / MERGED
-P2-WP007 = PASS / CLOSED / MERGED
-P2-WP008 = PASS / CLOSED / MERGED
-P2-WP009 = PASS / CLOSED / MERGED
-P2-WP010 = PASS / CLOSED / MERGED
-P2-WP011 = PASS / CLOSED / MERGED
-P2-WP012 = PASS / CLOSED / MERGED
-P2-WP013 = PASS / CLOSED / MERGED
-P3-WP014 = PASS / CLOSED / MERGED
-P3-WP015 = PASS / CLOSED / MERGED
-P3-WP016 = PASS / CLOSED / MERGED
-P3-WP017 = PASS / CLOSED / MERGED
-P4-WP018 = PASS / CLOSED / MERGED
-P4-WP019 = PASS / CLOSED / MERGED
+CURRENT KNOWN TRUTH AT C1 START
+- canonical main: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
+- P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
+- completed planned Core V1 work packages = 19 / 20
+- P4-WP020 = ACTIVE / NOT CLOSED
+- Core V1 release = NOT DECLARED
 
-P4-WP019 CLOSURE
-- PRE1 PR #49 merged at 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-- Implementation PR #50 merged at a09fcab835515679bf4f0bbfce8aec84f7e15062
-- Final reviewed implementation HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-- Final Independent Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5135969695)
-- Exact-head CI before merge:
-  - Backend: 412 passed, 2 skipped
-  - Frontend: 52/52 tests PASS
-  - Frontend build/typecheck: PASS
-  - Frontend lint: 0 errors
+LIVE R1
+- consumed / immutable
+- bounded OpenAI request returned HTTP 429
+- STOP enforced
+- never rerun R1
 
-P4-WP019 ACCEPTED CAPABILITIES
-1. .orbis ZIP-compatible archive package.
-2. Canonical manifest/checksum trust root and canonical JSON.
-3. Archive security/path/size/compression guards.
-4. FULL_SELF_CONTAINED Core V1 archive contract only.
-5. Full project graph export/import.
-6. CLONE import with UUID/FK remap, storage re-upload and source lineage.
-7. RESTORE import with fail-closed collision handling.
-8. Phase-3 referential-integrity and asset-completeness preflight.
-9. Historical RenderJob/GenerationJob truth preservation and worker fencing.
-10. Historical UsageLedger truth preservation, partial-index fencing and budget exclusion.
-11. Transaction rollback and storage compensation.
-12. REST API export/import endpoints.
-13. Frontend Export/Import UX with fixed canonical archive contract.
+LIVE R2
+- execution ID: LIVE-20260909-BB75-R2
+- run ID: 34287696335
+- main: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
+- no-paid preflight PASS
+- EXECUTION_STARTED fence written => R2 consumed
+- OpenAI STORY SUCCESS
+- OpenAI usage: 544 prompt / 585 completion tokens
+- last known confirmed/committed UAT cost at STOP: USD 0.0072
+- Gemini IMAGE reached provider, returned non-success HTTP, surfaced as HTTP_ERROR
+- exact Gemini HTTP status was not retained in durable R2 evidence
+- chargeable requests conservatively consumed: 2/6
+- Vidu NOT EXECUTED
+- ElevenLabs NOT EXECUTED
+- downstream live proof NOT EXECUTED
+- STOP enforced
+- never rerun R2
+
+ACTIVE CORRECTIVE
+P4-WP020-LIVE-R2-C1 — Gemini HTTP Evidence + Control-Truth Corrective
+
+Owner-authorized boundary:
+- NO-PAID / CODE + TEST + CONTROL-DOC only
+- provider calls allowed: 0
+- paid spend allowed: USD 0.00
+- working branch: ai/p4-wp020-live-r2-c1-gemini-evidence
+
+C1 ALLOWED
+- persist sanitized Gemini non-2xx evidence through existing GenerationJob.result
+- retain only provider/model/http_status/error_code/retryable/submission_uncertain
+- never persist provider error body, headers, API keys, credentials or reference bytes
+- test HTTP 400/401/403/429/503
+- verify deterministic failure vs RECONCILIATION_REQUIRED behavior
+- sync control docs
+- run normal CI/migrations
+
+C1 FORBIDDEN
+- no real provider call
+- no paid workflow dispatch
+- no R1/R2 rerun
+- no R3 paid execution
+- no model/endpoint/pricing/retry-policy change
+- no schema migration
+- no release tag or production deployment
+
+C1 MERGE-READINESS EVIDENCE REQUIRED
+- targeted Gemini tests PASS
+- full backend CI PASS
+- fresh PostgreSQL migrations PASS
+- frontend CI PASS if triggered
+- secret/provider-body leakage = 0
+- paid workflow dispatch during C1 = 0
+- exact diff remains inside C1 scope
+
+NEXT GATE
+- Independently review exact C1 branch HEAD and CI.
+- STOP for Owner merge decision.
+- Do NOT auto-start R3.
+- A later R3 requires a new execution ID, fresh no-paid preflight, bounded resume/cost contract, fresh Owner paid/live authorization tied to exact then-current main, and a new one-shot fence.
+- Prefer resuming from Gemini rather than repeating already-proven OpenAI work unless evidence requires otherwise.
 
 OWNER-LOCKED PRODUCT DIRECTION
-- Orbis is an AI Video Production Orchestrator / Production Control Plane, not a foundation model.
-- Provider-neutral boundaries:
-  CreativeProvider
-  ImageProvider
-  VideoProvider
-  AudioProvider
-- Core owns production state, lineage, references, locks, history, approvals, durable jobs, retry/resume/reconciliation, cost/budget, QC, assembly, render, multi-output and project portability.
-- Core V1 modes: STORY, SHORT, LOOP, SCENE.
-- Architecture-ready later only: PRODUCT, EXPLAINER, PRESENTER, MONTAGE.
-- Vidu remains the Core V1 default VideoProvider behind an adapter.
-- LOCAL_AI = DISALLOWED.
-- Cloud-hosted ComfyUI is future planning only.
-
-LOCKED PRODUCT QUALITIES
-MULTI_PROJECT = REQUIRED
-FULL_HISTORY_RETENTION = REQUIRED
-AUDITABLE_CHANGES = REQUIRED
-NO_SILENT_HISTORY_LOSS = REQUIRED
-AUTOMATION_FIRST = REQUIRED
-HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
-APPROVAL_GATED_AUTOMATION = REQUIRED
-GUIDED_FLEXIBILITY = REQUIRED
-AUDIO_PRODUCTION_CORE_V1 = REQUIRED
-PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
-
-CURRENT GATE
-ACTIVE_WORK_PACKAGE = NONE
-P4-WP019 = PASS / CLOSED / MERGED
-P4-WP020 = PROPOSED / NOT AUTHORIZED
-
-NEXT ALLOWED ACTION
-- Inspect/define P4-WP020 scope, E2E/UAT matrix, release gates and closure evidence when requested by Owner.
-- Present a bounded P4-WP020 authorization contract to Owner.
-- Do NOT start P4-WP020 implementation until explicit Owner authorization.
-- Do NOT reopen P4-WP019 absent a proven regression.
-- Do NOT expand into post-Core-V1 integrations/providers.
-- Do NOT merge future implementation without explicit Owner approval.
+- Orbis = AI Video Production Orchestrator / Production Control Plane
+- provider-neutral: CreativeProvider / ImageProvider / VideoProvider / AudioProvider
+- Core V1 modes: STORY / SHORT / LOOP / SCENE
+- later architecture only: PRODUCT / EXPLAINER / PRESENTER / MONTAGE
+- LOCAL_AI = DISALLOWED
+- CLOUD_AI = REQUIRED
+- VENDOR_LOCK_IN = DISALLOWED
+- never auto-expand Core V1 scope
 ```
