@@ -74,13 +74,14 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | Historical P3-WP017 Proposal | [`../40_DELIVERY/P3_WP017_PROPOSAL.md`](../40_DELIVERY/P3_WP017_PROPOSAL.md) |
 | Historical P4-WP018 Proposal | [`../40_DELIVERY/P4_WP018_PROPOSAL.md`](../40_DELIVERY/P4_WP018_PROPOSAL.md) |
 | Historical P4-WP019 Proposal | [`../40_DELIVERY/P4_WP019_PROPOSAL.md`](../40_DELIVERY/P4_WP019_PROPOSAL.md) |
+| P4-WP020 E2E / UAT / Core V1 Release Proposal | [`../40_DELIVERY/P4_WP020_PROPOSAL.md`](../40_DELIVERY/P4_WP020_PROPOSAL.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
 | Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
 | WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
 
-P4-WP020 is currently `PROPOSED / NOT AUTHORIZED`. Until a dedicated WP020 proposal/contract is explicitly accepted, its live scope and gate are controlled by `CURRENT_STATE.md`, `ACTIVE_TASK.md`, `WORK_PACKAGES.md` and newer repository truth.
+P4-WP020 remains `PROPOSED / NOT AUTHORIZED`. The proposal document defines the candidate staged contract only; it does not authorize PRE1, implementation, paid provider usage, release mutation or merge.
 
 ---
 
