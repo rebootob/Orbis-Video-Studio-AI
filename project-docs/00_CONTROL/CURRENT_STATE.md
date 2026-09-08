@@ -9,113 +9,44 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-MAIN_HEAD: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+MAIN_HEAD: a09fcab835515679bf4f0bbfce8aec84f7e15062
 
+P0-WP001: PASS / CLOSED / MERGED
+P1-WP002: PASS / CLOSED / MERGED
+P1-WP003: PASS / CLOSED / MERGED
+P1-WP004: PASS / CLOSED / MERGED
+P1-WP005: PASS / CLOSED / MERGED
 P2-WP006: PASS / CLOSED / MERGED
 P2-WP007: PASS / CLOSED / MERGED
-P2-WP007_PR: "#15"
-P2-WP007_REVIEWED_HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
-P2-WP007_MERGE_COMMIT: 9cb098dea7fc2948b023ad48163c729f566573a7
-
 P2-WP008: PASS / CLOSED / MERGED
-P2-WP008_PR: "#19"
-P2-WP008_REVIEWED_HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
-P2-WP008_MERGE_COMMIT: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
-
 P2-WP009: PASS / CLOSED / MERGED
-P2-WP009_PR: "#23"
-P2-WP009_REVIEWED_HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
-P2-WP009_MERGE_COMMIT: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
-
 P2-WP010: PASS / CLOSED / MERGED
-P2-WP010_ISSUE: "#24"
-P2-WP010_PR: "#25"
-P2-WP010_BRANCH: ai/p2-wp010-mode-aware-web-workspace
-P2-WP010_REVIEWED_HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
-P2-WP010_MERGE_COMMIT: 639e61fb69b6abee8598074add458035db906ceb
-P2-WP010_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124386306)
-
 P2-WP011: PASS / CLOSED / MERGED
-P2-WP011_ISSUE: "#28"
-P2-WP011_PR: "#29"
-P2-WP011_BRANCH: ai/p2-wp011-batch-resume
-P2-WP011_REVIEWED_HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
-P2-WP011_MERGE_COMMIT: 643614b089a295ea96be179e470707609cbe4b53
-P2-WP011_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5124729394)
-
 P2-WP012: PASS / CLOSED / MERGED
-P2-WP012_ISSUE: "#31"
-P2-WP012_PR: "#32"
-P2-WP012_BRANCH: ai/p2-wp012-production-orchestrator
-P2-WP012_REVIEWED_HEAD: a781926bbf607cad1b992d089920be6f094e41c9
-P2-WP012_MERGE_COMMIT: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
-P2-WP012_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5125098674)
-
 P2-WP013: PASS / CLOSED / MERGED
-P2-WP013_ISSUE: "#33"
-P2-WP013_PR: "#34"
-P2-WP013_BRANCH: ai/p2-wp013-image-keyframe-pipeline
-P2-WP013_REVIEWED_HEAD: f9fd46b917390224a5ab58bad0d3be238edbd7b3
-P2-WP013_MERGE_COMMIT: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
-P2-WP013_FINAL_REVIEW: PASS / READY TO MERGE
-
 P3-WP014: PASS / CLOSED / MERGED
-P3-WP014_ISSUE: "#35"
-P3-WP014_PR: "#36"
-P3-WP014_BRANCH: ai/p3-wp014-audio-production
-P3-WP014_REVIEWED_HEAD: fb425feaec2dede3201e054d0b842b68820473d8
-P3-WP014_MERGE_COMMIT: f50e2568d197b3c4bab5e4303f31af817db6e1bf
-P3-WP014_FINAL_REVIEW: PASS / READY TO MERGE
-
 P3-WP015: PASS / CLOSED / MERGED
-P3-WP015_ISSUE: "#37"
-P3-WP015_PR: "#38"
-P3-WP015_BRANCH: ai/p3-wp015-simplified-assembly
-P3-WP015_STARTING_HEAD: f50e2568d197b3c4bab5e4303f31af817db6e1bf
-P3-WP015_REVIEWED_HEAD: 640212f71182ba3f6a5024a442beb363868eabc1
-P3-WP015_MERGE_COMMIT: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
-P3-WP015_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127082342)
-
 P3-WP016: PASS / CLOSED / MERGED
-P3-WP016_ISSUE: "#40"
-P3-WP016_PR: "#41"
-P3-WP016_BRANCH: ai/p3-wp016-qc-approval
-P3-WP016_STARTING_HEAD: a8eef74792f037466b5f366c76a961c1610a85da
-P3-WP016_REVIEWED_HEAD: 5def41c8bba9b3004b7007f671899e045438a8c4
-P3-WP016_MERGE_COMMIT: 43e5221e7f39a19e8c6fde54c450324aa8333059
-P3-WP016_FINAL_REVIEW: PASS / READY TO MERGE (Review ID 5127769635)
-
 P3-WP017: PASS / CLOSED / MERGED
-P3-WP017_PR: "#44"
-P3-WP017_BRANCH: ai/p3-wp017-cloud-render-workers
-P3-WP017_STARTING_HEAD: 556ca1c2566c154e5f10559e74907896bbf3b797
-P3-WP017_REVIEWED_HEAD: 72d842936a7812aabec8df6b948930a0e296a553
-P3-WP017_MERGE_COMMIT: 72065b9c29350e54dd7811a00d7198c6765004d1
-P3-WP017_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
-
 P4-WP018: PASS / CLOSED / MERGED
-P4-WP018_PR: "#47"
-P4-WP018_BRANCH: ai/p4-wp018-multi-output-export-presets
-P4-WP018_PRE1_REVIEWED_HEAD: f51694643596acba54447cc0ab36bc8cbfd8dfd5
-P4-WP018_PRE1_MERGE_COMMIT: 96d53c30f0344dc84bb3d9205e5b7bbbde94885b
-P4-WP018_IMPLEMENTATION_REVIEWED_HEAD: fd745def2235fdaa6accf82ea2cb037a4fa42390
-P4-WP018_MERGE_COMMIT: 09e62876543ee7990919beb43600a1c748be545d
-P4-WP018_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
-P4-WP018_PROPOSAL: project-docs/40_DELIVERY/P4_WP018_PROPOSAL.md
+P4-WP019: PASS / CLOSED / MERGED
 
-P4-WP019: IN_PROGRESS / CHANGES REQUIRED
 P4-WP019_PR: "#50"
 P4-WP019_BRANCH: ai/p4-wp019-orbis-archive
 P4-WP019_PRE1_REVIEWED_HEAD: e1deff16aa93fb3b2e68d404415971351c4a9e46
 P4-WP019_PRE1_MERGE_COMMIT: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-P4-WP019_REVIEWED_HEAD: 59596c0e21c6d685a160742fd498128a53b4682b
-P4-WP019_LATEST_REVIEW: CHANGES REQUIRED (Review ID 5135776036)
+P4-WP019_FINAL_REVIEWED_HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
+P4-WP019_FINAL_REVIEW: PASS / READY FOR OWNER MERGE DECISION (Review ID 5135969695)
+P4-WP019_MERGE_COMMIT: a09fcab835515679bf4f0bbfce8aec84f7e15062
 P4-WP019_PROPOSAL: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
-IMPLEMENTATION_AUTHORIZED: YES
+
+ACTIVE_WORK_PACKAGE: NONE
+IMPLEMENTATION_AUTHORIZED: NONE
+CURRENT_GATE: POST-WP019 / READY FOR OWNER WP020 AUTHORIZATION DECISION
 P4-WP020: PROPOSED / NOT AUTHORIZED
 
-ACTIVE_WORK_PACKAGE: P4-WP019
-CURRENT_GATE: P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
+COMPLETED_WORK_PACKAGES: 19 / 20
+CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
 
 VIDEO_PRODUCTION_MODES_V1:
   - STORY
@@ -154,86 +85,118 @@ WATCHER: PAUSED / NOT PRODUCTION-TRUSTED
 
 ---
 
-## Detailed Status Matrix
+## Delivery Status Matrix
 
-| Component / Layer | Status | Notes |
+| Work Package | Status | Key Truth |
 | :--- | :--- | :--- |
-| Governance & Documentation (P0-WP001) | PASS / CLOSED / MERGED | Foundation complete. |
-| Backend Core Framework (P1-WP002) | PASS / CLOSED / MERGED | Backend/database foundation complete. |
-| Object Storage & Asset API (P1-WP003) | PASS / CLOSED / MERGED | S3-compatible asset layer complete. |
-| Document Ingestion Engine (P1-WP004) | PASS / CLOSED / MERGED | PDF/DOCX/PPTX/text ingestion complete. |
-| Story & Script Generator (P1-WP005) | PASS / CLOSED / MERGED | Creative generation service complete behind provider-oriented service boundary. |
-| Reference Library & Bibles (P2-WP006) | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
-| Vidu Provider Adapter & Durable Queue (P2-WP007) | PASS / CLOSED / MERGED | Durable job control, retries, reconciliation, cancellation and secret safety complete. |
-| Hybrid Shot / Asset Lock / Base Video Modes (P2-WP008) | PASS / CLOSED / MERGED | Hybrid shot engine, lock machine, Core V1 video modes and config inheritance complete. |
-| Cost Control & Granular Usage Audit Ledger (P2-WP009) | PASS / CLOSED / MERGED | Provider-neutral usage ledger, budget controls, pricing abstraction, audit adjustments and DB-level idempotency complete. |
-| Mode-Aware Web Workspace & Automation-First Storyboard UX (P2-WP010) | PASS / CLOSED / MERGED | PR #25 merged into main at 639e61fb69b6abee8598074add458035db906ceb. Mode-aware workspace, staged approvals, full-history retention, queue controls and safety gates complete. |
-| Selective / Batch Regeneration & Resume Service (P2-WP011) | PASS / CLOSED / MERGED | Canonical candidate selection, shot deduplication, repeat-safe resume, set-based DB queries (no N+1), transactional job/audit persistence, bounded keyset execution, memory-bounded created_jobs accumulation, and BatchRun audit complete. PR #29 merged into main at 643614b089a295ea96be179e470707609cbe4b53. |
-| Production Orchestrator & Staged Approval State Machine (P2-WP012) | PASS / CLOSED / MERGED | Server-side orchestrator service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration. PR #32 merged at cdd79aaa80eaefa8be6c4e4894cb40db0b097a60. |
-| Storyboard Image / Keyframe Pipeline (P2-WP013) | PASS / CLOSED / MERGED | Storyboard keyframe pipeline, ImageProvider abstraction, batch generation & continuity references complete. PR #34 merged at c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd. |
-| Core V1 Audio Production Automation (P3-WP014) | PASS / CLOSED / MERGED | Provider-neutral AudioProvider boundary, 3D audio taxonomy, AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration. PR #36 merged at f50e2568d197b3c4bab5e4303f31af817db6e1bf. |
-| Simplified Assembly / Timeline Preview (P3-WP015) | PASS / CLOSED / MERGED | Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, and frontend timeline workspace. PR #38 merged at 35b31c3c41834209fcb9d63ad7ac52e9632d63d2. |
-| Core V1 QC & Approval Pipeline (P3-WP016) | PASS / CLOSED / MERGED | Provider/revision-bound QC engine, structured findings, warning decision audit history, 1-shot approval per timeline revision, production orchestrator integration. PR #41 merged at 43e5221e7f39a19e8c6fde54c450324aa8333059. |
-| Cloud Render Workers (P3-WP017) | PASS / CLOSED / MERGED | RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering. PR #44 merged into main at 72065b9c29350e54dd7811a00d7198c6765004d1. |
-| Project Export/Import Archive Package (.orbis) (P4-WP019) | IN_PROGRESS / CHANGES REQUIRED | PRE1 merged at `5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5` (PR #49). Implementation PR #50 on branch `ai/p4-wp019-orbis-archive`. Delivered: .orbis ZIP container, non-circular checksums (`checksums.sha256`), security hardening (zip slip/bomb/ratio), full project graph export/import, FULL_SELF_CONTAINED asset packaging, CLONE mode with UUID remapping/storage re-upload, RESTORE mode with collision detection, Phase-3 canonical preflight validation (`ArchivePreflightValidator`), historical job status preservation with worker fencing (`imported_historical`, `execution_disabled`), active partial unique index fencing, UsageLedger financial fencing, budget service exclusion, API export/import endpoints, frontend Export/Import modals, extensive test suites. Reviewed HEAD `59596c0e21c6d685a160742fd498128a53b4682b` (Review ID 5135776036): CHANGES REQUIRED on Migration 020 fail-closed downgrade preflight and archive self-consistency (enforcing FULL_SELF_CONTAINED, catalog size_bytes). Subsequent corrective commit `632f70e9159413cb36ea4f767318c605c45497d1` pushed to PR #50 with 412 backend tests and 52 frontend tests passing. Implementation ~97% complete; 18 of 20 WPs merged (90%); Overall Core V1 ~94-95%. |
-| Watcher / Dispatcher automation | PAUSED | Do not depend on it for production delivery until separate no-credit UAT passes. |
+| P0-WP001 — Governance & Architecture Documentation | PASS / CLOSED / MERGED | Foundation complete. |
+| P1-WP002 — Backend Core Framework | PASS / CLOSED / MERGED | Backend/database foundation complete. |
+| P1-WP003 — Object Storage & Asset API | PASS / CLOSED / MERGED | S3-compatible asset layer complete. |
+| P1-WP004 — Document Ingestion Engine | PASS / CLOSED / MERGED | PDF/DOCX/PPTX/text ingestion complete. |
+| P1-WP005 — Story & Script Generator | PASS / CLOSED / MERGED | Creative generation service complete behind provider boundary. |
+| P2-WP006 — Reference Library & Bibles | PASS / CLOSED / MERGED | Reference context, bibles and lock safety complete. |
+| P2-WP007 — Vidu Adapter & Durable Queue | PASS / CLOSED / MERGED | Durable provider job control complete. |
+| P2-WP008 — Hybrid Shot / Asset Lock / Base Modes | PASS / CLOSED / MERGED | Hybrid shot engine and Core V1 modes complete. |
+| P2-WP009 — Cost Control & Usage Ledger | PASS / CLOSED / MERGED | Budget and provider-neutral usage audit complete. |
+| P2-WP010 — Mode-Aware Web Workspace | PASS / CLOSED / MERGED | Approval-gated, automation-first workspace complete. |
+| P2-WP011 — Batch Regeneration / Resume | PASS / CLOSED / MERGED | Repeat-safe batch/resume and performance guardrails complete. |
+| P2-WP012 — Production Orchestrator | PASS / CLOSED / MERGED | Server-side stage state machine and orchestration audit complete. |
+| P2-WP013 — Storyboard Image / Keyframe Pipeline | PASS / CLOSED / MERGED | Provider-neutral ImageProvider pipeline complete. |
+| P3-WP014 — Core V1 Audio Production | PASS / CLOSED / MERGED | AudioProvider and audio production automation complete. |
+| P3-WP015 — Simplified Assembly / Timeline | PASS / CLOSED / MERGED | Assembly timeline and preview complete. |
+| P3-WP016 — QC & Approval Pipeline | PASS / CLOSED / MERGED | QC findings, decisions and approval gate complete. |
+| P3-WP017 — Cloud Render Workers | PASS / CLOSED / MERGED | Durable render lifecycle and worker fencing complete. |
+| P4-WP018 — Multi-Output Export Presets | PASS / CLOSED / MERGED | Multi-platform render variants and presets complete. |
+| P4-WP019 — Project Archive `.orbis` | PASS / CLOSED / MERGED | PR #50 merged at `a09fcab835515679bf4f0bbfce8aec84f7e15062`. Final reviewed HEAD `df691035f54c1a9ffea4934b6f43134fde35d391`, Review ID `5135969695`. |
+| P4-WP020 — E2E Integration, UAT & Core V1 Release | PROPOSED / NOT AUTHORIZED | Final remaining Core V1 work package. Must not start without explicit Owner authorization. |
+
+---
+
+## P4-WP019 Closure Truth
+
+P4-WP019 delivered the portable project archive boundary required for Core V1:
+
+1. `.orbis` ZIP-compatible archive format.
+2. Canonical manifest/checksum trust root and canonical JSON.
+3. Archive security limits and safe path handling.
+4. `FULL_SELF_CONTAINED` Core V1 export contract.
+5. Full project graph export/import.
+6. CLONE import with UUID/FK remapping and source lineage.
+7. RESTORE import with fail-closed collision handling.
+8. Phase-3 graph/referential-integrity preflight.
+9. Asset completeness and payload/catalog/DB size consistency checks.
+10. Historical RenderJob/GenerationJob execution truth preservation with worker fencing.
+11. Historical UsageLedger financial truth preservation and budget exclusion.
+12. Active partial-unique-index separation for live vs imported historical jobs/ledgers.
+13. Transaction rollback and storage compensation.
+14. REST API export/import endpoints.
+15. Frontend export/import UX using the locked canonical archive contract.
+
+Final exact-head evidence before merge:
+
+```text
+Reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
+Independent Review: PASS / READY FOR OWNER MERGE DECISION
+Review ID: 5135969695
+Backend CI: PASS — 412 passed, 2 skipped
+Frontend CI: PASS — 52/52 tests, build PASS, lint 0 errors
+PR #50: MERGED / CLOSED
+Merge Commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
+```
 
 ---
 
 ## Locked Product Direction
 
-Orbis Video Studio AI is a cloud-first, provider-independent **AI Video Production Orchestrator / Production Control Plane**. It should orchestrate best-of-breed creative, image, video and audio providers rather than reimplement foundation models.
+Orbis Video Studio AI is a cloud-first, provider-independent **AI Video Production Orchestrator / Production Control Plane**. It orchestrates best-of-breed Creative, Image, Video and Audio providers rather than reimplementing foundation models.
 
-The system owns production state and control: Project, Story/Scene/Shot structure, references, locks, approvals, history/version lineage, durable jobs, cost/budget, QC, assembly and export.
+Core owns production state and control:
 
-Target guided production flow:
+- multi-project state
+- Story / Scene / Shot lineage
+- references and continuity
+- locks
+- full history/versioning
+- approvals
+- durable jobs
+- retry/resume/reconciliation
+- cost/budget
+- QC
+- assembly
+- rendering
+- multi-output
+- project portability/export/import
 
-```text
-Brief / References
--> Story
--> Review / Approve
--> Storyboard
--> Review / Approve
--> Shot Plan + Prompts
--> Review / Approve
--> Images / Keyframes
--> Continuity QC
--> Review / Approve
--> Video Generation
--> VO / BGM / SFX / Ambience
--> Auto Assembly
--> Final QC
--> Final Approval
--> Render / Export
-```
-
-Users may stop, review, go back, regenerate selected items, restore previous versions and continue from incomplete work. Full Auto remains an option, but it must never remove safe review/control.
-
-UI principle:
+Provider-neutral boundaries remain:
 
 ```text
-Simple enough for first-time users
-Powerful enough for advanced users
-Consistent across every screen
-Safe for costly AI actions
-Beautiful but not distracting
+CreativeProvider
+ImageProvider
+VideoProvider
+AudioProvider
 ```
+
+Vidu remains the Core V1 default VideoProvider behind an adapter. Cloud-hosted ComfyUI remains future planning only and is not authorized Core V1 implementation.
 
 ---
 
-## Next Allowed Action
+## Current Gate / Next Allowed Action
 
-1. Keep WP001-WP018 closed unless a proven regression exists.
-2. `ACTIVE_WORK_PACKAGE = P4-WP019`.
-3. `CURRENT_GATE = P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE`.
-4. `P4-WP019 = IN_PROGRESS / CHANGES REQUIRED` (PR #50, branch `ai/p4-wp019-orbis-archive`).
-5. Current reviewed implementation HEAD = `59596c0e21c6d685a160742fd498128a53b4682b` (Review ID 5135776036: CHANGES REQUIRED).
-6. Latest PR commit = `632f70e9159413cb36ea4f767318c605c45497d1`.
-7. `P4-WP020 = PROPOSED / NOT AUTHORIZED`.
-8. Antigravity = STOP / NONE after documentation sync.
-9. Codex = STOP.
-10. Claude Code = STOP.
-11. Do NOT merge without Owner approval.
-12. Do NOT start WP020.
+```text
+ACTIVE_WORK_PACKAGE = NONE
+P4-WP019 = PASS / CLOSED / MERGED
+P4-WP020 = PROPOSED / NOT AUTHORIZED
+```
 
-Live GitHub/repository truth newer than this document is authoritative.
+Allowed now:
+
+1. Keep control documents synchronized with the P4-WP019 merge truth.
+2. Review/define P4-WP020 scope and acceptance gates if the Owner requests it.
+3. Start P4-WP020 implementation only after explicit Owner authorization.
+
+Not allowed now:
+
+- Do not reopen P4-WP019 without a proven regression.
+- Do not auto-start P4-WP020.
+- Do not expand Core V1 scope into post-V1 integrations or provider experiments.
+- Do not merge future implementation without explicit Owner approval.
