@@ -125,8 +125,8 @@ def _run_story_to_video_jobs(db):
     return project, story, jobs
 
 
-def test_e2e_01_story_completion_exposes_video_asset_materialization_gap(db_session):
-    """S1-A01 evidence: completed video jobs never become durable VIDEO Shot truth."""
+def test_e2e_01_story_completion_exposes_video_and_assembly_lineage_gaps(db_session):
+    """S1-A01/A03 evidence from the real zero-billing STORY graph."""
     project, story, jobs = _run_story_to_video_jobs(db_session)
 
     with patch.object(ProviderFactory, "get_provider", return_value=CompletedFakeVideoProvider()):
@@ -154,19 +154,24 @@ def test_e2e_01_story_completion_exposes_video_asset_materialization_gap(db_sess
         db_session, project.id, "TRANSITION_TO_FINAL_REVIEW"
     ).to_stage == "FINAL_REVIEW"
 
+    story_scenes = db_session.query(Scene).filter(Scene.story_id == story.id).all()
+    project_scenes = db_session.query(Scene).filter(Scene.project_id == project.id).all()
+    assert story_scenes
+    assert project_scenes == []
+
     shots = (
         db_session.query(Shot)
         .join(Scene, Shot.scene_id == Scene.id)
-        .filter((Scene.project_id == project.id) | (Scene.story_id == story.id))
+        .filter(Scene.story_id == story.id)
         .all()
     )
     assert shots
     assert all(shot.source_asset_id is None for shot in shots)
 
+    # S1-A03 current truth: Assembly only queries Scene.project_id, so the
+    # canonical STORY-linked graph is omitted entirely and yields 0 placements.
     timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
-    assert timeline.shot_placements
-    assert all(placement.source_type != "VIDEO" for placement in timeline.shot_placements)
-    assert any(placement.source_type == "KEYFRAME" for placement in timeline.shot_placements)
+    assert timeline.shot_placements == []
 
 
 def _seed_materialized_video_project(db, mock_storage):
