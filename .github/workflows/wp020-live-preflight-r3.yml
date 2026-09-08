@@ -111,7 +111,7 @@ jobs:
 
       - name: Run no-paid LIVE preflight
         working-directory: backend
-        run: python ../.github/scripts/wp020_live_preflight.py
+        run: PYTHONPATH=. python ../.github/scripts/wp020_live_preflight.py
 
       - name: Confirm no provider execution
         run: echo "PREFLIGHT_ONLY_COMPLETE — this workflow contains no provider-generation invocation"
