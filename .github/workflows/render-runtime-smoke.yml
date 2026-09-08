@@ -32,7 +32,7 @@ jobs:
 
       - name: Render real MP4 smoke artifact
         run: |
-          docker run --rm orbis-render-runtime-smoke python - <<'PY'
+          docker run --rm -i orbis-render-runtime-smoke python - <<'PY'
           import os
           import tempfile
           from app.services.render.ffmpeg_executor import FFmpegRenderExecutor
