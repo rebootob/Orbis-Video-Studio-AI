@@ -1,0 +1,67 @@
+name: Render Runtime Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backend/Dockerfile"
+      - "backend/app/services/render/**"
+      - "backend/app/services/render_worker.py"
+      - "docker-compose.yml"
+      - ".github/workflows/render-runtime-smoke.yml"
+
+jobs:
+  render-runtime-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR diff whitespace
+        run: git diff --check "origin/${{ github.base_ref }}...HEAD"
+
+      - name: Build render runtime image
+        run: docker build -t orbis-render-runtime-smoke ./backend
+
+      - name: Verify FFmpeg runtime
+        run: docker run --rm orbis-render-runtime-smoke ffmpeg -version
+
+      - name: Render real MP4 smoke artifact
+        run: |
+          docker run --rm -i orbis-render-runtime-smoke python - <<'PY'
+          import os
+          import tempfile
+          from app.services.render.ffmpeg_executor import FFmpegRenderExecutor
+
+          with tempfile.TemporaryDirectory() as scratch:
+              output = os.path.join(scratch, "smoke.mp4")
+              meta = FFmpegRenderExecutor().render_timeline(
+                  timeline_spec={
+                      "placements": [],
+                      "audio_clips": [],
+                      "total_duration": 0.25,
+                      "target_width": 320,
+                      "target_height": 180,
+                  },
+                  scratch_dir=scratch,
+                  output_file_path=output,
+              )
+              assert os.path.exists(output)
+              assert os.path.getsize(output) > 0
+              assert meta["video_codec"] == "h264"
+              assert meta["audio_codec"] == "aac"
+              print(f"render-smoke-bytes={os.path.getsize(output)}")
+          PY
+
+      - name: Validate Compose render-worker wiring
+        env:
+          POSTGRES_PASSWORD: ci-placeholder
+          OBJECT_STORAGE_ACCESS_KEY: ci-placeholder
+          OBJECT_STORAGE_SECRET_KEY: ci-placeholder
+        run: |
+          docker compose config --quiet
+          docker compose config --services | grep -Fx "render-worker"
