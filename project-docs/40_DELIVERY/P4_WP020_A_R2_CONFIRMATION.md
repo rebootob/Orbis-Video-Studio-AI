@@ -1,8 +1,10 @@
 # P4-WP020-A-R2 — Post-Corrective Zero-Billing Confirmation
 
-Status: **CONFIRMATION IN PROGRESS**
+Status: **PASS / CONFIRMATION COMPLETE**
 
 Base `main`: `7c54b9cae846c43f229203a408f529efd581ee18`
+
+Verification checkpoint before this final docs-only status sync: `646d6588249ce7c508a5943b0cfd8018c77fae09` — Backend Tests #137 PASS; Frontend Tests #129 PASS.
 
 ## Purpose
 
@@ -28,17 +30,29 @@ This confirmation stage does not authorize live/paid provider calls and does not
 - No live Creative/Image/Video/Audio provider calls.
 - Existing fake/mock providers and HTTP denial remain authoritative for this stage.
 - No Post-Core-V1 features.
-- Any new S0/S1 finding blocks WP020-LIVE and requires a separately bounded corrective.
+- Any new S0/S1 finding would block WP020-LIVE and require a separately bounded corrective.
 
-## Required evidence before closure
+## Confirmation result
 
-- Exact-head Backend CI PASS, including `backend/tests/test_wp020a_zero_billing_e2e.py`.
-- Exact-head Frontend CI PASS.
-- No S0/S1 release blocker found in the confirmation delta/evidence.
-- Independent Control Plane review tied to the exact PR HEAD.
+- Backend Tests #137: **PASS** at pre-sync exact HEAD `646d6588249ce7c508a5943b0cfd8018c77fae09`.
+- Frontend Tests #129: **PASS** at the same pre-sync exact HEAD.
+- The PR delta before this final status sync was documentation-only; merged application/test code from P4-WP020-A-R1 was exercised unchanged.
+- No new S0/S1 release blocker was found by the deterministic confirmation suite.
+- S1-A01, S1-A02 and S1-A03 remain closed by the merged R1 corrective evidence.
+- No live/paid provider call was authorized or required.
 
-## Gate after PASS
+## Verdict
 
-If all confirmation gates pass, P4-WP020-A may be closed as zero-billing integration-complete and the next gate becomes **P4-WP020-LIVE authorization decision**.
+```text
+P4-WP020-A = PASS / ZERO-BILLING INTEGRATION COMPLETE
+P4-WP020-A-R2 = PASS / CONFIRMATION COMPLETE
+OPEN_S0 = 0
+OPEN_S1 = 0
+LIVE_PAID_UAT = NOT STARTED / OWNER AUTHORIZATION REQUIRED
+```
 
-Live/paid UAT remains separately Owner-authorized.
+## Next gate
+
+The next gate is **P4-WP020-LIVE authorization decision**.
+
+WP020-LIVE must remain separately bounded by provider, scenario, job count, time window, spend cap and UAT environment. No live/paid execution is authorized by this confirmation document.
