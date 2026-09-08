@@ -1,147 +1,126 @@
 # Active Task Specification
 
-> **Canonical Document Location:** [`project-docs/00_CONTROL/ACTIVE_TASK.md`](project-docs/00_CONTROL/ACTIVE_TASK.md)
+> Canonical location: `project-docs/00_CONTROL/ACTIVE_TASK.md`
+>
+> Fresh repository truth overrides stale text.
 
 ---
 
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R2-C1
+TITLE = Gemini HTTP Evidence + Control-Truth Corrective
+STATUS = OWNER AUTHORIZED / NO-PAID CORRECTIVE IN PROGRESS
+BASE_MAIN = 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
+WORKING_BRANCH = ai/p4-wp020-live-r2-c1-gemini-evidence
+PROVIDER_CALLS_ALLOWED = 0
+PAID_SPEND_ALLOWED = USD 0.00
 ```
 
-Current status:
+P4-WP020 itself remains **ACTIVE / NOT CLOSED**. Core V1 release is not declared.
+
+---
+
+## Why C1 Exists
+
+The consumed R2 live run reached real providers in this order:
+
+1. OpenAI STORY succeeded.
+2. Gemini IMAGE returned a non-success HTTP response.
+3. Orbis surfaced only `HTTP_ERROR` in durable execution evidence.
+4. The transient provider result contained an HTTP status, but `GenerationJob.result` persisted only `raw_response`, which was empty for the Gemini non-2xx path.
+5. The live contract stopped execution before Vidu, ElevenLabs, and all downstream live proof.
+
+R2 is consumed and must not be rerun.
+
+---
+
+## Accepted R2 Evidence
 
 ```text
-P4-WP019 = PASS / CLOSED / MERGED
-P4-WP020 = PROPOSED / NOT AUTHORIZED
-CURRENT_GATE = POST-WP019 / READY FOR OWNER WP020 AUTHORIZATION DECISION
-IMPLEMENTATION_AUTHORIZED = NONE
+Execution ID: LIVE-20260909-BB75-R2
+Run ID: 34287696335
+Main SHA: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
+Execution fence: CONSUMED
+OpenAI STORY: SUCCESS
+OpenAI usage: 544 prompt / 585 completion tokens
+Last known confirmed/committed UAT cost at STOP: USD 0.0072
+Gemini IMAGE: HTTP_ERROR
+Chargeable calls conservatively consumed: 2/6
+Vidu: NOT EXECUTED
+ElevenLabs: NOT EXECUTED
+Downstream live proof: NOT EXECUTED
 ```
 
-Canonical repository truth:
+No paid retry is authorized by C1.
+
+---
+
+## Authorized C1 Scope
+
+Implementation may only:
+
+1. make Gemini non-2xx failure evidence durable using the existing `GenerationJob.result` JSON field;
+2. persist only sanitized metadata:
+   - provider;
+   - model;
+   - HTTP status;
+   - error code;
+   - retryable flag;
+   - submission-uncertain flag;
+3. keep provider response body, headers, API keys, credentials and reference bytes out of durable failure evidence;
+4. add tests for HTTP 400 / 401 / 403 / 429 / 503;
+5. verify deterministic failure vs `RECONCILIATION_REQUIRED` semantics;
+6. synchronize control docs to current WP020/R2/C1 truth.
+
+No schema migration is required or authorized.
+
+---
+
+## Explicitly Forbidden in C1
+
+- no real OpenAI call;
+- no real Gemini call;
+- no Vidu call;
+- no ElevenLabs call;
+- no paid/live workflow dispatch;
+- no R1 or R2 rerun;
+- no R3 live execution identity;
+- no automatic paid retry;
+- no Gemini model or endpoint change;
+- no pricing-policy change;
+- no retry-policy change;
+- no release tag;
+- no production deployment;
+- no post-Core-V1 scope expansion.
+
+---
+
+## Verification Required Before Merge Proposal
 
 ```text
-Canonical branch: main
-Canonical main HEAD: a09fcab835515679bf4f0bbfce8aec84f7e15062
-P4-WP019 PR: #50 (MERGED / CLOSED)
-P4-WP019 branch: ai/p4-wp019-orbis-archive
-P4-WP019 final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-P4-WP019 final review: PASS / READY FOR OWNER MERGE DECISION
-P4-WP019 final review ID: 5135969695
-P4-WP019 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
+TARGETED_GEMINI_TESTS = PASS required
+FULL_BACKEND_CI = PASS required
+FRESH_POSTGRES_MIGRATIONS = PASS required
+FRONTEND_CI = PASS if repository policy triggers it
+SECRET_LEAK_CHECK = PASS required
+PAID_WORKFLOW_DISPATCH_COUNT_DURING_C1 = 0 required
+EXACT_DIFF_SCOPE = C1 only
 ```
 
-Execution roles:
+After independent exact-head review, STOP for Owner merge decision.
+
+---
+
+## Roles
 
 ```text
-Owner = final human authority / authorization / UAT / merge approval
+Owner = final human authority / authorization / merge / paid-live gates
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE; bounded low-credit Execution Plane only when explicitly authorized
+Antigravity = bounded low-credit Execution Plane only when explicitly authorized
 Codex = STOP
 Claude Code = STOP
 ```
 
----
-
-## P4-WP019 Closure
-
-P4-WP019 is complete and must not be reopened without a proven regression.
-
-Delivered and accepted scope:
-
-1. `.orbis` ZIP-compatible archive package.
-2. Canonical manifest/checksum trust root and canonical JSON.
-3. Archive security validation and bounded extraction limits.
-4. `FULL_SELF_CONTAINED` Core V1 archive contract.
-5. Full project graph serialization and import.
-6. CLONE import with fresh UUID/FK remapping and source lineage.
-7. RESTORE import with collision-safe fail-closed semantics.
-8. Phase-3 graph and referential-integrity preflight.
-9. Asset completeness and payload/catalog/database size consistency.
-10. Historical RenderJob/GenerationJob truth preservation with execution fencing.
-11. Historical UsageLedger truth preservation, partial-index fencing and budget exclusion.
-12. Transaction rollback and storage compensation.
-13. API export/import endpoints.
-14. Frontend Export/Import flow using the canonical Core V1 contract.
-
-Final review evidence:
-
-```text
-Reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-Review ID: 5135969695
-Verdict: PASS / READY FOR OWNER MERGE DECISION
-Backend CI: PASS — 412 passed, 2 skipped
-Frontend CI: PASS — 52/52 tests; build PASS; lint 0 errors
-PR #50 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
-```
-
----
-
-## Delivery Progress
-
-```text
-Completed work packages: 19 / 20
-WP-count completion: 95%
-Core V1 remaining package: P4-WP020 only
-```
-
-P4-WP020 is intended to cover End-to-End System Integration, UAT and Core V1 Release. Its implementation is **not authorized** by completion of P4-WP019.
-
----
-
-## Next Allowed Action
-
-Allowed without implementation authorization:
-
-1. Maintain control-document truth.
-2. Inspect current system/repository evidence for WP020 planning.
-3. Define/verify P4-WP020 scope, UAT matrix, release gates and acceptance criteria.
-4. Present the bounded P4-WP020 authorization contract to the Owner.
-
-Not allowed:
-
-- Do not start P4-WP020 code or test implementation until the Owner explicitly authorizes it.
-- Do not silently expand WP020 into post-Core-V1 integrations.
-- Do not reopen P4-WP019 absent a proven regression.
-- Do not merge any future implementation without Owner approval.
-
----
-
-## Locked Product Direction
-
-Core V1 modes:
-
-```text
-STORY
-SHORT
-LOOP
-SCENE
-```
-
-Architecture-ready later only:
-
-```text
-PRODUCT
-EXPLAINER
-PRESENTER
-MONTAGE
-```
-
-Product locks remain:
-
-```text
-MULTI_PROJECT = REQUIRED
-FULL_HISTORY_RETENTION = REQUIRED
-AUDITABLE_CHANGES = REQUIRED
-NO_SILENT_HISTORY_LOSS = REQUIRED
-AUTOMATION_FIRST = REQUIRED
-HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
-APPROVAL_GATED_AUTOMATION = REQUIRED
-GUIDED_FLEXIBILITY = REQUIRED
-AUDIO_PRODUCTION_CORE_V1 = REQUIRED
-PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
-LOCAL_AI = DISALLOWED
-CLOUD_AI = REQUIRED
-VENDOR_LOCK_IN = DISALLOWED
-```
+Detailed C1 contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R2_C1.md`.
