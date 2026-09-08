@@ -23,7 +23,6 @@ from app.providers.safety import contains_secret
 ReferenceResolver = Callable[[str], Tuple[bytes, str]]
 
 _SUPPORTED_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
-_SUPPORTED_IMAGE_SIZES = {"512", "1K", "2K", "4K"}
 _SUPPORTED_OUTPUT_MIME_TYPES = {"image/jpeg"}
 _SUPPORTED_REFERENCE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _MODEL_RE = re.compile(r"^gemini-[A-Za-z0-9.-]+-image(?:-preview)?$")
@@ -86,7 +85,7 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 and isinstance(self._timeout_seconds, (int, float))
                 and math.isfinite(self._timeout_seconds)
                 and 0 < float(self._timeout_seconds) <= 120
-                and self._default_image_size in _SUPPORTED_IMAGE_SIZES
+                and self._default_image_size == "1K"
                 and 1 <= self._max_reference_count <= 14
                 and 0 < self._max_inline_reference_bytes <= 19 * 1024 * 1024
                 and all(isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for v in numeric_rates)
@@ -196,7 +195,12 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         if not isinstance(usage, dict):
             return None, None
 
-        summary = {"input_tokens": 0, "output_text_tokens": 0, "output_image_tokens": 0}
+        summary = {
+            "input_tokens": 0,
+            "output_text_tokens": 0,
+            "output_image_tokens": 0,
+            "thought_tokens": 0,
+        }
         for row in usage.get("input_tokens_by_modality", []) if isinstance(usage.get("input_tokens_by_modality"), list) else []:
             if isinstance(row, dict) and isinstance(row.get("tokens"), int) and row["tokens"] >= 0:
                 summary["input_tokens"] += row["tokens"]
@@ -207,13 +211,17 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 summary["output_image_tokens"] += row["tokens"]
             else:
                 summary["output_text_tokens"] += row["tokens"]
+        thought_tokens = usage.get("total_thought_tokens")
+        if isinstance(thought_tokens, int) and thought_tokens >= 0:
+            summary["thought_tokens"] = thought_tokens
 
         if summary["output_image_tokens"] <= 0:
             return None, summary
 
+        text_and_thinking_tokens = summary["output_text_tokens"] + summary["thought_tokens"]
         cost = (
             summary["input_tokens"] * float(settings.GEMINI_IMAGE_INPUT_COST_PER_MILLION_USD)
-            + summary["output_text_tokens"] * float(settings.GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD)
+            + text_and_thinking_tokens * float(settings.GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD)
             + summary["output_image_tokens"] * float(settings.GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD)
         ) / 1_000_000.0
         return round(cost, 6), summary
@@ -229,11 +237,11 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
             return self._failure("UNSUPPORTED_SEED")
 
         extras = params.provider_specific_params or {}
-        if set(extras) - {"image_size", "mime_type"}:
+        if set(extras) - {"mime_type"}:
             return self._failure("UNSUPPORTED_PROVIDER_PARAMETERS")
-        image_size = str(extras.get("image_size") or self._default_image_size)
+        image_size = self._default_image_size
         output_mime = str(extras.get("mime_type") or "image/jpeg")
-        if image_size not in _SUPPORTED_IMAGE_SIZES or output_mime not in _SUPPORTED_OUTPUT_MIME_TYPES:
+        if output_mime not in _SUPPORTED_OUTPUT_MIME_TYPES:
             return self._failure("INVALID_PARAMETERS")
 
         prompt = self._safe_prompt(params)
@@ -293,8 +301,6 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
 
         cost_usd, usage_summary = self._usage_cost(data)
         if cost_usd is None:
-            # A completed/chargeable provider result without metering evidence must
-            # not be converted into a fabricated confirmed cost by core.
             return ImageJobResult(
                 provider_job_id=interaction_id or f"gemini-sync-{params.shot_id}",
                 status="COMPLETED",
