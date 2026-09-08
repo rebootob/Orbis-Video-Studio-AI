@@ -374,7 +374,7 @@ class ManualCreativeService:
             action=action,
             display_name=label or action,
             description=description or "Submit manually authored creative structure.",
-            action_type=OrchestrationActionType.APPROVAL,
+            action_type=OrchestrationActionType.GENERATION,
             is_chargeable=False,
             is_blocked=not valid,
             blocked_reason=reason if not valid else None,
