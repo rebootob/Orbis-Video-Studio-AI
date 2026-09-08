@@ -9,111 +9,101 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-PRE1
-TITLE = Gemini Access Probe + Resume Contract + Control-Truth Sync
-STATUS = OWNER AUTHORIZED / NO-PAID PRE1 IN PROGRESS
-BASE_MAIN = d706acacd1f51224c955fb9c8d0d9eab3deda186
-WORKING_BRANCH = ai/p4-wp020-live-r3-pre1
-PROVIDER_GENERATION_CALLS_ALLOWED = 0
-PAID_SPEND_ALLOWED = USD 0.00
+ACTIVE_WORK_PACKAGE = NONE
+STATUS = WAITING FOR OWNER NEXT-GATE AUTHORIZATION
+P4-WP020 = ACTIVE / NOT CLOSED
+CORE_V1_RELEASE = NOT DECLARED
+PAID_LIVE_EXECUTION = NOT AUTHORIZED
 ```
 
-P4-WP020 remains **ACTIVE / NOT CLOSED**. Core V1 release is not declared.
+PRE1 is complete. Completion does not auto-authorize R3 execution tooling or paid/live execution.
 
 ---
 
-## Preconditions Already Satisfied
+## Most Recent Completed Gate
 
-- C1 is PASS / MERGED via PR #74.
-- C1 merge commit is `d706acacd1f51224c955fb9c8d0d9eab3deda186`.
-- R1 and R2 execution identities are consumed and immutable.
-- R2 OpenAI STORY success remains accepted historical evidence.
-- R2 Gemini failure remains exact-status-unknown because C1 cannot reconstruct old evidence retroactively.
-
----
-
-## Authorized PRE1 Scope
-
-Implementation may only:
-
-1. add a manual-only Gemini metadata access probe;
-2. use exactly one authenticated metadata `GET` to `models/gemini-3.1-flash-image` after PRE1 is merged;
-3. authenticate with the configured Gemini key without exposing the key;
-4. persist/log only sanitized status/provider/model/http-status/error classification plus explicit no-generation counters;
-5. test HTTP 200/400/401/403/404/429/5xx and transport/error handling without network calls;
-6. prove provider error body and API key do not leak;
-7. synchronize control docs after C1 merge;
-8. draft a full-chain R3 resume contract without assigning a paid authorization.
-
----
-
-## Explicitly Forbidden in PRE1
-
-- no OpenAI request;
-- no Gemini generation request;
-- no `/interactions`;
-- no `generateContent`;
-- no prompt/image/media submission;
-- no Vidu request;
-- no ElevenLabs request;
-- no paid/live workflow dispatch;
-- no R1/R2 rerun;
-- no R3 execution fence;
-- no R3 paid authorization marker;
-- no release tag;
-- no production deployment;
-- no Core V1 release declaration.
-
----
-
-## Required Verification Before Merge Proposal
+`P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
 
 ```text
-TARGETED_PRE1_TESTS = PASS required
-FULL_BACKEND_CI = PASS required
-FRESH_POSTGRES_MIGRATIONS = PASS required
-FRONTEND_CI = PASS if repository policy triggers it
-WORKFLOW_TRIGGER = workflow_dispatch only
-WORKFLOW_PERMISSIONS = contents: read only
-STATIC_NO_GENERATION_GUARD = PASS required
-SECRET_AND_PROVIDER_BODY_LEAKAGE = 0 required
-PAID_LIVE_WORKFLOW_DISPATCH_DURING_IMPLEMENTATION = 0 required
-EXACT_DIFF_SCOPE = PRE1 only
+Status: PASS / COMPLETED
+PR: #75
+Reviewed PRE1 HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+Merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Metadata probe run: 34291500281
+Probe result: ACCESS_PROBE_PASS
+HTTP status: 200
+Model: gemini-3.1-flash-image
+generation_request_sent: false
+paid_generation_calls: 0
+PRE1 spend: USD 0.00
 ```
 
-After independent exact-head review, STOP for Owner merge decision.
+The probe proves metadata-level authentication/model visibility only. It does not authorize generation and does not prove that the Gemini image-generation submission path will succeed.
 
 ---
 
-## Post-Merge PRE1 Probe Gate
+## Immutable Prior LIVE Truth
 
-After PRE1 tooling is merged, the already-authorized metadata-only probe may be manually dispatched on canonical `main`.
+### R1
 
-`ACCESS_PROBE_PASS` requires:
+- consumed / immutable;
+- bounded OpenAI request returned HTTP 429;
+- never rerun R1.
 
-- HTTP 200;
-- model metadata identity `models/gemini-3.1-flash-image`;
-- `generation_request_sent=false`;
-- `paid_generation_calls=0`.
+### R2
 
-Any non-PASS result blocks R3 paid tooling preparation until reviewed.
+- execution ID `LIVE-20260909-BB75-R2`;
+- run `34287696335`;
+- execution fence consumed;
+- OpenAI STORY succeeded;
+- Gemini IMAGE returned non-success HTTP surfaced as `HTTP_ERROR`;
+- exact historical Gemini HTTP status unavailable;
+- conservative chargeable requests consumed = 2/6;
+- last known confirmed/committed UAT cost at STOP = USD 0.0072;
+- Vidu / ElevenLabs / downstream live proof not executed;
+- never rerun R2.
 
-A probe PASS still does **not** authorize any paid/live generation.
+### R2-C1
+
+- PASS / MERGED / CLOSED via PR #74;
+- merge commit `d706acacd1f51224c955fb9c8d0d9eab3deda186`;
+- future Gemini non-2xx evidence now retains sanitized HTTP status/classification;
+- C1 provider calls = 0;
+- C1 spend = USD 0.00.
 
 ---
 
-## Proposed R3 Only — Not Authorized
+## Proposed Next Gate — Not Authorized
 
-The proposed R3 contract is a new coherent six-call chain because R2's ephemeral database/object-storage state is not reusable canonical project state:
+The next proposed work is **R3 paid one-shot execution-tooling preparation**, not R3 execution itself.
+
+Draft R3 bounds remain:
 
 ```text
 OpenAI x1 -> Gemini x1 -> Vidu x1 -> ElevenLabs x3
-Hard cap USD 1.00
+Maximum chargeable requests: 6
+Hard cap: USD 1.00
 Sequential only
-OpenAI retry 0
+OpenAI retries: 0
 ```
 
-Execution identity and binding main SHA remain unassigned until later tooling merge and fresh Owner authorization.
+Before any R3 tooling implementation, ChatGPT must fresh-review canonical `main` and present a bounded tooling contract for explicit Owner authorization.
+
+R3 execution identity and exact binding main SHA remain unassigned.
+
+---
+
+## Explicitly Forbidden Without a New Owner Gate
+
+- no R3 execution-tooling implementation;
+- no OpenAI/Gemini/Vidu/ElevenLabs generation request;
+- no R3 paid workflow dispatch;
+- no R3 execution fence;
+- no R3 paid authorization marker;
+- no R1/R2 rerun;
+- no release tag;
+- no production deployment;
+- no Core V1 release declaration.
 
 ---
 
