@@ -36,12 +36,14 @@ MANDATORY STARTUP
 3. Inspect Issue #63 and recent P4-WP020 workflow evidence for any live/status decision.
 4. Newer repository/workflow/Issue #63 truth overrides stale text.
 
-CURRENT KNOWN TRUTH AT R3 PRE1 START
-- canonical main: d706acacd1f51224c955fb9c8d0d9eab3deda186
+CURRENT KNOWN TRUTH AFTER R3 PRE1
+- canonical main: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
 - P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 - completed planned Core V1 work packages = 19 / 20
 - P4-WP020 = ACTIVE / NOT CLOSED
 - Core V1 release = NOT DECLARED
+- ACTIVE_WORK_PACKAGE = NONE
+- next gate requires fresh Owner authorization
 
 R1
 - consumed / immutable
@@ -64,42 +66,36 @@ R2
 - never rerun R2
 
 C1
-- P4-WP020-LIVE-R2-C1 = PASS / MERGED
+- P4-WP020-LIVE-R2-C1 = PASS / MERGED / CLOSED
 - PR #74
 - reviewed HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
 - merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
-- future Gemini non-2xx evidence now retains sanitized HTTP status/classification
+- future Gemini non-2xx evidence retains sanitized HTTP status/classification
 - C1 provider calls: 0
 - C1 spend: USD 0.00
 
-ACTIVE TASK
-P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync
+R3 PRE1
+- P4-WP020-LIVE-R3-PRE1 = PASS / COMPLETED
+- PR #75
+- reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+- merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+- metadata probe run: 34291500281
+- probe main: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+- workflow conclusion: SUCCESS
+- ACCESS_PROBE_PASS
+- HTTP status: 200
+- model: gemini-3.1-flash-image
+- generation_request_sent=false
+- paid_generation_calls=0
+- PRE1 spend: USD 0.00
 
-Owner-authorized boundary:
-- NO-PAID PRE1 only
-- base main: d706acacd1f51224c955fb9c8d0d9eab3deda186
-- working branch: ai/p4-wp020-live-r3-pre1
-- provider generation calls allowed: 0
-- paid spend allowed: USD 0.00
-
-PRE1 ALLOWED
-- prepare manual-only Gemini metadata probe
-- after merge, exactly one authenticated GET /v1beta/models/gemini-3.1-flash-image
-- sanitize output to status/provider/model/http_status/error classification only
-- explicit generation_request_sent=false / paid_generation_calls=0
-- tests for 200/400/401/403/404/429/5xx with no network
-- prove no API-key/provider-body leakage
-- sync control docs
-- draft R3 contract
-
-PRE1 FORBIDDEN
-- no OpenAI request
-- no Gemini generation request or /interactions
-- no Vidu/ElevenLabs request
-- no paid workflow dispatch
-- no R1/R2 rerun
-- no R3 execution fence or paid authorization marker
-- no release tag / production deployment / Core V1 release declaration
+PRE1 INTERPRETATION
+- configured Gemini credential authenticates to current model metadata
+- gemini-3.1-flash-image is visible through the metadata endpoint
+- no image-generation request was sent
+- PRE1 does NOT prove Gemini image-generation submission will succeed
+- PRE1 does NOT reconstruct the exact historical R2 Gemini status
+- PRE1 does NOT authorize R3 tooling or paid execution
 
 R3 DRAFT ONLY — NOT AUTHORIZED
 R2 used ephemeral PostgreSQL/MinIO, so retained R2 evidence cannot be reused as canonical Story/project state. A future coherent end-to-end LIVE PASS is proposed as:
@@ -114,24 +110,14 @@ R2 used ephemeral PostgreSQL/MinIO, so retained R2 evidence cannot be reused as 
 - new execution ID and exact main SHA assigned only after execution tooling merge
 - fresh Owner paid/live authorization required
 
-PRE1 MERGE-READINESS
-- targeted PRE1 tests PASS
-- full backend CI PASS
-- fresh PostgreSQL migrations PASS
-- frontend CI PASS if triggered
-- workflow_dispatch only
-- permissions contents: read only
-- static no-generation guard PASS
-- secret/provider-body leakage = 0
-- no paid/live workflow dispatch during implementation
-- exact diff PRE1-only
-
 NEXT GATE
-- independently review exact PRE1 branch HEAD + CI
-- STOP for Owner merge decision
-- after merge, manually run metadata-only probe on main
-- probe PASS still does NOT authorize paid R3 execution
 - do NOT auto-start R3
+- fresh-review current main and evidence first
+- present a bounded R3 paid one-shot EXECUTION-TOOLING PREPARATION contract only
+- obtain explicit Owner authorization before implementation
+- tooling merge still does NOT authorize paid execution
+- fresh paid/live Owner authorization must be a later separate gate tied to exact post-tooling main
+- do NOT create a R3 execution fence before that authorization/run gate
 - do NOT declare Core V1 released
 
 OWNER-LOCKED PRODUCT DIRECTION
