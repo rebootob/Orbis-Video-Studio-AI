@@ -5,7 +5,6 @@ import uuid
 
 import pytest
 
-from app.core.config import settings
 from app.models.asset import Asset
 from app.models.project import Project
 from app.models.scene import Scene
@@ -53,8 +52,8 @@ def _patch_http(monkeypatch, response):
     return captured
 
 
-def _success_payload(image_bytes=b"jpeg-bytes", interaction_id="int-123"):
-    return {
+def _success_payload(image_bytes=b"jpeg-bytes", interaction_id="int-123", include_usage=True):
+    payload = {
         "id": interaction_id,
         "status": "completed",
         "steps": [
@@ -69,11 +68,13 @@ def _success_payload(image_bytes=b"jpeg-bytes", interaction_id="int-123"):
                 ],
             }
         ],
-        "usage": {
+    }
+    if include_usage:
+        payload["usage"] = {
             "input_tokens_by_modality": [{"modality": "text", "tokens": 24}],
             "output_tokens_by_modality": [{"modality": "image", "tokens": 1120}],
-        },
-    }
+        }
+    return payload
 
 
 def test_factory_registers_real_provider_without_removing_mock():
@@ -99,7 +100,7 @@ def test_missing_credentials_fail_closed_without_http(monkeypatch):
     assert result.submission_uncertain is False
 
 
-def test_success_maps_aspect_ratio_and_inline_image_without_raw_body(monkeypatch):
+def test_success_maps_aspect_ratio_inline_image_and_metered_cost(monkeypatch):
     image_bytes = b"\xff\xd8fake-jpeg\xff\xd9"
     captured = _patch_http(monkeypatch, _FakeResponse(200, _success_payload(image_bytes)))
     adapter = GeminiImageProviderAdapter(api_key="test-key")
@@ -118,13 +119,33 @@ def test_success_maps_aspect_ratio_and_inline_image_without_raw_body(monkeypatch
     assert result.provider_job_id == "int-123"
     assert result.image_data == image_bytes
     assert result.content_type == "image/jpeg"
-    assert result.cost_usd is None
+    assert result.cost_usd == pytest.approx(0.067212)
     assert captured["json"]["response_format"]["aspect_ratio"] == "16:9"
     assert captured["json"]["response_format"]["image_size"] == "1K"
     assert "Avoid these visual elements" in captured["json"]["input"][-1]["text"]
     assert captured["headers"]["x-goog-api-key"] == "test-key"
+    assert result.raw_response["usage_summary"] == {
+        "input_tokens": 24,
+        "output_text_tokens": 0,
+        "output_image_tokens": 1120,
+    }
     assert "usage" not in (result.raw_response or {})
     assert "test-key" not in str(result.raw_response)
+
+
+def test_completed_image_without_cost_evidence_requires_reconciliation(monkeypatch):
+    _patch_http(monkeypatch, _FakeResponse(200, _success_payload(include_usage=False)))
+    adapter = GeminiImageProviderAdapter(api_key="test-key")
+    result = asyncio.run(
+        adapter.generate_image(
+            ImageGenerationParams(shot_id=str(uuid.uuid4()), prompt="A safe image prompt")
+        )
+    )
+    assert result.status == "COMPLETED"
+    assert result.image_data is not None
+    assert result.cost_usd is None
+    assert result.submission_uncertain is True
+    assert result.error_code == "COST_EVIDENCE_MISSING"
 
 
 def test_reference_images_are_materialized_and_sent_inline(monkeypatch):
