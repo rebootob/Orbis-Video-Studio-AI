@@ -109,9 +109,9 @@ class CloudRenderWorker:
                 local_asset_path = os.path.join(scratch_dir, f"asset_{visual_asset.id}{ext}")
 
                 self.storage_provider.download_file_object(
-                    bucket=visual_asset.storage_bucket,
-                    key=visual_asset.storage_key,
-                    file_path=local_asset_path,
+                    visual_asset.storage_bucket,
+                    visual_asset.storage_key,
+                    local_asset_path,
                 )
 
                 if not os.path.exists(local_asset_path):
@@ -153,9 +153,9 @@ class CloudRenderWorker:
                     local_audio_path = os.path.join(scratch_dir, f"audio_{ac.id}{a_ext}")
                     try:
                         self.storage_provider.download_file_object(
-                            bucket=audio_asset.storage_bucket,
-                            key=audio_asset.storage_key,
-                            file_path=local_audio_path,
+                            audio_asset.storage_bucket,
+                            audio_asset.storage_key,
+                            local_audio_path,
                         )
                         if os.path.exists(local_audio_path):
                             audio_clips_list.append({
