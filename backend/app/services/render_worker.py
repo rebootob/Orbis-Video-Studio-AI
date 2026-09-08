@@ -21,7 +21,7 @@ from app.services.render import RenderExecutor, FFmpegRenderExecutor
 from app.services.render.subtitle_burnin import FFmpegSubtitleBurnInProcessor
 from app.services.storage import get_storage_provider, ObjectStorageProvider
 from app.services.render_job import RenderJobService
-from app.services.subtitle import SubtitleService
+from app.services.subtitle_control import SubtitleService
 from app.models.assembly import AssemblyTimeline
 from app.models.asset import Asset
 from app.models.audio_clip import AudioClip
