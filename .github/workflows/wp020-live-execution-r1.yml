@@ -1,4 +1,4 @@
-﻿name: WP020 LIVE One-Shot Execution R1
+name: WP020 LIVE One-Shot Execution R1
 
 on:
   push:
@@ -196,7 +196,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Checking Issue #$ISSUE_NUMBER for existing execution marker..."
-          EXISTING=$(gh issue view "$ISSUE_NUMBER" --comments --json comments --jq '.comments[].body' | grep "EXECUTION_STARTED: $WP020_LIVE_EXECUTION_ID" || true)
+          EXISTING=$(gh issue view "$ISSUE_NUMBER" --comments --json comments --jq '.comments[].body' | grep -E "^EXECUTION_STARTED: $WP020_LIVE_EXECUTION_ID" || true)
           if [ -n "$EXISTING" ]; then
             echo "STOP: One-shot fence already consumed! Marker found in Issue #$ISSUE_NUMBER" >&2
             exit 1
