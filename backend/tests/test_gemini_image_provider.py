@@ -5,14 +5,18 @@ import uuid
 
 import pytest
 
+from app.core.config import settings
 from app.models.asset import Asset
 from app.models.project import Project
 from app.models.scene import Scene
 from app.models.shot import Shot
+from app.models.usage_ledger import UsageLedger
 from app.providers.image.base import ImageGenerationParams, ReferenceImageInput
 from app.providers.image.factory import ImageProviderFactory
 from app.providers.image.gemini_adapter import GeminiImageProviderAdapter
 from app.services.image_generation import reference_materializer as materializer
+from app.services.keyframe_generation import KeyframeGenerationService
+from app.services.pricing import ProviderPricingService
 
 
 class _FakeResponse:
@@ -73,6 +77,7 @@ def _success_payload(image_bytes=b"jpeg-bytes", interaction_id="int-123", includ
         payload["usage"] = {
             "input_tokens_by_modality": [{"modality": "text", "tokens": 24}],
             "output_tokens_by_modality": [{"modality": "image", "tokens": 1120}],
+            "total_thought_tokens": 0,
         }
     return payload
 
@@ -82,6 +87,16 @@ def test_factory_registers_real_provider_without_removing_mock():
     adapter = ImageProviderFactory.get_provider("gemini_image", api_key="test-key")
     assert isinstance(adapter, GeminiImageProviderAdapter)
     assert adapter.provider_id == "gemini_image"
+
+
+def test_default_gemini_pre_dispatch_reservation_is_conservative():
+    ProviderPricingService.reset()
+    estimated, currency, status = ProviderPricingService.estimate_cost(
+        "gemini_image", "IMAGE_GENERATION"
+    )
+    assert currency == "USD"
+    assert status == "ESTIMATED"
+    assert estimated == pytest.approx(0.08)
 
 
 def test_missing_credentials_fail_closed_without_http(monkeypatch):
@@ -128,9 +143,24 @@ def test_success_maps_aspect_ratio_inline_image_and_metered_cost(monkeypatch):
         "input_tokens": 24,
         "output_text_tokens": 0,
         "output_image_tokens": 1120,
+        "thought_tokens": 0,
     }
     assert "usage" not in (result.raw_response or {})
     assert "test-key" not in str(result.raw_response)
+
+
+def test_thinking_tokens_are_included_in_metered_cost(monkeypatch):
+    payload = _success_payload()
+    payload["usage"]["total_thought_tokens"] = 100
+    _patch_http(monkeypatch, _FakeResponse(200, payload))
+    adapter = GeminiImageProviderAdapter(api_key="test-key")
+    result = asyncio.run(
+        adapter.generate_image(
+            ImageGenerationParams(shot_id=str(uuid.uuid4()), prompt="A safe image prompt")
+        )
+    )
+    assert result.cost_usd == pytest.approx(0.067512)
+    assert result.raw_response["usage_summary"]["thought_tokens"] == 100
 
 
 def test_completed_image_without_cost_evidence_requires_reconciliation(monkeypatch):
@@ -177,7 +207,7 @@ def test_reference_images_are_materialized_and_sent_inline(monkeypatch):
     assert result.raw_response["reference_count"] == 2
 
 
-def test_unsupported_seed_and_unknown_provider_params_fail_before_http(monkeypatch):
+def test_unsupported_seed_size_override_and_unknown_provider_params_fail_before_http(monkeypatch):
     def forbidden_client(**_kwargs):
         raise AssertionError("HTTP must not be opened for unsupported params")
 
@@ -190,6 +220,17 @@ def test_unsupported_seed_and_unknown_provider_params_fail_before_http(monkeypat
         )
     )
     assert seeded.error_code == "UNSUPPORTED_SEED"
+
+    size_override = asyncio.run(
+        adapter.generate_image(
+            ImageGenerationParams(
+                shot_id=str(uuid.uuid4()),
+                prompt="shot",
+                provider_specific_params={"image_size": "4K"},
+            )
+        )
+    )
+    assert size_override.error_code == "UNSUPPORTED_PROVIDER_PARAMETERS"
 
     unknown = asyncio.run(
         adapter.generate_image(
@@ -217,6 +258,62 @@ def test_http_503_is_retryable_and_submission_uncertain(monkeypatch):
     assert result.retryable is True
     assert result.submission_uncertain is True
     assert result.raw_response is None
+
+
+def test_keyframe_service_persists_gemini_asset_lineage_and_metered_cost(
+    monkeypatch, db_session, mock_storage
+):
+    ProviderPricingService.reset()
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    image_bytes = b"\xff\xd8service-jpeg\xff\xd9"
+    _patch_http(monkeypatch, _FakeResponse(200, _success_payload(image_bytes, "int-service")))
+
+    project = Project(
+        title="Gemini Keyframe Project",
+        video_mode="STORY",
+        status="SHOT_PLAN_APPROVED",
+        budget_limit=1.0,
+    )
+    db_session.add(project)
+    db_session.flush()
+    scene = Scene(project_id=project.id, scene_number=1)
+    db_session.add(scene)
+    db_session.flush()
+    shot = Shot(
+        scene_id=scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        visual_prompt="A production keyframe",
+    )
+    db_session.add(shot)
+    db_session.commit()
+
+    asset, job = KeyframeGenerationService.generate_shot_keyframe(
+        db=db_session,
+        project_id=project.id,
+        shot_id=shot.id,
+        provider_name="gemini_image",
+        cost_authorized=True,
+    )
+
+    assert asset is not None
+    assert asset.project_id == project.id
+    assert asset.asset_type == "KEYFRAME"
+    assert asset.content_type == "image/jpeg"
+    assert job.provider_name == "gemini_image"
+    assert job.provider_job_id == "int-service"
+    assert job.status == "COMPLETED"
+    assert job.cost_usd == pytest.approx(0.067212)
+    db_session.refresh(shot)
+    assert shot.keyframe_asset_id == asset.id
+    assert mock_storage.get_object(asset.storage_bucket, asset.storage_key) == image_bytes
+
+    ledger = db_session.query(UsageLedger).filter(UsageLedger.job_id == job.id).one()
+    assert ledger.provider == "gemini_image"
+    assert ledger.estimated_cost == pytest.approx(0.08)
+    assert ledger.actual_cost == pytest.approx(0.0672)
+    assert ledger.cost_status == "CONFIRMED"
+    assert ledger.provider_event_id == "int-service"
 
 
 class _NonClosingSessionContext:
