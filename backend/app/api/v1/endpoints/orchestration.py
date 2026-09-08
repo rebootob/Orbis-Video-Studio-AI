@@ -16,6 +16,8 @@ from app.schemas.orchestrator import (
     PaginatedOrchestrationAuditResponse,
     OrchestrationAuditResponse,
 )
+from app.services.creative_generation.base import CreativeGenerationProvider
+from app.services.creative_generation.factory import get_creative_provider
 
 router = APIRouter()
 
@@ -57,8 +59,9 @@ def execute_orchestration_action(
     project_id: uuid.UUID,
     request: ExecuteActionRequest,
     db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
 ):
-    """Execute an allowed action. Manual submissions never resolve or call CreativeProvider."""
+    """Execute an allowed action; MANUAL submissions bypass provider dispatch."""
     if ManualCreativeService.handles_action(request.action):
         return ManualCreativeService.execute_submission(
             db=db,
@@ -73,7 +76,7 @@ def execute_orchestration_action(
         action=request.action,
         parameters=request.parameters,
         actor="USER",
-        provider=None,
+        provider=provider,
     )
     return _overlay_execute_response(db, response)
 
@@ -87,6 +90,7 @@ def approve_production_stage(
     project_id: uuid.UUID,
     request: Optional[ApproveStageRequest] = None,
     db: Session = Depends(get_db),
+    provider: CreativeGenerationProvider = Depends(get_creative_provider),
 ):
     """Approve current production stage gate and advance to next stage."""
     req = request or ApproveStageRequest()
@@ -97,7 +101,7 @@ def approve_production_stage(
         notes=req.notes,
         cost_authorized=bool(req.cost_authorized),
         actor="USER",
-        provider=None,
+        provider=provider,
     )
     return _overlay_approve_response(db, response)
 
