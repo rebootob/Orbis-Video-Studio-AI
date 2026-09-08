@@ -16,6 +16,7 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
 ---
@@ -23,25 +24,28 @@ Core V1 release = NOT DECLARED
 ## Current Canonical Truth
 
 ```text
-Canonical main at PRE1 start:
-d706acacd1f51224c955fb9c8d0d9eab3deda186
+Canonical main:
+dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
 
-C1 corrective:
-P4-WP020-LIVE-R2-C1 = PASS / MERGED
+R2-C1:
+PASS / MERGED / CLOSED
 PR #74
-Reviewed HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
-Merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
+Merge: d706acacd1f51224c955fb9c8d0d9eab3deda186
 
-Current active task:
-P4-WP020-LIVE-R3-PRE1
-Gemini Access Probe + Resume Contract + Control-Truth Sync
+R3-PRE1:
+PASS / COMPLETED
+PR #75
+Reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+Merge: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Metadata probe run: 34291500281
+Probe: ACCESS_PROBE_PASS / HTTP 200
+Model: gemini-3.1-flash-image
+generation_request_sent: false
+paid_generation_calls: 0
+PRE1 spend: USD 0.00
 
-Working branch:
-ai/p4-wp020-live-r3-pre1
-
-PRE1 provider generation calls allowed: 0
-PRE1 paid spend allowed: USD 0.00
 R3 paid/live execution: NOT AUTHORIZED
+R3 execution tooling: NOT AUTHORIZED
 ```
 
 ---
@@ -81,29 +85,30 @@ C1 made future Gemini non-2xx status/classification durable but cannot reconstru
 
 ---
 
-## Active PRE1 Contract
+## R3 PRE1 Accepted Evidence
 
-Owner authorized `P4-WP020-LIVE-R3-PRE1` as **NO-PAID** only.
+PRE1 was Owner-authorized as NO-PAID only and is now complete.
 
-Allowed:
+Accepted post-merge probe evidence:
 
-- manual-only Gemini metadata access tooling;
-- after merge, exactly one authenticated `GET /v1beta/models/gemini-3.1-flash-image`;
-- sanitized status/provider/model/http-status/error classification only;
-- zero-network tests covering 200/400/401/403/404/429/5xx;
-- secret/provider-body leakage checks;
-- control-truth sync;
-- draft R3 contract.
+```text
+Workflow: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
+Run: 34291500281
+Main: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Conclusion: success
+ACCESS_PROBE_PASS
+HTTP 200
+gemini-3.1-flash-image
+generation_request_sent=false
+paid_generation_calls=0
+```
 
-Forbidden:
-
-- OpenAI request;
-- Gemini generation request or `/interactions`;
-- Vidu/ElevenLabs request;
-- paid workflow dispatch;
-- R1/R2 rerun;
-- R3 paid authorization/fence/execution;
-- release tag/production deployment.
+Interpretation:
+- configured Gemini credential can authenticate to current model metadata;
+- target model is visible through metadata access;
+- no image-generation submission was made;
+- this does not prove the generation path itself will succeed;
+- no R3 paid authorization or execution fence exists.
 
 Detailed PRE1 contract:
 `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
@@ -112,7 +117,7 @@ Detailed PRE1 contract:
 
 ## Proposed R3 Direction — Not Authorized
 
-R2 used ephemeral PostgreSQL and MinIO. The retained artifact is accepted historical evidence but is not reusable canonical project state. Therefore a future end-to-end LIVE PASS must create a new isolated project and run one coherent bounded chain:
+R2 used ephemeral PostgreSQL and MinIO. Retained R2 evidence is historical proof, not reusable canonical project state. A future coherent end-to-end LIVE PASS is therefore proposed as a new isolated UAT project and one bounded chain:
 
 ```text
 OpenAI STORY x1
@@ -125,33 +130,27 @@ Sequential only
 OpenAI retries: 0
 ```
 
-R3 execution ID and binding main SHA are intentionally unassigned until later execution tooling is merged and fresh Owner paid/live authorization is recorded.
+R3 execution ID and exact binding main SHA remain unassigned.
 
 Draft:
 `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`
 
 ---
 
-## PRE1 Verification and Next Gate
+## Next Gate
 
-Before merge proposal:
+No next work package is auto-authorized.
 
-```text
-Targeted PRE1 tests = PASS
-Full backend CI = PASS
-Fresh PostgreSQL migration paths = PASS
-Frontend CI = PASS if triggered
-Workflow = workflow_dispatch only
-Permissions = contents: read only
-Static no-generation guard = PASS
-Secret/provider-body leakage = 0
-Paid/live workflow dispatch during implementation = 0
-Exact diff = PRE1 only
-```
+The next proposed gate is **R3 paid one-shot execution-tooling preparation only**. Before any implementation:
 
-Then STOP for Owner merge decision.
+1. fresh-fetch canonical `main`;
+2. review current control docs, Issue #63, and latest workflow history;
+3. present a bounded tooling-only contract to the Owner;
+4. obtain explicit Owner authorization;
+5. implement only that tooling scope;
+6. STOP again for review/merge before any paid authorization or execution.
 
-After PRE1 merge, manually run the metadata-only probe on `main`. Probe PASS still does not authorize paid R3 execution.
+PRE1 PASS by itself does not authorize tooling, paid provider calls, a R3 fence, release tagging, deployment, or Core V1 release.
 
 ---
 
@@ -196,9 +195,10 @@ VENDOR_LOCK_IN = DISALLOWED
    - `project-docs/00_CONTROL/DOCUMENT_INDEX.md`
    - `project-docs/00_CONTROL/CHAT_HANDOFF.md`
    - `project-docs/00_CONTROL/NEXT_CHAT_PROMPT.md`
+   - `project-docs/40_DELIVERY/WORK_PACKAGES.md`
    - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
    - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`
 3. Inspect Issue #63 and recent workflow evidence for any live decision.
 4. Never reuse R1 or R2 execution identities.
-5. Never infer paid authorization from PRE1, merge, probe PASS, or generic approval outside the exact presented paid gate.
+5. Never infer paid authorization from PRE1 PASS, a merge, metadata probe success, or generic approval outside the exact presented gate.
 6. Never auto-start R3 or declare Core V1 released.

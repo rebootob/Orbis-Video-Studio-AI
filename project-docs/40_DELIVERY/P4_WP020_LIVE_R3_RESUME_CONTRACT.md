@@ -1,11 +1,30 @@
 # P4-WP020-LIVE-R3 — Proposed Full-Chain Resume Contract
 
-**Status:** PROPOSED / NOT PAID-AUTHORIZED / NOT EXECUTED  
+**Status:** PROPOSED / TOOLING NOT AUTHORIZED / NOT PAID-AUTHORIZED / NOT EXECUTED  
 **Execution identity:** NOT YET ASSIGNED  
 **Binding main SHA:** NOT YET ASSIGNED  
+**PRE1 prerequisite:** PASS / COMPLETED  
 **Purpose:** define the next bounded full-chain LIVE attempt after PRE1 only.
 
-This document does not authorize any paid provider request. The immutable R3 execution ID and exact authorized `main` SHA must be assigned only after R3 execution tooling is merged and fresh repository truth is reviewed.
+This document does not authorize R3 execution tooling or any paid provider request. The immutable R3 execution ID and exact authorized `main` SHA must be assigned only after separately authorized R3 execution tooling is reviewed and merged and fresh repository truth is reviewed.
+
+## Accepted PRE1 evidence
+
+```text
+P4-WP020-LIVE-R3-PRE1: PASS / COMPLETED
+PR: #75
+Reviewed PRE1 HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+Merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Metadata probe run: 34291500281
+Probe status: ACCESS_PROBE_PASS
+HTTP status: 200
+Model: gemini-3.1-flash-image
+generation_request_sent: false
+paid_generation_calls: 0
+PRE1 spend: USD 0.00
+```
+
+This proves metadata-level credential/model visibility only. It does not prove that the image-generation submission path will succeed.
 
 ## Why R3 is a full chain
 
@@ -56,20 +75,21 @@ OpenAI automatic retries: 0
 
 The cap is a maximum authorization ceiling, not a target spend. Every provider dispatch must pass current pricing validation before the call.
 
-## Required preconditions before R3 paid authorization
+## Precondition state before R3 paid authorization
 
-All must be true:
+Already satisfied by PRE1:
 
-1. PRE1 merged into canonical `main`.
-2. Gemini metadata access probe returns `ACCESS_PROBE_PASS` on then-current `main`.
-3. PRE1 probe evidence confirms:
-   - HTTP 200;
-   - exact model metadata identity;
-   - generation request sent = false;
-   - paid generation calls = 0.
-4. R3 execution tooling is manual-only and separately reviewed.
-5. Full backend/frontend/migration CI for the exact tooling HEAD is PASS.
-6. A fresh no-paid runtime preflight validates:
+1. PRE1 merged into canonical `main` — PASS.
+2. Gemini metadata access probe returned `ACCESS_PROBE_PASS` — PASS.
+3. Probe evidence confirmed HTTP 200, exact model metadata identity, `generation_request_sent=false`, and `paid_generation_calls=0` — PASS.
+
+Still required and **not authorized by PRE1**:
+
+4. Owner explicitly authorizes bounded R3 execution-tooling preparation.
+5. R3 execution tooling is manual-only and separately reviewed.
+6. Full backend/frontend/migration CI for the exact tooling HEAD is PASS.
+7. R3 tooling is merged to canonical `main` with Owner approval.
+8. A fresh no-paid runtime preflight validates:
    - current exact `main`;
    - credential presence only;
    - current pricing configuration;
@@ -77,8 +97,8 @@ All must be true:
    - USD 1.00 budget cap;
    - OpenAI retries = 0;
    - no pre-existing R3 execution fence.
-7. Owner provides fresh paid/live authorization tied to exact post-tooling-merge `main` and immutable R3 execution ID.
-8. Actual run requires a separate explicit run gate after authorization is recorded.
+9. Owner provides fresh paid/live authorization tied to exact post-tooling-merge `main` and immutable R3 execution ID.
+10. Actual run requires a separate explicit run gate after authorization is recorded.
 
 ## Proposed execution sequence
 
