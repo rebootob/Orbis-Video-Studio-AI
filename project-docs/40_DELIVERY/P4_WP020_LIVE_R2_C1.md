@@ -1,18 +1,22 @@
 # P4-WP020-LIVE-R2-C1 — Gemini HTTP Evidence + Control-Truth Corrective
 
-**Status:** OWNER AUTHORIZED / NO-PAID CORRECTIVE IN PROGRESS  
+**Status:** PASS / MERGED / CLOSED  
 **Base canonical main:** `570acda49245ecae7ae48e1e66ed8839e4bfc2e2`  
 **Working branch:** `ai/p4-wp020-live-r2-c1-gemini-evidence`  
-**Paid/live provider execution:** NOT AUTHORIZED  
-**Allowed provider calls in this corrective:** 0
+**Reviewed implementation HEAD:** `6c66650312ebbd2433e5b00c7864c086ea37e28e`  
+**PR:** `#74`  
+**Merge commit:** `d706acacd1f51224c955fb9c8d0d9eab3deda186`  
+**Paid/live provider execution during C1:** NONE  
+**Provider calls during C1:** `0`  
+**Paid spend during C1:** `USD 0.00`
 
 ## Purpose
 
-Close the evidence gap exposed by the consumed R2 live run without issuing another provider request.
+C1 closed the evidence gap exposed by the consumed R2 live run without issuing another provider request.
 
-R2 stopped at Gemini Image after the service surfaced only `HTTP_ERROR`. The adapter already retained the HTTP status in the transient `ImageJobResult`, but the durable `GenerationJob.result` evidence path persisted only `raw_response`, which was `None` for non-2xx Gemini responses.
+R2 stopped at Gemini Image after the service surfaced only `HTTP_ERROR`. The adapter already retained the HTTP status in the transient `ImageJobResult`, but the durable `GenerationJob.result` evidence path persisted only `raw_response`, which was empty for non-2xx Gemini responses.
 
-This corrective preserves provider behavior and only adds sanitized durable error metadata plus tests and control-document synchronization.
+C1 preserved provider behavior and added sanitized durable error metadata, tests, and control-document synchronization.
 
 ## Accepted live truth before C1
 
@@ -34,64 +38,60 @@ This corrective preserves provider behavior and only adds sanitized durable erro
 - Last known confirmed/committed UAT cost at STOP: USD 0.0072.
 - Gemini IMAGE: provider request reached; Orbis received non-success HTTP and surfaced `HTTP_ERROR`.
 - Chargeable calls conservatively consumed by R2: 2/6.
-- Exact Gemini HTTP status was not retained in durable evidence.
+- Exact historical Gemini HTTP status was not retained in durable evidence.
 - Vidu: NOT EXECUTED.
 - ElevenLabs: NOT EXECUTED.
 - Assembly / subtitle / QC / approval / render / multi-output / archive live downstream proof: NOT EXECUTED.
-- STOP is mandatory. No paid rerun is authorized by C1.
 
-## Authorized implementation scope
+## Delivered C1 scope
 
-1. Preserve Gemini HTTP failure evidence using the existing `GenerationJob.result` JSON boundary.
-2. Persist only sanitized metadata for non-2xx HTTP responses:
+1. Gemini non-2xx HTTP failure evidence now uses the existing `GenerationJob.result` JSON boundary.
+2. Durable metadata is limited to:
    - `provider`
    - `model`
    - `http_status`
    - `error_code`
    - `retryable`
    - `submission_uncertain`
-3. Never persist provider response body, response headers, credentials, API keys, prompt payload secrets, or reference bytes as failure evidence.
-4. Add deterministic tests for HTTP 400 / 401 / 403 / 429 / 503 classification.
-5. Verify deterministic failures remain deterministic and 5xx uncertain outcomes remain `RECONCILIATION_REQUIRED` at the service boundary.
-6. Verify sanitized metadata is durably persisted to `GenerationJob.result`.
-7. Synchronize control documents to the actual P4-WP020 LIVE state.
+3. Provider response body, response headers, credentials, API keys, prompt payload secrets and reference bytes remain excluded.
+4. Tests cover HTTP 400 / 401 / 403 / 429 / 503 classification.
+5. Deterministic failures remain deterministic and uncertain 5xx outcomes remain `RECONCILIATION_REQUIRED` at the service boundary.
+6. Sanitized metadata is durably persisted to `GenerationJob.result`.
+7. Control documents were synchronized to the consumed R2 truth.
 
-## Explicit non-scope
+## Verified evidence before merge
 
-- No real OpenAI, Gemini, Vidu, or ElevenLabs call.
-- No GitHub paid/live workflow dispatch.
-- No reuse of R1 or R2 execution IDs.
-- No new R3 execution ID in this corrective.
-- No model change.
-- No endpoint change.
-- No pricing change.
-- No retry-policy change.
-- No database migration or schema change.
-- No release tag or Core V1 release declaration.
-- No post-Core-V1 provider or product expansion.
+```text
+Backend: 470 passed / 2 skipped
+Fresh PostgreSQL migrations: PASS
+Frontend: 52/52 PASS
+Frontend build/typecheck: PASS
+Frontend lint: 0 errors / warnings only
+Paid provider calls during C1: 0
+Paid spend during C1: USD 0.00
+```
 
-## Required verification
+Independent exact-head review returned PASS before Owner-approved merge of PR #74.
 
-C1 can be proposed for merge only when:
+## Historical non-scope remains locked
 
-1. backend targeted Gemini tests PASS;
-2. full backend CI PASS;
-3. fresh PostgreSQL migration CI PASS;
-4. frontend CI remains PASS if triggered by repository policy;
-5. no secret/provider response body is present in durable failure evidence;
-6. no paid workflow was dispatched by this corrective;
-7. exact branch diff remains inside the authorized C1 scope.
+C1 did not authorize or perform:
 
-## Post-C1 gate
+- real OpenAI, Gemini, Vidu, or ElevenLabs request;
+- paid/live workflow dispatch;
+- reuse of R1 or R2 execution IDs;
+- R3 paid execution;
+- model/endpoint/pricing/retry-policy change;
+- database migration/schema change;
+- release tag or Core V1 release declaration;
+- post-Core-V1 scope expansion.
 
-After C1 is merged and independently reviewed, STOP.
+## Post-C1 truth
 
-A later R3 live attempt requires all of the following:
+After merge, repository review established that R2's PostgreSQL and MinIO state was ephemeral. Its artifact preserves accepted historical evidence but not reusable canonical Story/project state. Therefore a future coherent end-to-end R3 LIVE PASS cannot truthfully resume the exact R2 Story record.
 
-1. a fresh execution identity;
-2. a bounded resume contract that does not unnecessarily repeat already-proven OpenAI work;
-3. a no-paid preflight on then-current canonical main;
-4. fresh Owner paid/live authorization tied to exact main;
-5. a new one-shot execution fence before any chargeable provider request.
+The next authorized gate is `P4-WP020-LIVE-R3-PRE1`, a NO-PAID Gemini metadata-access / contract-preparation gate. The proposed R3 paid contract is a fresh full-chain six-call UAT and remains NOT AUTHORIZED until later explicit Owner gates.
 
-C1 by itself authorizes none of those paid/live actions.
+See:
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`
