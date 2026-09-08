@@ -8,7 +8,7 @@
 
 Orbis Video Studio AI is delivered through discrete, bounded Work Packages. Every WP requires explicit Owner authorization before implementation. Completion of one WP never auto-authorizes the next.
 
-The product direction is automation-first: Orbis should orchestrate external Creative, Image, Video and Audio AI services behind adapters while owning the production state, approvals, history, cost control, QC, assembly and export workflow.
+The product direction is automation-first: Orbis orchestrates external Creative, Image, Video and Audio AI services behind adapters while owning production state, approvals, history, cost control, QC, assembly, render, export and project portability.
 
 ```mermaid
 graph TD
@@ -21,162 +21,154 @@ graph TD
 
 ---
 
-## 2. Completed Work
-
-- **P0-WP001 — Project Governance & Architecture Documentation Foundation**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P1-WP002 — Backend Core Framework & Domain Database Setup**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P1-WP003 — S3 Object Storage & Asset Management API**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P1-WP004 — Document Ingestion & Text Extraction Engine**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P1-WP005 — Story & Screenplay Script Generator Service**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P2-WP006 — Reference Library & Character/Location Bibles**
-  - **Status:** PASS / CLOSED / MERGED
-
-- **P2-WP007 — Vidu Provider Adapter & Durable Job Dispatch Queue**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #15
-  - **Reviewed Head:** `5a03d4d7f56ac8ae39a78914276610c0512da78b`
-  - **Merge Commit:** `9cb098dea7fc2948b023ad48163c729f566573a7`
-
-- **P2-WP008 — Hybrid Shot Engine, Asset Lock Machine & Base Video Mode Configuration**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #19
-  - **Reviewed Head:** `a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797`
-  - **Merge Commit:** `a360c3b38d1d962f9f3c5f6412e3107e90fae7db`
-
-- **P2-WP009 — Cost Control & Granular Usage Audit Ledger**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #23
-  - **Reviewed Head:** `250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa`
-  - **Merge Commit:** `9f094a5cbe9a4faeb5741231d0a819da0da283c1`
-  - **Scope delivered:** provider-neutral usage ledger, configurable pricing service, project budget controls, manual adjustment audit, DB-level idempotency/uniqueness and concurrency-safe accounting behavior.
-
-- **P2-WP010 — Mode-Aware Web Workspace & Automation-First Storyboard UX**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #24
-  - **PR:** #25
-  - **Reviewed Head:** `0f0a16fa95c8110bc8ab7a0c52d45351eaa82182`
-  - **Merge Commit:** `639e61fb69b6abee8598074add458035db906ceb`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5124386306)
-  - **Scope delivered:** Mode-aware workspace (Story/Short/Loop/Scene), staged workflow with production approval gates, soft-delete / version lineage retention (FULL_HISTORY_RETENTION / NO_SILENT_HISTORY_LOSS), dashboard project management (rename/duplicate/archive/search/sort), actionable queue controls (Generate Selected / Continue incomplete / safe cost confirmation), and provider submission stage fencing.
-
-- **P2-WP011 — Selective / Batch Regeneration & Resume Service + Performance & Scalability Guardrails**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #28
-  - **PR:** #29
-  - **Reviewed Head:** `b2f349adb6d5704fa1aadfb19e06644b40a37080`
-  - **Merge Commit:** `643614b089a295ea96be179e470707609cbe4b53`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5124729394)
-  - **Scope Delivered:**
-    - Canonical `BatchResumeService` supporting Generate Selected, Continue Incomplete, and Retry Failed.
-    - Shot-level deduplication (at most ONE new job per shot, even with multiple historical failed jobs).
-    - Repeat-safe resume semantics (no duplicate active work, preservation of completed assets).
-    - Transactional `GenerationJob` + `UsageLedger` + `BatchRunItem` atomic persistence with savepoint rollback isolation.
-    - Strictly bounded keyset processing via `(created_at, id)` snapshot, eliminating full-project candidate in-memory materialization.
-    - Streaming chunk processing (`EXECUTE_CHUNK_SIZE = 50`) and set-based DB queries (zero N+1 queries).
-    - Strictly bounded memory retention (`MAX_COMPATIBILITY_RETURNED_JOBS = 100`, `accumulate_jobs=False` on canonical resume).
-    - Fail-closed legacy `/jobs/batch` execution boundary ($\le 100$) with atomic rollback on capacity breach.
-    - Lightweight `BatchRun` & `BatchRunItem` audit trail with truthful skip reasons and dynamic read reconciliation.
-    - Migration `011_batch_resume_runs_and_indexes.py` with targeted indexes.
-    - Full frontend integration removing client-side retry loops and guarding stage transitions.
-
-- **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #31
-  - **PR:** #32
-  - **Reviewed Head:** `a781926bbf607cad1b992d089920be6f094e41c9`
-  - **Merge Commit:** `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5125098674)
-  - **Scope Delivered:** Server-side Orchestrator Service, stage transition gates, mode routing (STORY, SHORT, LOOP, SCENE), automation modes (MANUAL, ASSISTED, AUTO), append-only orchestration audit ledger, frontend integration.
-
-- **P2-WP013 — Storyboard Image / Keyframe Pipeline**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #33
-  - **PR:** #34
-  - **Reviewed Head:** `f9fd46b917390224a5ab58bad0d3be238edbd7b3`
-  - **Merge Commit:** `c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd`
-  - **Final Review:** PASS / READY TO MERGE
-  - **Scope Delivered:** Provider-neutral ImageProvider abstraction, storyboard keyframe generation, continuity/reference integration, batch image generation.
-
-- **P3-WP014 — Core V1 Audio Production Automation**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #35
-  - **PR:** #36
-  - **Reviewed Head:** `fb425feaec2dede3201e054d0b842b68820473d8`
-  - **Merge Commit:** `f50e2568d197b3c4bab5e4303f31af817db6e1bf`
-  - **Final Review:** PASS / READY TO MERGE
-  - **Scope Delivered:** Provider-neutral AudioProvider boundary, 3D audio taxonomy (source, type, generation mode), AudioSpec render, scope lineage, volume/fade/ducking mixing metadata, usage ledger integration.
-
-- **P3-WP015 — Simplified Assembly / Timeline Preview**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #37
-  - **PR:** #38
-  - **Reviewed Head:** `640212f71182ba3f6a5024a442beb363868eabc1`
-  - **Merge Commit:** `35b31c3c41834209fcb9d63ad7ac52e9632d63d2`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5127082342)
-  - **Scope Delivered:** Simplified assembly timeline engine, shot ordering, non-destructive timeline overrides, manual placement & lock preservation, transition preview specs, auto-assembly idempotency, frontend timeline workspace.
-
-- **P3-WP016 — Core V1 QC & Approval Pipeline**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #40
-  - **PR:** #41
-  - **Reviewed Head:** `5def41c8bba9b3004b7007f671899e045438a8c4`
-  - **Merge Commit:** `43e5221e7f39a19e8c6fde54c450324aa8333059`
-  - **Final Review:** PASS / READY TO MERGE (Review ID 5127769635)
-  - **Scope Delivered:** Provider/revision-bound QC engine, structured findings (BLOCKER / WARNING), warning decision audit history (ACCEPTED_WITH_REASON / FIX_REQUIRED), 1-shot approval per timeline revision, production orchestrator workflow integration.
-
-- **P3-WP017 — Cloud Render Workers**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #44
-  - **Starting Head:** `556ca1c2566c154e5f10559e74907896bbf3b797`
-  - **Reviewed Head:** `72d842936a7812aabec8df6b948930a0e296a553`
-  - **Merge Commit:** `72065b9c29350e54dd7811a00d7198c6765004d1`
-  - **Final Review:** PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
-  - **Scope Delivered:** Cloud Render Workers, RenderJob durable lifecycle, exact ApprovalRecord/timeline revision gate, provider-neutral RenderExecutor, FFmpeg master render, stateless worker / lease / claim fencing, retry / recovery / reconciliation, object storage output, immutable Asset/history, attempt-specific UsageLedger accounting, budget-safe retry, RECONCILIATION_REQUIRED duplicate blocking, MASTER-only rendering.
-
----
-
-## 3. Active Work Package
+## 2. Current Delivery Summary
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+Completed Core V1 WPs: 19 / 20
+WP-count completion: 95%
+ACTIVE_WORK_PACKAGE: NONE
+P4-WP020: PROPOSED / NOT AUTHORIZED
 ```
 
-- **Current Status:** POST-WP017 / READY FOR OWNER NEXT-WP AUTHORIZATION
-- P4-WP018 remains: `PROPOSED / NOT AUTHORIZED`. Do not implement or silently authorize WP018 without explicit Owner authorization.
+Canonical main truth after WP019:
+
+```text
+main HEAD: a09fcab835515679bf4f0bbfce8aec84f7e15062
+P4-WP019 PR #50: MERGED / CLOSED
+P4-WP019 final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
+P4-WP019 final review: PASS / READY FOR OWNER MERGE DECISION
+P4-WP019 final review ID: 5135969695
+P4-WP019 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
+```
 
 ---
 
-## 4. Remaining Roadmap — Direction After WP017
+## 3. Completed Work Packages
 
-The roadmap should prioritize end-to-end production automation rather than building a heavyweight manual NLE.
+| WP | Title | Status |
+| :--- | :--- | :--- |
+| P0-WP001 | Project Governance & Architecture Documentation Foundation | PASS / CLOSED / MERGED |
+| P1-WP002 | Backend Core Framework & Domain Database Setup | PASS / CLOSED / MERGED |
+| P1-WP003 | S3 Object Storage & Asset Management API | PASS / CLOSED / MERGED |
+| P1-WP004 | Document Ingestion & Text Extraction Engine | PASS / CLOSED / MERGED |
+| P1-WP005 | Story & Screenplay Script Generator Service | PASS / CLOSED / MERGED |
+| P2-WP006 | Reference Library & Character/Location Bibles | PASS / CLOSED / MERGED |
+| P2-WP007 | Vidu Provider Adapter & Durable Job Dispatch Queue | PASS / CLOSED / MERGED |
+| P2-WP008 | Hybrid Shot Engine, Asset Lock Machine & Base Video Modes | PASS / CLOSED / MERGED |
+| P2-WP009 | Cost Control & Granular Usage Audit Ledger | PASS / CLOSED / MERGED |
+| P2-WP010 | Mode-Aware Web Workspace & Automation-First Storyboard UX | PASS / CLOSED / MERGED |
+| P2-WP011 | Selective / Batch Regeneration & Resume + Performance Guardrails | PASS / CLOSED / MERGED |
+| P2-WP012 | Production Orchestrator & Staged Approval State Machine | PASS / CLOSED / MERGED |
+| P2-WP013 | Provider-Neutral Storyboard Image / Keyframe Pipeline | PASS / CLOSED / MERGED |
+| P3-WP014 | Core V1 Audio Production Automation | PASS / CLOSED / MERGED |
+| P3-WP015 | Simplified Assembly / Timeline Preview | PASS / CLOSED / MERGED |
+| P3-WP016 | Core V1 QC & Approval Pipeline | PASS / CLOSED / MERGED |
+| P3-WP017 | Cloud Render Workers | PASS / CLOSED / MERGED |
+| P4-WP018 | Multi-Output & Platform Export Presets | PASS / CLOSED / MERGED |
+| P4-WP019 | Project Export/Import Archive Package (`.orbis`) | PASS / CLOSED / MERGED |
 
-### Phase 2 — Production Orchestration & Generation
+Key recent merge truth:
 
-- **P2-WP012 — Production Orchestrator & Staged Approval State Machine**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #31
-  - **PR:** #32 (Merged into `main` at `cdd79aaa80eaefa8be6c4e4894cb40db0b097a60`)
+```text
+P3-WP017 PR #44 merge: 72065b9c29350e54dd7811a00d7198c6765004d1
+P4-WP018 PR #47 merge: 09e62876543ee7990919beb43600a1c748be545d
+P4-WP019 PRE1 PR #49 merge: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+P4-WP019 implementation PR #50 merge: a09fcab835515679bf4f0bbfce8aec84f7e15062
+```
 
-- **P2-WP013 — Provider-Neutral Storyboard Image / Keyframe Pipeline**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #33
-  - **PR:** #34 (Merged into `main` at `c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd`)
+---
 
-### Future Provider Planning Note — ComfyUI / Cloud GPU
+## 4. P4-WP019 Closure Detail
 
-Preserve provider-neutral architecture. ComfyUI + Cloud GPU is a FUTURE provider/execution candidate.
+### P4-WP019 — Project Export/Import Archive Package (`.orbis`)
 
-Concept:
+```text
+Status: PASS / CLOSED / MERGED
+PR: #50
+Branch: ai/p4-wp019-orbis-archive
+Final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
+Final Review ID: 5135969695
+Merge Commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
+Proposal: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
+```
+
+Accepted scope delivered:
+
+- `.orbis` ZIP-compatible archive format.
+- canonical manifest/checksum trust root and canonical JSON.
+- secure path validation and archive size/count/compression guards.
+- Core V1 `FULL_SELF_CONTAINED` export contract.
+- full project graph serialization.
+- CLONE mode with fresh UUID/FK remap and source lineage.
+- RESTORE mode with fail-closed collision handling.
+- Phase-3 graph/referential-integrity preflight.
+- asset completeness and payload/catalog/database size consistency.
+- historical RenderJob/GenerationJob preservation and worker fencing.
+- historical UsageLedger preservation, partial-index fencing and budget exclusion.
+- transaction rollback and storage compensation.
+- REST API export/import endpoints.
+- frontend Export/Import UX.
+
+Final exact-head verification before merge:
+
+```text
+Backend: 412 passed, 2 skipped
+Frontend: 52/52 tests PASS
+Frontend build/typecheck: PASS
+Frontend lint: 0 errors
+```
+
+P4-WP019 must not be reopened unless a proven regression is found.
+
+---
+
+## 5. Remaining Core V1 Roadmap
+
+### P4-WP020 — End-to-End System Integration, UAT & Core V1 Release
+
+```text
+Status: PROPOSED / NOT AUTHORIZED
+Implementation authorization: NONE
+```
+
+Purpose:
+
+- verify the already-delivered Core V1 system end to end;
+- execute bounded UAT across the supported Core V1 modes and critical production path;
+- verify failure/recovery, cost, history, approval, render/export and archive behavior at system level;
+- close release-blocking defects only within the authorized WP020 contract;
+- collect release evidence and make the final Core V1 release decision.
+
+Before any implementation, ChatGPT must inspect repository truth and present a bounded WP020 contract containing at minimum:
+
+1. exact scope and explicit exclusions;
+2. E2E scenario matrix;
+3. UAT scenario matrix;
+4. critical regression gates;
+5. release-blocking severity rules;
+6. test/evidence requirements;
+7. rollback/recovery requirements;
+8. Core V1 release closure criteria.
+
+Owner authorization is mandatory before WP020 implementation starts.
+
+---
+
+## 6. Post-Core V1 / V1.x — Not Part of WP020 by Default
+
+The following remain future work unless separately authorized:
+
+- full Hermes / n8n / external-agent operational gateway;
+- new production modes beyond STORY / SHORT / LOOP / SCENE;
+- new provider implementations beyond currently accepted Core V1 boundaries;
+- cloud-hosted ComfyUI provider implementation;
+- social publishing automation;
+- marketplace/provider ecosystem;
+- heavyweight NLE/DAW capabilities;
+- realtime cloud project replication/sync.
+
+ComfyUI + Cloud GPU remains a future provider/execution candidate only:
+
 ```text
 Orbis
 -> GenerationJob
@@ -189,84 +181,25 @@ Orbis
 
 Status: `PROPOSED / NOT AUTHORIZED / NOT IMPLEMENTED`
 
-Important product locks:
-- Vidu remains the only currently implemented registered VideoProvider.
-- ComfyUI must not replace the provider abstraction.
-- Do not add ComfyUI source code in this docs sync.
-- Do not select a GPU cloud vendor yet.
-- `LOCAL_AI` remains disallowed.
-- Cloud-hosted ComfyUI is compatible with `CLOUD_AI` direction.
-
-### Phase 3 — Audio, Assembly, QC & Cloud Rendering
-
-- **P3-WP014 — Core V1 Audio Production Automation**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #35
-  - **PR:** #36 (Merged into `main` at `f50e2568d197b3c4bab5e4303f31af817db6e1bf`)
-
-- **P3-WP015 — Simplified Assembly / Timeline Preview**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #37
-  - **PR:** #38 (Merged into `main` at `35b31c3c41834209fcb9d63ad7ac52e9632d63d2`)
-
-- **P3-WP016 — Core V1 QC & Approval Pipeline**
-  - **Status:** PASS / CLOSED / MERGED
-  - **Issue:** #40
-  - **PR:** #41 (Merged into `main` at `43e5221e7f39a19e8c6fde54c450324aa8333059`)
-
-- **P3-WP017 — Cloud Render Workers**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #44 (Merged into `main` at `72065b9c29350e54dd7811a00d7198c6765004d1`)
-  - Final assembly/render after approval, preserving deterministic job control and auditability.
-
-### Phase 4 — Multi-Output, Export & Core V1 Release
-
-- **P4-WP018 — Multi-Output & Platform Export Presets**
-  - **Status:** PASS / CLOSED / MERGED
-  - **PR:** #47 (Merged into `main` at `09e62876543ee7990919beb43600a1c748be545d`)
-  - **Branch:** `ai/p4-wp018-multi-output-export-presets`
-  - **PRE1 Reviewed HEAD:** `f51694643596acba54447cc0ab36bc8cbfd8dfd5`
-  - **PRE1 Merge Commit:** `96d53c30f0344dc84bb3d9205e5b7bbbde94885b`
-  - **Implementation Reviewed HEAD:** `fd745def2235fdaa6accf82ea2cb037a4fa42390`
-  - **Merge Commit:** `09e62876543ee7990919beb43600a1c748be545d`
-  - **Final Independent Review:** PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
-  - Multi-output export presets (16:9, 9:16, 1:1), resolution/bitrate/quality presets, platform-oriented presets, RenderBatch grouping, durable render_variant_key, variant-aware idempotency, atomic batch budget authorization, immutable preset snapshot, WP017 worker reuse, FFmpeg output transformation, export Asset lineage, migration upgrade/downgrade safety, concurrent budget safety, full history retention.
-
-- **P4-WP019 — Project Export/Import Archive Package (.orbis)**
-  - **Status:** IN_PROGRESS / CHANGES REQUIRED (PR #50)
-  - **Branch:** `ai/p4-wp019-orbis-archive`
-  - **PRE1 Reviewed HEAD:** `e1deff16aa93fb3b2e68d404415971351c4a9e46`
-  - **PRE1 Merge Commit:** `5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5` (PR #49)
-  - **Reviewed Implementation HEAD:** `59596c0e21c6d685a160742fd498128a53b4682b`
-  - **Latest Review:** CHANGES REQUIRED (Review ID 5135776036)
-  - **Latest PR Commit:** `632f70e9159413cb36ea4f767318c605c45497d1`
-  - **Proposal Document:** [`project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md`](P4_WP019_PROPOSAL.md)
-  - Full-fidelity, portable `.orbis` ZIP container format, non-circular checksum trust root (`checksums.sha256` -> `manifest.json` -> payload members), canonical relative POSIX path validation, CLONE vs RESTORE mode semantics, in-memory referential ID remapping, fail-closed Phase-3 preflight validation (`ArchivePreflightValidator`), storage compensation cleanup, security hardening (ZIP Slip, bomb, mime guards), preservation of original historical job execution status with worker fencing (`imported_historical = True`, `execution_disabled = True`), active partial unique index fencing, UsageLedger financial fencing, budget service historical spend exclusion, REST API endpoints, frontend Export/Import modals, and full test coverage.
-
-- **P4-WP020 — End-to-End System Integration, UAT & Core V1 Release**
-  - **Status:** PROPOSED / NOT AUTHORIZED
-
-### Post-Core V1 / V1.x
-
-- **Full Operational Integration Gateway (Hermes / n8n / external agents)**
-  - **Status:** PROPOSED / POST-CORE V1 / V1.x
-  - Architecture readiness remains a V1 design requirement; full operational integration must not block Core V1.
-
 ---
 
-## 5. Product Locks Governing Future WPs
+## 7. Product Locks Governing Future WPs
 
 ```text
 MULTI_PROJECT = REQUIRED
 FULL_HISTORY_RETENTION = REQUIRED
+AUDITABLE_CHANGES = REQUIRED
 NO_SILENT_HISTORY_LOSS = REQUIRED
 AUTOMATION_FIRST = REQUIRED
 HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
 APPROVAL_GATED_AUTOMATION = REQUIRED
 GUIDED_FLEXIBILITY = REQUIRED
-AUDIO_PRODUCTION = CORE_V1_REQUIRED
+AUDIO_PRODUCTION_CORE_V1 = REQUIRED
 PROVIDER_INDEPENDENCE = REQUIRED
+PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
 LOCAL_AI = DISALLOWED
+CLOUD_AI = REQUIRED
+VENDOR_LOCK_IN = DISALLOWED
 ```
 
 Core V1 modes:
@@ -278,7 +211,7 @@ LOOP
 SCENE
 ```
 
-Architecture-ready only until separately authorized:
+Architecture-ready later only:
 
 ```text
 PRODUCT
@@ -288,3 +221,13 @@ MONTAGE
 ```
 
 Future-mode readiness must not silently expand an active WP.
+
+---
+
+## 8. Execution Rule
+
+```text
+ACTIVE_WORK_PACKAGE = NONE
+```
+
+No application-code implementation may start until the Owner explicitly authorizes P4-WP020 or another bounded work package.

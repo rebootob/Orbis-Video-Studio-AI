@@ -31,221 +31,129 @@ P3-WP015 = PASS / CLOSED / MERGED
 P3-WP016 = PASS / CLOSED / MERGED
 P3-WP017 = PASS / CLOSED / MERGED
 P4-WP018 = PASS / CLOSED / MERGED
+P4-WP019 = PASS / CLOSED / MERGED
 ```
 
-Key reviewed/merge truth:
+Current delivery count:
 
 ```text
-WP007 reviewed HEAD: 5a03d4d7f56ac8ae39a78914276610c0512da78b
-WP007 merge: 9cb098dea7fc2948b023ad48163c729f566573a7
-
-WP008 reviewed HEAD: a2c3f3d4e80a0b0aedb58fba5a04a436c9e88797
-WP008 merge: a360c3b38d1d962f9f3c5f6412e3107e90fae7db
-
-WP009 reviewed HEAD: 250df0bb6df24577e2e1f14c7ada3d0dbbaf75fa
-WP009 merge: 9f094a5cbe9a4faeb5741231d0a819da0da283c1
-
-WP010 reviewed HEAD: 0f0a16fa95c8110bc8ab7a0c52d45351eaa82182
-WP010 merge: 639e61fb69b6abee8598074add458035db906ceb
-WP010 PR: #25 (MERGED / CLOSED)
-WP010 Final Review: PASS / READY TO MERGE (Review ID 5124386306)
-
-WP011 reviewed HEAD: b2f349adb6d5704fa1aadfb19e06644b40a37080
-WP011 merge / main base HEAD: 643614b089a295ea96be179e470707609cbe4b53
-WP011 PR: #29 (MERGED / CLOSED)
-WP011 Final Review: PASS / READY TO MERGE (Review ID 5124729394)
-
-WP012 Issue: #31
-WP012 PR: #32 (MERGED / CLOSED)
-WP012 Reviewed HEAD: a781926bbf607cad1b992d089920be6f094e41c9
-WP012 Merge commit: cdd79aaa80eaefa8be6c4e4894cb40db0b097a60
-WP012 Final Review: PASS / READY TO MERGE (Review ID 5125098674)
-
-WP013 Issue: #33
-WP013 PR: #34 (MERGED / CLOSED)
-WP013 Reviewed HEAD: f9fd46b917390224a5ab58bad0d3be238edbd7b3
-WP013 Merge commit: c5412c7f3f45d11e27b5a9ac8d1567b8b098a0bd
-WP013 Status: PASS / CLOSED / MERGED
-
-WP014 Issue: #35
-WP014 PR: #36 (MERGED / CLOSED)
-WP014 Reviewed HEAD: fb425feaec2dede3201e054d0b842b68820473d8
-WP014 Merge commit: f50e2568d197b3c4bab5e4303f31af817db6e1bf
-WP014 Final Review: PASS / READY TO MERGE
-WP014 Status: PASS / CLOSED / MERGED
-
-WP015 Issue: #37
-WP015 PR: #38 (MERGED / CLOSED)
-WP015 Reviewed HEAD: 640212f71182ba3f6a5024a442beb363868eabc1
-WP015 Merge commit: 35b31c3c41834209fcb9d63ad7ac52e9632d63d2
-WP015 Final Review: PASS / READY TO MERGE (Review ID 5127082342)
-WP015 Status: PASS / CLOSED / MERGED
-
-WP016 Issue: #40
-WP016 PR: #41 (MERGED / CLOSED)
-WP016 Reviewed HEAD: 5def41c8bba9b3004b7007f671899e045438a8c4
-WP016 Merge commit: 43e5221e7f39a19e8c6fde54c450324aa8333059
-WP016 Final Review: PASS / READY TO MERGE (Review ID 5127769635)
-WP016 Status: PASS / CLOSED / MERGED
-
-WP017 PR: #44 (MERGED / CLOSED)
-WP017 Branch: ai/p3-wp017-cloud-render-workers
-WP017 Starting HEAD: 556ca1c2566c154e5f10559e74907896bbf3b797
-WP017 Reviewed HEAD: 72d842936a7812aabec8df6b948930a0e296a553
-WP017 Merge commit: 72065b9c29350e54dd7811a00d7198c6765004d1
-WP017 Final Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5129832936)
-WP017 Status: PASS / CLOSED / MERGED
-
-WP018 PR: #47 (MERGED / CLOSED)
-WP018 Branch: ai/p4-wp018-multi-output-export-presets
-WP018 PRE1 Reviewed HEAD: f51694643596acba54447cc0ab36bc8cbfd8dfd5
-WP018 PRE1 Merge commit: 96d53c30f0344dc84bb3d9205e5b7bbbde94885b
-WP018 Implementation Reviewed HEAD: fd745def2235fdaa6accf82ea2cb037a4fa42390
-WP018 Merge commit: 09e62876543ee7990919beb43600a1c748be545d
-WP018 Final Review: PASS / READY FOR OWNER MERGE DECISION (Review ID 5132040630)
-WP018 Status: PASS / CLOSED / MERGED
+19 of 20 planned Core V1 work packages merged = 95% by WP count
 ```
+
+---
+
+## P4-WP019 Closure Truth
+
+```text
+WP019 PRE1 PR: #49
+WP019 PRE1 reviewed HEAD: e1deff16aa93fb3b2e68d404415971351c4a9e46
+WP019 PRE1 merge commit: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
+
+WP019 implementation PR: #50 (MERGED / CLOSED)
+WP019 implementation branch: ai/p4-wp019-orbis-archive
+WP019 final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
+WP019 final independent review: PASS / READY FOR OWNER MERGE DECISION
+WP019 final review ID: 5135969695
+WP019 merge commit / current canonical main HEAD: a09fcab835515679bf4f0bbfce8aec84f7e15062
+```
+
+Final exact-head evidence before merge:
+
+```text
+Backend: 412 passed, 2 skipped
+Frontend: 52/52 tests PASS
+Frontend build/typecheck: PASS
+Frontend lint: 0 errors
+```
+
+Accepted WP019 capabilities:
+
+1. `.orbis` ZIP-compatible portable archive.
+2. Canonical manifest/checksum trust root and canonical JSON.
+3. Safe archive path handling and bounded extraction/security limits.
+4. Core V1 canonical package: `FULL_SELF_CONTAINED` only.
+5. Full project graph export/import.
+6. CLONE import with UUID/FK remap, asset re-upload and source lineage.
+7. RESTORE import with fail-closed collision handling.
+8. Phase-3 graph/referential-integrity preflight.
+9. Asset completeness and payload/catalog/DB consistency validation.
+10. Historical job status/attempt/error/timestamp truth preservation.
+11. `imported_historical` / `execution_disabled` worker fencing.
+12. RenderJob / GenerationJob / UsageLedger partial-index separation for historical vs live state.
+13. Historical UsageLedger financial truth preservation and live budget exclusion.
+14. Transaction rollback and storage compensation.
+15. REST API and frontend Export/Import workflow.
+
+P4-WP019 is closed. Do not reopen it without a proven regression.
 
 ---
 
 ## Current Gate
 
 ```text
-ACTIVE WORK PACKAGE = P4-WP019
-STATUS = IN_PROGRESS / CHANGES REQUIRED
-BRANCH = ai/p4-wp019-orbis-archive
-PR = #50
-CANONICAL_MAIN_HEAD = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-PRE1_MERGE_COMMIT = 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-CURRENT_REVIEWED_HEAD = 59596c0e21c6d685a160742fd498128a53b4682b
-LATEST_REVIEW_ID = 5135776036
-LATEST_REVIEW_VERDICT = CHANGES REQUIRED
-LATEST_PR_COMMIT = 632f70e9159413cb36ea4f767318c605c45497d1
-GATE = P4-WP019 / CORRECTIVE REQUIRED BEFORE MERGE
-ANTIGRAVITY = STOP / NONE after documentation sync
+CANONICAL_MAIN_HEAD = a09fcab835515679bf4f0bbfce8aec84f7e15062
+ACTIVE_WORK_PACKAGE = NONE
+IMPLEMENTATION_AUTHORIZED = NONE
+CURRENT_GATE = POST-WP019 / READY FOR OWNER WP020 AUTHORIZATION DECISION
+P4-WP019 = PASS / CLOSED / MERGED
+P4-WP020 = PROPOSED / NOT AUTHORIZED
+ANTIGRAVITY = STOP / NONE
 CODEX = STOP
 CLAUDE_CODE = STOP
-P4-WP019 = IN_PROGRESS / CHANGES REQUIRED
-P4-WP020 = PROPOSED / NOT AUTHORIZED
 ```
 
-P4-WP019 implementation authorized by Owner.
-Implementing locked .orbis archive export/import scope.
-Do NOT merge without Owner approval.
-Do NOT start WP020.
+Completion of WP019 does **not** auto-authorize WP020.
 
-### P4-WP019 Delivered Capabilities in PR #50
-1. `.orbis` ZIP-compatible archive subsystem with POSIX path safety.
-2. Canonical manifest & checksum design (`manifest.json`, `checksums.sha256`, canonical RFC 8785 JSON, SHA-256 trust root).
-3. Archive security validation (Zip Slip/path traversal rejection, absolute/UNC path guards, extension denylist, compression ratio/decompression limits, zip magic bytes).
-4. Full project graph export and import across all entities.
-5. `FULL_SELF_CONTAINED` asset packaging direction.
-6. CLONE mode (fresh UUID remap, FK translation, new storage keys, lineage recording).
-7. RESTORE mode (original identities preserved, fail-closed collision rejection).
-8. Phase-3 canonical preflight validation (`ArchivePreflightValidator` checking files, duplicate IDs, ownership, FK integrity, polymorphic AssetLocks, asset completeness).
-9. Historical execution fencing (`imported_historical = True`, `execution_disabled = True`, worker lease clearing, original execution status/history preserved).
-10. RenderJob / GenerationJob active partial unique-index separation.
-11. UsageLedger imported historical financial fencing.
-12. Budget service exclusion of imported historical costs.
-13. REST API endpoints (`/projects/{id}/export`, `/projects/import/validate`, `/projects/import/execute`).
-14. Frontend Export and Import modals integrated into `ProjectDashboard`.
-15. Extensive regression, migration, and archive test suites.
+---
 
-### Review History & Blockers
-- **Initial Implementation HEAD (`92c305ac1d5406e14cb3291805b6395c5b1707a2`)**:
-  - Independent Review ID `5133420916`: CHANGES REQUIRED (historical truth mutation, missing Phase-3 graph preflight, asset completeness).
-  - Materially corrected at reviewed HEAD `59596c0e21c6d685a160742fd498128a53b4682b`.
-- **Latest Review (`5135776036` on HEAD `59596c0e21c6d685a160742fd498128a53b4682b`)**:
-  - Verdict: CHANGES REQUIRED on 2 blockers:
-    1. *Migration 020 fail-closed downgrade*: Precheck UsageLedger `(provider, provider_event_id)` collisions before any schema change.
-    2. *Archive self-consistency*: Enforce `FULL_SELF_CONTAINED`, disallow `include_renders=False`, assert `actual_size == catalog size_bytes == Asset.file_size_bytes`.
-  - Delivered in commit `632f70e9159413cb36ea4f767318c605c45497d1` with 412 backend tests and 52 frontend tests passing.
+## Remaining Core V1 Work
 
-### Scope & Progress
-- 18 of 20 work packages merged into main = 90%.
-- WP019 implementation ~97% complete.
-- Overall Core V1 ~94–95% complete.
-- Core V1 completion still requires:
-  1. WP019 PASS / CLOSED / MERGED
-  2. Post-WP019 control sync
-  3. WP020 E2E / UAT / Core V1 Release
+Only one planned Core V1 work package remains:
 
-### Performance & Scalability Guardrails Delivered in WP011
-
-`PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE`
-
-The following guardrails were delivered and verified in P2-WP011:
-- Keyset-based pagination `(created_at, id)` eliminating unbounded in-memory candidate materialization
-- Streaming execution in chunks of $\le 50$ (`EXECUTE_CHUNK_SIZE = 50`)
-- Set-based DB queries in candidate evaluation and batch run listings (zero N+1 queries)
-- Reversible Alembic migration `011_batch_resume_runs_and_indexes.py` with targeted indexes
-- Bounded memory retention for created jobs (`MAX_COMPATIBILITY_RETURNED_JOBS = 100`, `accumulate_jobs=False` on canonical resume)
-- Fail-closed legacy `/jobs/batch` execution boundary ($\le 100$) with atomic rollback on capacity breach
-
-### ComfyUI / Cloud GPU Future Planning Note
-
-Preserve provider-neutral architecture.
-
-ComfyUI + Cloud GPU is a FUTURE provider/execution candidate.
-
-Concept:
-```text
-Orbis
--> GenerationJob
--> Provider Adapter
--> ComfyUI Provider
--> Cloud GPU Worker
--> Object Storage
--> Orbis Asset / Version / History
-```
+### P4-WP020 — End-to-End System Integration, UAT & Core V1 Release
 
 Status:
+
 ```text
-PROPOSED / NOT AUTHORIZED / NOT IMPLEMENTED
+PROPOSED / NOT AUTHORIZED
 ```
 
-Important product locks:
-- Vidu remains the only currently implemented registered VideoProvider.
-- ComfyUI must not replace the provider abstraction.
-- Do not add ComfyUI source code in this docs sync.
-- Do not select a GPU cloud vendor yet.
-- `LOCAL_AI` remains disallowed.
-- Cloud-hosted ComfyUI is compatible with `CLOUD_AI` direction.
+WP020 should be bounded to system-level integration verification, UAT, release readiness and Core V1 closure. It must not silently absorb post-V1 integrations, new providers or unrelated product expansion.
 
-### Future-Performance Backlog Note (Preserved)
-
-- server-side Project pagination
-- Asset/Job history pagination
-- media thumbnail/lazy-loading
-- streaming/multipart large-file upload
-- media preview streaming
-- frontend virtualization where needed
+Before implementation, ChatGPT should inspect current repository truth and define the exact WP020 scope, UAT matrix, release gates, evidence requirements and rollback/closure criteria for Owner approval.
 
 ---
 
 ## Owner-Locked Product Direction
 
-Orbis is not intended to recreate foundation AI models. It is an **AI Video Production Orchestrator / Production Control Plane** that coordinates best-of-breed Creative, Image, Video and Audio providers behind adapters.
+Orbis Video Studio AI is an **AI Video Production Orchestrator / Production Control Plane**, not a foundation-model project and not a heavyweight manual NLE clone.
 
-Provider-neutral direction:
+Provider-neutral boundaries:
 
 ```text
 CreativeProvider
-  -> OpenAI / Gemini / future
-
 ImageProvider
-  -> Gemini Image / OpenAI Image / future
-
 VideoProvider
-  -> Vidu / Veo / future
-
 AudioProvider
-  -> TTS / music / SFX / future
 ```
 
-The Orbis-owned value is production orchestration and control: Projects, modes, references, Story/Scene/Shot structure, approvals, history/version lineage, locks, durable queue/retry/recovery, cost/budget, QC, assembly and export.
+Core-owned value:
 
-### Core V1 Modes
+- multi-project state
+- Story / Scene / Shot structure and lineage
+- references and continuity
+- locks
+- full history/versioning
+- approvals
+- durable job execution
+- retry/resume/reconciliation
+- cost/budget
+- QC
+- assembly
+- render/multi-output
+- project portability/export/import
+
+Core V1 modes:
 
 ```text
 STORY
@@ -254,7 +162,7 @@ LOOP
 SCENE
 ```
 
-Architecture-ready later:
+Architecture-ready later only:
 
 ```text
 PRODUCT
@@ -263,81 +171,51 @@ PRESENTER
 MONTAGE
 ```
 
-### Multi-Project / History Locks
+Product locks:
 
 ```text
 MULTI_PROJECT = REQUIRED
 FULL_HISTORY_RETENTION = REQUIRED
 AUDITABLE_CHANGES = REQUIRED
 NO_SILENT_HISTORY_LOSS = REQUIRED
-```
-
-### Automation-First Locks
-
-```text
 AUTOMATION_FIRST = REQUIRED
-AUTO_STORYBOARD = REQUIRED
-AUTO_SHOT_PLANNING = REQUIRED
-AUTO_PROMPT_GENERATION = REQUIRED
-BATCH_GENERATION = REQUIRED
 HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
+APPROVAL_GATED_AUTOMATION = REQUIRED
+GUIDED_FLEXIBILITY = REQUIRED
+AUDIO_PRODUCTION_CORE_V1 = REQUIRED
+PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
+LOCAL_AI = DISALLOWED
+CLOUD_AI = REQUIRED
+VENDOR_LOCK_IN = DISALLOWED
 ```
 
-Target flow:
-
-```text
-Brief / References
--> Story
--> Review / Approve
--> Storyboard
--> Review / Approve
--> Detailed Shot Plan + Prompts
--> Review / Approve
--> Images / Keyframes
--> Continuity QC
--> Review / Approve
--> Video Generation
--> VO / BGM / SFX / Ambience
--> Auto Assembly
--> Final QC
--> Final Approval
--> Render / Export
-```
-
-The user must be able to stop at Story or Storyboard before generating detailed shots/images/video and consuming expensive provider credits.
-
-### Guided Flexibility
-
-The UI should always suggest a sensible next action, use safe defaults and progressive disclosure, avoid dead ends, explain failures in plain language and preserve Advanced controls without trapping the user in a rigid wizard.
-
-### Audio
-
-Audio Production is Core V1 and must include VO, BGM, SFX, ambience, basic mixing/fades/mute/volume and basic auto-ducking. Advanced DAW-style editing is outside V1.
+Vidu remains the implemented Core V1 default VideoProvider behind an adapter. ComfyUI/cloud-GPU execution remains future planning only and must not enter WP020 unless separately authorized.
 
 ---
 
 ## Roles
 
 ```text
-Owner = final human authority / UAT / authorization of next WP
+Owner = final human authority / authorization / UAT / merge approval
 ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = STOP / NONE (bounded low-credit Execution Plane when explicitly authorized)
+Antigravity = low-credit bounded Execution Plane only when explicitly authorized
 Codex = STOP by default
 Claude Code = STOP
 ```
 
-The local Antigravity watcher/dispatcher is PAUSED and must not be treated as a production dependency.
+The local Antigravity watcher/dispatcher remains PAUSED and must not be treated as a production dependency.
 
 ---
 
 ## Mandatory Resume Procedure
 
-1. Fresh-fetch current `main` HEAD (`5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5`).
-2. Read `START_HERE.md`.
-3. Read `CURRENT_STATE.md`.
-4. Read `ACTIVE_TASK.md`.
-5. Read `DOCUMENT_INDEX.md`.
+1. Fresh-fetch current `main` HEAD.
+2. Read `project-docs/00_CONTROL/START_HERE.md`.
+3. Read `project-docs/00_CONTROL/CURRENT_STATE.md`.
+4. Read `project-docs/00_CONTROL/ACTIVE_TASK.md`.
+5. Read `project-docs/00_CONTROL/DOCUMENT_INDEX.md`.
 6. Read this handoff.
-7. Active Work Package: `P4-WP019` implementation on branch `ai/p4-wp019-orbis-archive`.
-8. Do not repeat closed work.
-9. Do not start WP020.
+7. Read `project-docs/00_CONTROL/NEXT_CHAT_PROMPT.md` when preparing a new session.
+8. Confirm `ACTIVE_WORK_PACKAGE = NONE` unless newer repository truth says otherwise.
+9. Do not start WP020 without explicit Owner authorization.
+10. Do not repeat closed WP019 work unless a proven regression exists.
