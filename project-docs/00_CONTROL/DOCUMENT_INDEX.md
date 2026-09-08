@@ -77,13 +77,17 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 E2E / UAT / Core V1 Release Proposal | [`../40_DELIVERY/P4_WP020_PROPOSAL.md`](../40_DELIVERY/P4_WP020_PROPOSAL.md) |
 | P4-WP020 PRE1 Release Readiness Evidence | [`../40_DELIVERY/P4_WP020_PRE1_EVIDENCE.md`](../40_DELIVERY/P4_WP020_PRE1_EVIDENCE.md) |
 | P4-WP020 S1 Bounded Corrective Plan | [`../40_DELIVERY/P4_WP020_S1_CORRECTIVE_PLAN.md`](../40_DELIVERY/P4_WP020_S1_CORRECTIVE_PLAN.md) |
+| P4-WP020 LIVE Authorization Contract | [`../40_DELIVERY/P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md`](../40_DELIVERY/P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md) |
+| P4-WP020 LIVE R2 C1 Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R2_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R2_C1.md) |
+| P4-WP020 LIVE R3 PRE1 No-Paid Gate | [`../40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`](../40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md) |
+| P4-WP020 LIVE R3 Proposed Resume Contract | [`../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`](../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
 | Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
 | WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
 
-P4-WP020 remains controlled by staged Owner gates. PRE1 evidence is merged and the S1 corrective plan is documentation-only. Corrective implementation, WP020-A, paid provider usage, release mutation and merge remain separately Owner-controlled.
+P4-WP020 is active and controlled by staged Owner gates. R1/R2 are consumed live histories. R2-C1 is merged. R3-PRE1 is a NO-PAID metadata-access and contract-preparation gate only; it does not authorize R3 paid execution or Core V1 release.
 
 ---
 
