@@ -23,7 +23,7 @@ def test_story_mode_happy_path(client, db_session):
         description="A journey through the stars",
         video_mode="STORY",
         status="DRAFT",
-        automation_mode="MANUAL",
+        automation_mode="ASSISTED",
     )
     db_session.add(p)
     db_session.commit()
@@ -139,6 +139,7 @@ def test_short_mode_skips_story(client, db_session):
         description="Quick short-form hook",
         video_mode="SHORT",
         status="DRAFT",
+        automation_mode="ASSISTED",
     )
     db_session.add(p)
     db_session.commit()
@@ -172,6 +173,7 @@ def test_loop_mode_shot_plan(client, db_session):
         description="Seamless ambient loop",
         video_mode="LOOP",
         status="DRAFT",
+        automation_mode="ASSISTED",
     )
     db_session.add(p)
     db_session.commit()
@@ -202,6 +204,7 @@ def test_scene_mode_skips_story(client, db_session):
         description="Independent scene visual layout",
         video_mode="SCENE",
         status="DRAFT",
+        automation_mode="ASSISTED",
     )
     db_session.add(p)
     db_session.commit()
@@ -907,7 +910,13 @@ def test_full_roundtrip_revision_lifecycle_no_dead_ends(client, db_session):
     fake_provider = FakeCreativeGenerationProvider()
     client.app.dependency_overrides[get_creative_provider] = lambda: fake_provider
 
-    p = Project(title="Revision Roundtrip", video_mode="STORY", status="DRAFT", description="Brief description")
+    p = Project(
+        title="Revision Roundtrip",
+        video_mode="STORY",
+        status="DRAFT",
+        description="Brief description",
+        automation_mode="ASSISTED",
+    )
     db_session.add(p)
     db_session.commit()
     p_id = str(p.id)
