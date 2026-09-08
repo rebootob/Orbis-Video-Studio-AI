@@ -111,13 +111,22 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         refs = params.reference_images or []
         if not refs:
             return []
-        if len(refs) > self._max_reference_count or self._reference_resolver is None:
-            raise ValueError("REFERENCE_INPUT_UNSUPPORTED")
+        if len(refs) > self._max_reference_count:
+            raise ValueError("REFERENCE_COUNT_UNSUPPORTED")
+
+        if self._reference_resolver is not None:
+            resolver = self._reference_resolver
+        else:
+            # Keep reference materialization provider-neutral and dispatch-time only.
+            # This avoids presigned credentials/base64 entering durable job payloads.
+            from app.services.image_generation.reference_materializer import materialize_reference_image
+
+            resolver = lambda url: materialize_reference_image(url, params.shot_id)
 
         blocks = []
         total_bytes = 0
         for ref in refs:
-            payload, mime_type = self._reference_resolver(ref.url)
+            payload, mime_type = resolver(ref.url)
             if not isinstance(payload, (bytes, bytearray)) or not payload:
                 raise ValueError("REFERENCE_INPUT_INVALID")
             if mime_type not in _SUPPORTED_REFERENCE_MIME_TYPES:
