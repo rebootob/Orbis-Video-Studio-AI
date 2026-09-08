@@ -65,6 +65,11 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         try:
             key = config.get("api_key", self._api_key)
             parsed = urlsplit(self._base_url)
+            numeric_rates = (
+                settings.GEMINI_IMAGE_INPUT_COST_PER_MILLION_USD,
+                settings.GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD,
+                settings.GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD,
+            )
             return bool(
                 isinstance(key, str)
                 and key.strip()
@@ -84,6 +89,7 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 and self._default_image_size in _SUPPORTED_IMAGE_SIZES
                 and 1 <= self._max_reference_count <= 14
                 and 0 < self._max_inline_reference_bytes <= 19 * 1024 * 1024
+                and all(isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for v in numeric_rates)
             )
         except (TypeError, ValueError):
             return False
@@ -117,8 +123,6 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         if self._reference_resolver is not None:
             resolver = self._reference_resolver
         else:
-            # Keep reference materialization provider-neutral and dispatch-time only.
-            # This avoids presigned credentials/base64 entering durable job payloads.
             from app.services.image_generation.reference_materializer import materialize_reference_image
 
             resolver = lambda url: materialize_reference_image(url, params.shot_id)
@@ -186,6 +190,34 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 return decoded, mime_type, interaction_id
         return None, None, interaction_id
 
+    @staticmethod
+    def _usage_cost(data: Dict[str, Any]) -> Tuple[Optional[float], Optional[Dict[str, int]]]:
+        usage = data.get("usage")
+        if not isinstance(usage, dict):
+            return None, None
+
+        summary = {"input_tokens": 0, "output_text_tokens": 0, "output_image_tokens": 0}
+        for row in usage.get("input_tokens_by_modality", []) if isinstance(usage.get("input_tokens_by_modality"), list) else []:
+            if isinstance(row, dict) and isinstance(row.get("tokens"), int) and row["tokens"] >= 0:
+                summary["input_tokens"] += row["tokens"]
+        for row in usage.get("output_tokens_by_modality", []) if isinstance(usage.get("output_tokens_by_modality"), list) else []:
+            if not isinstance(row, dict) or not isinstance(row.get("tokens"), int) or row["tokens"] < 0:
+                continue
+            if row.get("modality") == "image":
+                summary["output_image_tokens"] += row["tokens"]
+            else:
+                summary["output_text_tokens"] += row["tokens"]
+
+        if summary["output_image_tokens"] <= 0:
+            return None, summary
+
+        cost = (
+            summary["input_tokens"] * float(settings.GEMINI_IMAGE_INPUT_COST_PER_MILLION_USD)
+            + summary["output_text_tokens"] * float(settings.GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD)
+            + summary["output_image_tokens"] * float(settings.GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD)
+        ) / 1_000_000.0
+        return round(cost, 6), summary
+
     async def generate_image(self, params: ImageGenerationParams) -> ImageJobResult:
         if not self.validate_config({}):
             return self._failure("INVALID_CONFIG")
@@ -193,8 +225,6 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
             return self._failure("INVALID_PARAMETERS")
         if params.aspect_ratio not in _SUPPORTED_ASPECT_RATIOS:
             return self._failure("UNSUPPORTED_ASPECT_RATIO")
-        # Gemini Interactions image generation does not expose deterministic seed
-        # semantics through this adapter; silently dropping a requested seed is forbidden.
         if params.seed is not None:
             return self._failure("UNSUPPORTED_SEED")
 
@@ -261,15 +291,32 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         if not image_bytes or not content_type:
             return self._failure("INVALID_RESPONSE", uncertain=False, job_id=interaction_id)
 
-        # Provider billing is token-based and may include input image/text cost.
-        # Do not invent an actual dollar amount here; core retains the pre-call
-        # estimate until provider billing evidence is reconciled.
+        cost_usd, usage_summary = self._usage_cost(data)
+        if cost_usd is None:
+            # A completed/chargeable provider result without metering evidence must
+            # not be converted into a fabricated confirmed cost by core.
+            return ImageJobResult(
+                provider_job_id=interaction_id or f"gemini-sync-{params.shot_id}",
+                status="COMPLETED",
+                image_data=image_bytes,
+                content_type=content_type,
+                error_code="COST_EVIDENCE_MISSING",
+                error_message="COST_EVIDENCE_MISSING",
+                submission_uncertain=True,
+                raw_response={
+                    "provider": self.provider_id,
+                    "model": self._model,
+                    "interaction_id": interaction_id or None,
+                    "usage_summary": usage_summary,
+                },
+            )
+
         return ImageJobResult(
             provider_job_id=interaction_id or f"gemini-sync-{params.shot_id}",
             status="COMPLETED",
             image_data=image_bytes,
             content_type=content_type,
-            cost_usd=None,
+            cost_usd=cost_usd,
             raw_response={
                 "provider": self.provider_id,
                 "model": self._model,
@@ -277,10 +324,9 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 "aspect_ratio": params.aspect_ratio,
                 "image_size": image_size,
                 "reference_count": len(reference_blocks),
+                "usage_summary": usage_summary,
             },
         )
 
     async def check_job_status(self, provider_job_id: str) -> ImageJobResult:
-        # This adapter uses the synchronous Interactions API. Core will only poll
-        # providers that return QUEUED/PROCESSING; Gemini never does so here.
         return self._failure("ASYNC_STATUS_UNSUPPORTED", job_id=provider_job_id)
