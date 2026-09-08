@@ -1,3 +1,5 @@
+import uuid
+
 from app.models.orchestration_audit import OrchestrationAudit
 from app.models.story import Story
 from app.models.story_version import StoryVersion
@@ -49,6 +51,7 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
     _forbid_openai(monkeypatch)
     project = _create_project(client, title="Manual Story", video_mode="STORY")
     project_id = project["id"]
+    project_uuid = uuid.UUID(project_id)
 
     initial = client.get(f"/api/v1/projects/{project_id}/orchestration")
     assert initial.status_code == 200
@@ -85,7 +88,7 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
     )
     assert second_story.status_code == 200, second_story.text
     assert second_story.json()["version_number"] == 2
-    assert db_session.query(StoryVersion).filter(StoryVersion.project_id == project_id).count() == 1
+    assert db_session.query(StoryVersion).filter(StoryVersion.project_id == project_uuid).count() == 1
 
     ready_story = client.get(f"/api/v1/projects/{project_id}/orchestration").json()
     assert ready_story["recommended_action"]["action"] == "SUBMIT_MANUAL_STORY"
@@ -154,14 +157,14 @@ def test_manual_story_mode_reaches_shot_plan_approved_without_creative_provider(
     approved = _approve(client, project_id, "SHOT_PLAN_GENERATED")
     assert approved["to_stage"] == "SHOT_PLAN_APPROVED"
 
-    assert db_session.query(UsageLedger).filter(UsageLedger.project_id == project_id).count() == 0
-    story = db_session.query(Story).filter(Story.project_id == project_id).one()
+    assert db_session.query(UsageLedger).filter(UsageLedger.project_id == project_uuid).count() == 0
+    story = db_session.query(Story).filter(Story.project_id == project_uuid).one()
     assert story.title == "Manual Story Title v2"
 
     actions = {
         row.action
         for row in db_session.query(OrchestrationAudit)
-        .filter(OrchestrationAudit.project_id == project_id)
+        .filter(OrchestrationAudit.project_id == project_uuid)
         .all()
     }
     assert "MANUAL_STORY_CREATE" in actions
@@ -177,6 +180,7 @@ def test_manual_scene_mode_reaches_shot_plan_approved_without_story_or_provider(
     _forbid_openai(monkeypatch)
     project = _create_project(client, title="Manual Scene", video_mode="SCENE")
     project_id = project["id"]
+    project_uuid = uuid.UUID(project_id)
 
     initial = client.get(f"/api/v1/projects/{project_id}/orchestration").json()
     assert initial["recommended_action"]["action"] == "SUBMIT_MANUAL_STORYBOARD"
@@ -222,8 +226,8 @@ def test_manual_scene_mode_reaches_shot_plan_approved_without_story_or_provider(
     assert submitted_plan.status_code == 200, submitted_plan.text
     assert _approve(client, project_id, "SHOT_PLAN_GENERATED")["to_stage"] == "SHOT_PLAN_APPROVED"
 
-    assert db_session.query(Story).filter(Story.project_id == project_id).count() == 0
-    assert db_session.query(UsageLedger).filter(UsageLedger.project_id == project_id).count() == 0
+    assert db_session.query(Story).filter(Story.project_id == project_uuid).count() == 0
+    assert db_session.query(UsageLedger).filter(UsageLedger.project_id == project_uuid).count() == 0
 
 
 def test_assisted_and_auto_keep_provider_backed_recommended_actions(client):
