@@ -1,10 +1,12 @@
 # P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync
 
-**Status:** OWNER AUTHORIZED / NO-PAID PRE1 IN PROGRESS  
+**Status:** PASS / COMPLETED  
 **Base main:** `d706acacd1f51224c955fb9c8d0d9eab3deda186`  
-**Working branch:** `ai/p4-wp020-live-r3-pre1`  
-**Provider generation calls authorized:** `0`  
-**Paid spend authorized:** `USD 0.00`
+**Reviewed PRE1 HEAD:** `28f8095d581556b27feed67e27f82c004ea07bbc`  
+**PR:** `#75`  
+**Merge commit:** `dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b`  
+**Provider generation calls during PRE1:** `0`  
+**Paid spend during PRE1:** `USD 0.00`
 
 ## Purpose
 
@@ -12,65 +14,77 @@ Close the remaining pre-R3 configuration uncertainty without generating content 
 
 R2 stopped after OpenAI STORY succeeded and the subsequent Gemini image request returned a non-success HTTP outcome. C1 made future Gemini HTTP status evidence durable, but it cannot reconstruct the exact R2 status retroactively.
 
-PRE1 therefore performs only a metadata-level Gemini access check, synchronizes control truth after C1 merge, and defines the proposed R3 resume contract.
+PRE1 therefore implemented and verified a metadata-level Gemini access check, synchronized control truth, and drafted the proposed R3 resume contract without paid authorization.
 
-## Authorized PRE1 scope
+## Delivered PRE1 scope
 
-1. Add a manual-only GitHub Actions workflow for a Gemini metadata access probe.
-2. The probe may perform exactly one authenticated `GET` to:
+1. Added a manual-only GitHub Actions workflow for a Gemini metadata access probe.
+2. The probe performs only one authenticated metadata `GET` to:
    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image`.
-3. Authentication uses the configured `GEMINI_API_KEY` in the `x-goog-api-key` header.
-4. The probe must never:
-   - call `/interactions`;
-   - call `generateContent`;
-   - submit a prompt or image payload;
-   - create an image or any other generated media;
-   - write an execution fence;
-   - write Issue #63;
-   - expose API key, provider response body, or headers in evidence.
-5. Persist/log only sanitized probe evidence:
-   - status;
-   - provider;
-   - model;
-   - HTTP status when known;
-   - sanitized error classification;
-   - `generation_request_sent=false`;
-   - `paid_generation_calls=0`.
-6. Add zero-network unit tests for success/failure classification and secret/body non-leakage.
-7. Synchronize control documents to current C1-merged/PRE1-active truth.
-8. Draft the R3 resume contract without authorizing paid execution.
+3. Authentication uses the configured `GEMINI_API_KEY` through the `x-goog-api-key` header.
+4. Static guards prevent generation-capable paths such as `/interactions`, `generateContent`, and POST-based generation calls.
+5. Probe evidence is sanitized to provider/model/status/http/error classification plus explicit no-generation counters.
+6. Zero-network tests cover 200/400/401/403/404/429/5xx behavior, invalid model handling, and secret/provider-body non-leakage.
+7. Control documents were synchronized.
+8. The R3 full-chain resume contract remains draft/proposed only.
 
-## Probe outcomes
+## Merge and CI evidence
 
-`ACCESS_PROBE_PASS` requires HTTP 200 and metadata identity `models/gemini-3.1-flash-image`.
+PR #75 exact reviewed HEAD:
+`28f8095d581556b27feed67e27f82c004ea07bbc`
 
-Sanitized STOP classifications include:
+Accepted CI evidence before merge:
 
-- 400 -> `BAD_REQUEST`
-- 401 -> `AUTHENTICATION_FAILED`
-- 403 -> `AUTHORIZATION_FAILED`
-- 404 -> `MODEL_NOT_VISIBLE`
-- 429 -> `RATE_LIMITED`
-- 5xx -> `PROVIDER_UNAVAILABLE`
-- network failure -> `TRANSPORT_ERROR`
+```text
+Backend: 479 passed, 2 skipped
+PostgreSQL fresh-head migration: PASS
+PostgreSQL from-revision-010 migration: PASS
+Frontend workflow: PASS
+Lint / typecheck / build / frontend tests: PASS
+```
 
-Any non-PASS result blocks preparation of R3 paid execution tooling until reviewed.
+PR #75 merged to canonical main as:
+`dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b`.
+
+## Post-merge metadata probe evidence
+
+```text
+Workflow: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
+Run ID: 34291500281
+Run main SHA: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Conclusion: success
+Probe status: ACCESS_PROBE_PASS
+HTTP status: 200
+Provider: gemini_image
+Model: gemini-3.1-flash-image
+generation_request_sent: false
+paid_generation_calls: 0
+```
+
+The static no-generation guard passed before the metadata request. Workflow permissions remained read-only and no R3 execution fence or paid authorization marker was written.
+
+## Interpretation
+
+PRE1 proves that the configured Gemini credential can authenticate to the metadata endpoint and that `gemini-3.1-flash-image` is visible there at the tested canonical main.
+
+PRE1 does **not** prove that an image-generation submission will succeed. It also does not reconstruct the exact historical HTTP status from R2.
 
 ## Why R3 cannot simply continue from the R2 Story record
 
-R2 ran on ephemeral PostgreSQL and MinIO services. The durable workflow artifact retained sanitized evidence, including Story identity and OpenAI usage/cost evidence, but not the reusable Story/project database state itself. The ephemeral database was destroyed at job completion.
+R2 ran on ephemeral PostgreSQL and MinIO services. The durable workflow artifact retained sanitized evidence, including Story identity and OpenAI usage/cost evidence, but not reusable Story/project database state. The ephemeral database was destroyed at job completion.
 
 Therefore a later full end-to-end LIVE PASS cannot truthfully claim to resume the exact R2 project state. The proposed R3 contract must create a new isolated UAT project and rerun the bounded provider chain from the beginning unless a separately reviewed durable-state recovery mechanism exists.
 
-This does not invalidate the accepted R2 OpenAI success evidence; it only means that evidence is historical proof rather than reusable project state.
+This does not invalidate the accepted R2 OpenAI success evidence; it remains historical proof rather than reusable project state.
 
-## Explicitly forbidden in PRE1
+## Closure safety state
 
-- no OpenAI request;
-- no Gemini generation request;
-- no Vidu request;
-- no ElevenLabs request;
-- no paid workflow dispatch;
+- no OpenAI generation request occurred in PRE1;
+- no Gemini generation request occurred in PRE1;
+- no Vidu request occurred in PRE1;
+- no ElevenLabs request occurred in PRE1;
+- PRE1 paid generation calls = 0;
+- PRE1 paid spend = USD 0.00;
 - no R1/R2 rerun;
 - no R3 execution fence;
 - no R3 paid authorization marker;
@@ -78,29 +92,17 @@ This does not invalidate the accepted R2 OpenAI success evidence; it only means 
 - no production deployment;
 - no Core V1 release declaration.
 
-## Merge-readiness evidence
+## Next gate — Not Authorized
 
-Before merge proposal:
+PRE1 is closed. No next work package is auto-authorized.
 
-- targeted PRE1 tests PASS;
-- full backend CI PASS;
-- migration checks PASS;
-- frontend CI PASS if repository policy triggers it;
-- exact diff remains PRE1-only;
-- workflow is `workflow_dispatch` only;
-- workflow permissions are `contents: read` only;
-- static no-generation guard PASS;
-- no paid/live workflow is dispatched during PRE1 implementation;
-- independent exact-head review PASS.
+The next proposed gate is **R3 paid one-shot execution-tooling preparation only**. ChatGPT must fresh-review canonical `main` and present a bounded tooling contract for explicit Owner authorization before implementation.
 
-After merge, the metadata probe may be manually dispatched on canonical `main` under this already authorized NO-PAID PRE1 scope. A probe PASS still does not authorize R3 paid execution.
+A later paid R3 execution still requires:
 
-## Next gate
-
-After PRE1 code/docs are merged and the metadata probe returns PASS:
-
-1. prepare bounded R3 paid one-shot tooling against then-current exact `main`;
-2. independently review exact tooling HEAD and CI;
-3. merge only with Owner authorization;
-4. record a fresh Owner paid/live authorization tied to the exact post-merge `main`;
-5. execute only after a separate explicit run gate.
+1. reviewed and merged R3 execution tooling;
+2. a fresh execution identity;
+3. exact binding to then-current canonical main;
+4. fresh no-paid preflight;
+5. fresh Owner paid/live authorization;
+6. a new one-shot execution fence immediately before the first chargeable request.
