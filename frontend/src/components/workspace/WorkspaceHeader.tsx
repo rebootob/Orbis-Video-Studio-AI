@@ -35,7 +35,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   };
 
   return (
-    <header className="app-header" data-testid="workspace-header">
+    <header
+      className="app-header"
+      data-testid="workspace-header"
+      data-project-id={project.id}
+      data-automation-mode={project.automation_mode || 'MANUAL'}
+    >
       {/* Left: Back & Project Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         <button
