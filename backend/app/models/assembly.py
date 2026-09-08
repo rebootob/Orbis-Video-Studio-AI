@@ -27,6 +27,9 @@ class AssemblyTimeline(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="DRAFT")  # DRAFT, READY, APPROVED
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    # Core V1 subtitle state is timeline-bound and append-history preserving.
+    # Shape: {"active": <track>, "history": [<prior track versions>]}
+    subtitle_state: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
