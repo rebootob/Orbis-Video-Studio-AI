@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD: float = 3.00
     GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD: float = 60.00
 
+    # ElevenLabs production AudioProvider settings (Core V1 R4)
+    ELEVENLABS_API_KEY: str = ""
+    ELEVENLABS_BASE_URL: str = "https://api.elevenlabs.io/v1"
+    ELEVENLABS_TIMEOUT_SECONDS: float = 60.0
+    # Speech requires an explicitly configured voice. BGM/SFX/Ambience can run
+    # with only the API key; VO/DIALOGUE fail closed when no voice is configured.
+    ELEVENLABS_DEFAULT_VOICE_ID: str = ""
+    ELEVENLABS_TTS_MODEL: str = "eleven_v3"
+    ELEVENLABS_MUSIC_MODEL: str = "music_v2"
+    ELEVENLABS_SFX_MODEL: str = "eleven_text_to_sound_v2"
+    ELEVENLABS_OUTPUT_FORMAT: str = "mp3_44100_128"
+    # Current ElevenAPI pay-as-you-go rates are configurable rather than hidden
+    # in domain logic. Defaults reflect provider evidence captured 2026-09-08.
+    ELEVENLABS_TTS_COST_PER_1K_CHARS_USD: float = 0.10
+    ELEVENLABS_MUSIC_COST_PER_MINUTE_USD: float = 0.15
+    ELEVENLABS_SFX_COST_PER_MINUTE_USD: float = 0.12
+
     # Vidu Video Generation Provider Settings
     VIDU_API_KEY: str = ""
     VIDU_BASE_URL: str = "https://api.vidu.com/ent/v2"
@@ -75,6 +92,7 @@ class Settings(BaseSettings):
     # Provider Routing Configuration
     # Production defaults must never silently resolve to deterministic fake providers.
     DEFAULT_IMAGE_PROVIDER: str = "gemini_image"
+    DEFAULT_AUDIO_PROVIDER: str = "elevenlabs_audio"
     DEFAULT_VIDEO_PROVIDER: str = "vidu"
 
     # Provider Pricing Configuration (Replaceable / Configurable via settings).
