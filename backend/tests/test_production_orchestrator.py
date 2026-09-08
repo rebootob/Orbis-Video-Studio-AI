@@ -458,7 +458,9 @@ def test_happy_path_video_in_progress_to_final_review_to_completed(client, db_se
     db_session.add(sh)
     db_session.commit()
 
-    job = GenerationJob(id=uuid.uuid4(), shot_id=sh.id, provider_name="vidu", status="COMPLETED")
+    job = GenerationJob(
+        id=uuid.uuid4(), shot_id=sh.id, provider_name="vidu", status="COMPLETED", output_asset_id=asset.id
+    )
     db_session.add(job)
     db_session.commit()
     p_id = str(p.id)
@@ -777,15 +779,15 @@ def test_duplicate_completed_jobs_do_not_falsely_complete_other_shots(client, db
     assert summary["shot_count"] == 2
     assert summary["completed_jobs"] == 3  # Raw historical jobs
     assert summary["distinct_completed_shots"] == 1  # Only 1 distinct shot completed!
-    assert summary["production_ready_shots"] == 1
+    assert summary["production_ready_shots"] == 0
 
-    # Transition to final review MUST be rejected: only 1 of 2 shots is production ready!
+    # Raw provider completion without durable output must not make either shot production-ready.
     res_trans = client.post(
         f"/api/v1/projects/{p_id}/orchestration/execute",
         json={"action": "TRANSITION_TO_FINAL_REVIEW"},
     )
     assert res_trans.status_code == 400
-    assert "only 1/2 shots are production-ready" in res_trans.json()["detail"]
+    assert "only 0/2 shots are production-ready" in res_trans.json()["detail"]
 
 
 def test_imported_source_backed_shots_satisfy_production_readiness(client, db_session):
@@ -814,12 +816,16 @@ def test_imported_source_backed_shots_satisfy_production_readiness(client, db_se
 
     # Shot 1: IMPORTED_VIDEO with source_asset_id (no GenerationJob needed)
     sh1 = Shot(scene_id=sc.id, shot_number=1, shot_type="IMPORTED_VIDEO", source_asset_id=ast.id, status="COMPLETED")
-    # Shot 2: AI_GENERATED with COMPLETED job
-    sh2 = Shot(scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED", status="PENDING")
+    # Shot 2: AI_GENERATED with materialized COMPLETED job
+    sh2 = Shot(
+        scene_id=sc.id, shot_number=2, shot_type="AI_GENERATED", status="COMPLETED", source_asset_id=ast.id
+    )
     db_session.add_all([sh1, sh2])
     db_session.commit()
 
-    job2 = GenerationJob(id=uuid.uuid4(), shot_id=sh2.id, provider_name="vidu", status="COMPLETED")
+    job2 = GenerationJob(
+        id=uuid.uuid4(), shot_id=sh2.id, provider_name="vidu", status="COMPLETED", output_asset_id=ast.id
+    )
     db_session.add(job2)
     db_session.commit()
 

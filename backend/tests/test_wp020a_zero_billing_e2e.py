@@ -339,7 +339,7 @@ def test_e2e_10_to_14_downstream_archive_roundtrip_closes_audio_history_gap(db_s
     exporter = ProjectExportService(storage_provider=mock_storage)
     archive_path, manifest = exporter.export_project(db=db_session, project_id=project.id)
     try:
-        assert manifest["package_type"] == "FULL_SELF_CONTAINED"
+        assert manifest["archive_options"]["package_type"] == "FULL_SELF_CONTAINED"
         importer = ProjectImportService(storage_provider=mock_storage)
         validation = importer.validate_project_archive(archive_path, db_session)
         assert validation["valid"] is True

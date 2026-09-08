@@ -26,6 +26,7 @@ from app.providers.vidu import ViduProviderAdapter
 from app.providers.factory import ProviderFactory
 from app.services.job_dispatch import JobDispatchService as Queue, LEASE_SECONDS, POLL_SECONDS
 from app.services.generation_worker import run_once
+from app.services.video_materialization import VideoMaterializationService
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
 
@@ -40,6 +41,15 @@ def deny_live_http(monkeypatch):
     async def denied(*args, **kwargs):
         raise AssertionError("Unmocked HTTP is forbidden in WP007 tests")
     monkeypatch.setattr(httpx.AsyncClient, "send", denied)
+
+    async def materialized_by_focused_suite(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        VideoMaterializationService,
+        "materialize_completed_result",
+        materialized_by_focused_suite,
+    )
 
 
 def make_shot(db):

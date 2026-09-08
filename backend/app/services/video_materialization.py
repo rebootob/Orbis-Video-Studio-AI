@@ -162,14 +162,15 @@ class VideoMaterializationService:
         if existing:
             if existing.project_id != project.id or existing.asset_type != "VIDEO":
                 raise VideoMaterializationError("Existing deterministic video Asset conflicts with GenerationJob")
-            if shot.is_locked and shot.source_asset_id not in (None, existing.id):
+            if shot.is_locked and shot.source_asset_id != existing.id:
                 raise VideoMaterializationError("Shot became locked before completed output could be bound")
-            job.output_asset_id = existing.id
-            shot.source_asset_id = existing.id
-            db.commit()
+            with db.begin_nested():
+                job.output_asset_id = existing.id
+                shot.source_asset_id = existing.id
+                db.flush()
             return existing
 
-        if shot.is_locked and shot.source_asset_id is not None:
+        if shot.is_locked:
             raise VideoMaterializationError("Shot became locked before completed output could be bound")
 
         storage = storage_provider or get_storage_provider()
@@ -195,35 +196,37 @@ class VideoMaterializationService:
             uploaded_bucket = bucket
             uploaded_key = storage_key
 
-            asset = Asset(
-                id=asset_id,
-                project_id=project.id,
-                name=f"Generated Video Shot {shot.shot_number}",
-                original_filename=f"generated_shot_{shot.shot_number}.{ext}",
-                asset_type="VIDEO",
-                content_type=content_type,
-                file_size_bytes=size,
-                checksum_sha256=checksum,
-                storage_bucket=bucket,
-                storage_key=storage_key,
-                created_at=_utc_now(),
-                updated_at=_utc_now(),
-            )
-            db.add(asset)
-            db.flush()
-            job.output_asset_id = asset.id
-            shot.source_asset_id = asset.id
-            shot.updated_at = _utc_now()
-            db.commit()
-            db.refresh(asset)
+            try:
+                with db.begin_nested():
+                    asset = Asset(
+                        id=asset_id,
+                        project_id=project.id,
+                        name=f"Generated Video Shot {shot.shot_number}",
+                        original_filename=f"generated_shot_{shot.shot_number}.{ext}",
+                        asset_type="VIDEO",
+                        content_type=content_type,
+                        file_size_bytes=size,
+                        checksum_sha256=checksum,
+                        storage_bucket=bucket,
+                        storage_key=storage_key,
+                        created_at=_utc_now(),
+                        updated_at=_utc_now(),
+                    )
+                    db.add(asset)
+                    db.flush()
+                    job.output_asset_id = asset.id
+                    shot.source_asset_id = asset.id
+                    shot.updated_at = _utc_now()
+                    db.flush()
+            except Exception:
+                if uploaded_new_object and uploaded_bucket and uploaded_key:
+                    try:
+                        storage.delete_object(uploaded_bucket, uploaded_key)
+                    except Exception:
+                        pass
+                raise
             return asset
         except Exception as exc:
-            db.rollback()
-            if uploaded_new_object and uploaded_bucket and uploaded_key:
-                try:
-                    storage.delete_object(uploaded_bucket, uploaded_key)
-                except Exception:
-                    pass
             if isinstance(exc, VideoMaterializationError):
                 raise
             raise VideoMaterializationError("Completed provider video could not be durably materialized") from exc
