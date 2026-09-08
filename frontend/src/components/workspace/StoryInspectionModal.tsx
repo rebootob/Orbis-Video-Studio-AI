@@ -64,7 +64,7 @@ export const StoryInspectionModal: React.FC<StoryInspectionModalProps> = ({
     ? document.querySelector<HTMLElement>('[data-testid="workspace-header"]')
     : null;
   const activeProjectId = workingStory?.project_id || story?.project_id || workspaceHeader?.dataset.projectId;
-  const automationMode = workspaceHeader?.dataset.automationMode || 'MANUAL';
+  const automationMode = workspaceHeader?.dataset.automationMode || 'ASSISTED';
   const isManualMode = automationMode === 'MANUAL';
 
   useEffect(() => {
