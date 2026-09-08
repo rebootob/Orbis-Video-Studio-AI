@@ -43,3 +43,107 @@ jobs:
 
       - name: Run backend tests
         run: pytest -q
+
+  fresh-postgres-migrations:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        migration_path:
+          - fresh-head
+          - from-revision-010
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: orbis_ci
+          POSTGRES_PASSWORD: orbis_ci_password
+          POSTGRES_DB: orbis_migration_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbis_ci -d orbis_migration_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: orbis_ci
+      POSTGRES_PASSWORD: orbis_ci_password
+      POSTGRES_DB: orbis_migration_ci
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python - <<'PY'
+          import subprocess
+          import sys
+          import tomllib
+
+          with open("pyproject.toml", "rb") as f:
+              config = tomllib.load(f)
+
+          dependencies = config["project"]["dependencies"]
+          dev_dependencies = config["project"]["optional-dependencies"]["dev"]
+
+          subprocess.check_call(
+              [sys.executable, "-m", "pip", "install", *dependencies, *dev_dependencies]
+          )
+          PY
+
+      - name: Exercise migration path
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.migration_path }}" = "from-revision-010" ]; then
+            alembic upgrade 010_story_version_history
+          fi
+          alembic upgrade head
+
+      - name: Verify migration head and Alembic version capacity
+        run: |
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy import create_engine, text
+          from app.core.config import settings
+
+          expected_head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+          engine = create_engine(settings.SQLALCHEMY_DATABASE_URI)
+          with engine.connect() as conn:
+              actual_head = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              max_length = conn.execute(
+                  text(
+                      """
+                      SELECT character_maximum_length
+                      FROM information_schema.columns
+                      WHERE table_schema = current_schema()
+                        AND table_name = 'alembic_version'
+                        AND column_name = 'version_num'
+                      """
+                  )
+              ).scalar_one()
+
+          assert actual_head == expected_head, (actual_head, expected_head)
+          assert max_length is not None and max_length >= len(expected_head), (
+              max_length,
+              expected_head,
+          )
+          print(f"Migration head verified: {actual_head}; version_num capacity={max_length}")
+          PY
