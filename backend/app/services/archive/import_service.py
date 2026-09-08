@@ -1548,9 +1548,12 @@ class ProjectImportService:
                 for ta in tas:
                     db.add(TimelineAudit(
                         id=remap.get_or_create(parse_uuid(ta["id"]), "TIMELINE_AUDIT"),
+                        project_id=new_project_id,
                         timeline_id=remap.get_or_create(parse_uuid(ta["timeline_id"]), "TIMELINE"),
                         action=ta.get("action", "UPDATE"),
-                        details=ta.get("details"),
+                        actor=ta.get("actor", "system"),
+                        change_reason=ta.get("change_reason"),
+                        snapshot_data=ta.get("snapshot_data", ta.get("details")),
                         created_at=parse_datetime(ta.get("created_at")) or datetime.now(timezone.utc),
                     ))
 
