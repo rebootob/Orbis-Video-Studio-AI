@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     GEMINI_IMAGE_SIZE: str = "1K"
     GEMINI_IMAGE_MAX_REFERENCE_COUNT: int = 14
     GEMINI_IMAGE_MAX_INLINE_REFERENCE_BYTES: int = 18874368  # 18 MiB under API inline request limit
+    # Current Gemini Developer API rates are configurable, not hard-coded in domain logic.
+    # Defaults reflect the provider decision evidence captured for R3 on 2026-09-08.
+    GEMINI_IMAGE_INPUT_COST_PER_MILLION_USD: float = 0.50
+    GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD: float = 3.00
+    GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD: float = 60.00
 
     # Vidu Video Generation Provider Settings
     VIDU_API_KEY: str = ""
