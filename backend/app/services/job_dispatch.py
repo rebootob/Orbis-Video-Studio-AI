@@ -429,6 +429,34 @@ class JobDispatchService:
 
         if res.provider_job_id and (not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", res.provider_job_id) or contains_secret(res.provider_job_id)):
             res = ProviderJobResult(provider_job_id="", status="FAILED", submission_uncertain=True)
+
+        if res.status == "COMPLETED" and getattr(job, "job_type", "VIDEO") == "VIDEO":
+            try:
+                from app.services.video_materialization import VideoMaterializationService
+                await VideoMaterializationService.materialize_completed_result(db, job.id, res)
+            except Exception:
+                now = now if supplied_now is not None else utc_now()
+                failed_values = released()
+                failed_values.update(
+                    provider_job_id=res.provider_job_id or None,
+                    result=safe_result(res),
+                    status="RECONCILIATION_REQUIRED",
+                    error_message="Provider completed but durable video materialization failed; manual reconciliation required",
+                    next_retry_at=None,
+                    next_poll_at=None,
+                )
+                change(db, [
+                    Job.id == job_id,
+                    Job.status == "SUBMITTING",
+                    Job.claim_token == claim_token,
+                    Job.submission_attempt_id == attempt,
+                ], failed_values)
+                from app.services.cost_ledger import CostLedgerService
+                CostLedgerService.confirm_job_cost(
+                    db, job_id, actual_cost=res.cost_usd, provider_event_id=res.provider_job_id
+                )
+                return load(db, job_id)
+
         now = now if supplied_now is not None else utc_now()
         values = released()
         values.update(result=safe_result(res), error_message=None, next_retry_at=None)
@@ -520,6 +548,28 @@ class JobDispatchService:
             res = await adapter.check_job_status(job.provider_job_id)
         except Exception as exc:
             res = failure(exc)
+
+        if res.status == "COMPLETED" and getattr(job, "job_type", "VIDEO") == "VIDEO":
+            try:
+                from app.services.video_materialization import VideoMaterializationService
+                await VideoMaterializationService.materialize_completed_result(db, job.id, res)
+            except Exception:
+                now = now if supplied_now is not None else utc_now()
+                failed_values = {
+                    **released(),
+                    "provider_job_id": job.provider_job_id,
+                    "result": safe_result(res),
+                    "status": "RECONCILIATION_REQUIRED",
+                    "error_message": "Provider completed but durable video materialization failed; manual reconciliation required",
+                    "next_retry_at": None,
+                    "next_poll_at": None,
+                }
+                change(db, [Job.id == job_id, Job.status == "POLLING", Job.claim_token == token], failed_values)
+                from app.services.cost_ledger import CostLedgerService
+                CostLedgerService.confirm_job_cost(
+                    db, job_id, actual_cost=res.cost_usd, provider_event_id=job.provider_job_id
+                )
+                return load(db, job_id)
 
         now = now if supplied_now is not None else utc_now()
         values = {

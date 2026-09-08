@@ -225,7 +225,12 @@ class ProjectExportService:
         story_versions = (
             db.query(StoryVersion).filter(StoryVersion.project_id == p_id).order_by(StoryVersion.version_number).all()
         )
-        scenes = db.query(Scene).filter(Scene.project_id == p_id).order_by(Scene.scene_number).all()
+        scenes = (
+            db.query(Scene)
+            .filter((Scene.project_id == p_id) | (Scene.story.has(project_id=p_id)))
+            .order_by(Scene.scene_number, Scene.id)
+            .all()
+        )
         scene_ids = [s.id for s in scenes]
 
         shots = db.query(Shot).filter(Shot.scene_id.in_(scene_ids)).order_by(Shot.shot_number).all() if scene_ids else []
@@ -250,7 +255,7 @@ class ProjectExportService:
         audio_clips = db.query(AudioClip).filter(AudioClip.project_id == p_id).all()
         clip_ids = [c.id for c in audio_clips]
         audio_clip_histories = (
-            db.query(AudioClipHistory).filter(AudioClipHistory.audio_clip_id.in_(clip_ids)).all() if clip_ids else []
+            db.query(AudioClipHistory).filter(AudioClipHistory.clip_id.in_(clip_ids)).all() if clip_ids else []
         )
 
         timelines = db.query(AssemblyTimeline).filter(AssemblyTimeline.project_id == p_id).order_by(AssemblyTimeline.version).all()

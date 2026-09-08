@@ -163,14 +163,26 @@ class AssemblyService:
         db.add(timeline)
         db.flush()
 
-        # Fetch canonical project scenes & shots
-        db_scenes = db.query(Scene).filter(Scene.project_id == p_uuid).order_by(Scene.scene_number.asc()).all()
+        # Fetch the canonical project graph through either direct project lineage
+        # or STORY lineage. Keep archived history out of the live assembly graph.
+        db_scenes = (
+            db.query(Scene)
+            .filter((Scene.project_id == p_uuid) | (Scene.story.has(project_id=p_uuid)))
+            .order_by(Scene.scene_number.asc(), Scene.id.asc())
+            .all()
+        )
+        db_scenes = [s for s in db_scenes if not (s.scene_config or {}).get("archived")]
         db_scene_map: Dict[str, Scene] = {str(s.id): s for s in db_scenes}
         scene_ids = [s.id for s in db_scenes]
 
         shots = []
         if scene_ids:
-            shots = db.query(Shot).filter(Shot.scene_id.in_(scene_ids)).order_by(Shot.shot_number.asc()).all()
+            shots = (
+                db.query(Shot)
+                .filter(Shot.scene_id.in_(scene_ids), Shot.status != "ARCHIVED")
+                .order_by(Shot.shot_number.asc(), Shot.id.asc())
+                .all()
+            )
 
         assets = db.query(Asset).filter(Asset.project_id == p_uuid).all()
         asset_map: Dict[str, Asset] = {str(a.id): a for a in assets}
