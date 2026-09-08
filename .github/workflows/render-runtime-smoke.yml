@@ -8,6 +8,7 @@ on:
       - "backend/Dockerfile"
       - "backend/app/services/render/**"
       - "backend/app/services/render_worker.py"
+      - "backend/app/services/subtitle.py"
       - "docker-compose.yml"
       - ".github/workflows/render-runtime-smoke.yml"
 
@@ -30,31 +31,42 @@ jobs:
       - name: Verify FFmpeg runtime
         run: docker run --rm orbis-render-runtime-smoke ffmpeg -version
 
-      - name: Render real MP4 smoke artifact
+      - name: Render real MP4 and subtitle burn-in smoke artifact
         run: |
           docker run --rm -i orbis-render-runtime-smoke python - <<'PY'
           import os
           import tempfile
           from app.services.render.ffmpeg_executor import FFmpegRenderExecutor
+          from app.services.render.subtitle_burnin import FFmpegSubtitleBurnInProcessor
 
           with tempfile.TemporaryDirectory() as scratch:
-              output = os.path.join(scratch, "smoke.mp4")
+              raw_output = os.path.join(scratch, "smoke.mp4")
+              subtitled_output = os.path.join(scratch, "smoke-subtitled.mp4")
+              srt_path = os.path.join(scratch, "smoke.srt")
               meta = FFmpegRenderExecutor().render_timeline(
                   timeline_spec={
                       "placements": [],
                       "audio_clips": [],
-                      "total_duration": 0.25,
+                      "total_duration": 0.5,
                       "target_width": 320,
                       "target_height": 180,
                   },
                   scratch_dir=scratch,
-                  output_file_path=output,
+                  output_file_path=raw_output,
               )
-              assert os.path.exists(output)
-              assert os.path.getsize(output) > 0
+              assert os.path.exists(raw_output)
+              assert os.path.getsize(raw_output) > 0
               assert meta["video_codec"] == "h264"
               assert meta["audio_codec"] == "aac"
-              print(f"render-smoke-bytes={os.path.getsize(output)}")
+
+              with open(srt_path, "w", encoding="utf-8") as f:
+                  f.write("1\n00:00:00,000 --> 00:00:00,450\nสวัสดีจาก Orbis\n")
+
+              FFmpegSubtitleBurnInProcessor().burn_in(raw_output, srt_path, subtitled_output)
+              assert os.path.exists(subtitled_output)
+              assert os.path.getsize(subtitled_output) > 0
+              print(f"render-smoke-bytes={os.path.getsize(raw_output)}")
+              print(f"subtitle-burnin-bytes={os.path.getsize(subtitled_output)}")
           PY
 
       - name: Validate Compose render-worker wiring
