@@ -6,6 +6,7 @@ import {
   Edit2,
   Archive,
   Check,
+  X,
   Lock,
   Unlock,
   Clapperboard,
@@ -36,6 +37,16 @@ interface SceneSectionProps {
   onToggleSceneLock: (scene: Scene) => void;
 }
 
+const dialogueToText = (dialogue: unknown): string => {
+  if (typeof dialogue === 'string') return dialogue;
+  if (dialogue == null) return '';
+  try {
+    return JSON.stringify(dialogue, null, 2);
+  } catch {
+    return String(dialogue);
+  }
+};
+
 export const SceneSection: React.FC<SceneSectionProps> = ({
   scene,
   shots,
@@ -60,13 +71,35 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [heading, setHeading] = useState(scene.heading || `Scene ${scene.scene_number}`);
   const [setting, setSetting] = useState(scene.setting || '');
+  const [description, setDescription] = useState(scene.description || '');
+  const [purpose, setPurpose] = useState(scene.purpose || '');
+  const [narration, setNarration] = useState(scene.narration || '');
+  const [dialogue, setDialogue] = useState(dialogueToText(scene.dialogue));
+  const [durationSeconds, setDurationSeconds] = useState(scene.duration_seconds || 5);
+
+  const resetEditor = () => {
+    setHeading(scene.heading || `Scene ${scene.scene_number}`);
+    setSetting(scene.setting || '');
+    setDescription(scene.description || '');
+    setPurpose(scene.purpose || '');
+    setNarration(scene.narration || '');
+    setDialogue(dialogueToText(scene.dialogue));
+    setDurationSeconds(scene.duration_seconds || 5);
+  };
 
   const handleSaveScene = () => {
-    onUpdateScene(scene.id, { heading, setting });
+    onUpdateScene(scene.id, {
+      heading,
+      setting,
+      description: description || undefined,
+      purpose: purpose || undefined,
+      narration: narration || undefined,
+      dialogue: dialogue || undefined,
+      duration_seconds: durationSeconds,
+    });
     setIsEditing(false);
   };
 
-  // Sort shots by shot_number
   const sortedShots = [...shots].sort((a, b) => a.shot_number - b.shot_number);
 
   return (
@@ -80,12 +113,11 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
       }}
       data-testid={`scene-section-${scene.id}`}
     >
-      {/* Scene Header */}
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           flexWrap: 'wrap',
           gap: '12px',
           paddingBottom: '14px',
@@ -93,27 +125,75 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
           marginBottom: '16px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-          <Clapperboard size={18} color="#818cf8" />
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flex: 1, minWidth: '320px' }}>
+          <Clapperboard size={18} color="#818cf8" style={{ marginTop: '4px' }} />
           {isEditing ? (
-            <div style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '480px' }}>
-              <input
-                type="text"
-                value={heading}
-                onChange={(e) => setHeading(e.target.value)}
-                placeholder="Scene Heading (e.g. INT. COMMAND CENTER - NIGHT)"
-                style={{ flex: 2 }}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, maxWidth: '720px' }} data-testid={`scene-editor-${scene.id}`}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 110px', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={heading}
+                  onChange={(e) => setHeading(e.target.value)}
+                  placeholder="Scene Heading (e.g. INT. COMMAND CENTER - NIGHT)"
+                  data-testid={`scene-heading-input-${scene.id}`}
+                />
+                <input
+                  type="text"
+                  value={setting}
+                  onChange={(e) => setSetting(e.target.value)}
+                  placeholder="Setting / location"
+                />
+                <input
+                  type="number"
+                  min="0.5"
+                  step="0.5"
+                  value={durationSeconds}
+                  onChange={(e) => setDurationSeconds(Number(e.target.value))}
+                  title="Scene duration seconds"
+                />
+              </div>
+              <textarea
+                rows={2}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Scene description / visual situation"
+                data-testid={`scene-description-input-${scene.id}`}
               />
               <input
                 type="text"
-                value={setting}
-                onChange={(e) => setSetting(e.target.value)}
-                placeholder="Setting notes"
-                style={{ flex: 1 }}
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="Scene purpose / narrative objective"
               />
-              <button className="btn btn-sm btn-primary" onClick={handleSaveScene}>
-                <Check size={14} />
-              </button>
+              <textarea
+                rows={2}
+                value={narration}
+                onChange={(e) => setNarration(e.target.value)}
+                placeholder="Narration / VO text (optional)"
+                data-testid={`scene-narration-input-${scene.id}`}
+              />
+              <textarea
+                rows={2}
+                value={dialogue}
+                onChange={(e) => setDialogue(e.target.value)}
+                placeholder="Dialogue / speaker lines (optional)"
+                data-testid={`scene-dialogue-input-${scene.id}`}
+              />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  className="btn btn-xs btn-outline"
+                  onClick={() => {
+                    resetEditor();
+                    setIsEditing(false);
+                  }}
+                  title="Cancel scene edits"
+                >
+                  <X size={12} /> Cancel
+                </button>
+                <button className="btn btn-xs btn-primary" onClick={handleSaveScene} data-testid={`scene-save-btn-${scene.id}`}>
+                  <Check size={14} /> Save Scene
+                </button>
+              </div>
             </div>
           ) : (
             <div>
@@ -132,65 +212,54 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
                   Setting: {scene.setting}
                 </p>
               )}
+              {scene.description && (
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '5px', maxWidth: '720px' }}>
+                  {scene.description}
+                </p>
+              )}
+              {scene.narration && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  VO: {scene.narration}
+                </p>
+              )}
             </div>
           )}
         </div>
 
-        {/* Scene Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {/* Reorder Scene buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           {canMoveSceneUp && onMoveSceneUp && (
-            <button
-              className="btn btn-xs btn-outline"
-              onClick={() => onMoveSceneUp(scene.id)}
-              title="Move Scene Up"
-            >
+            <button className="btn btn-xs btn-outline" onClick={() => onMoveSceneUp(scene.id)} title="Move Scene Up">
               <ChevronUp size={12} />
             </button>
           )}
           {canMoveSceneDown && onMoveSceneDown && (
-            <button
-              className="btn btn-xs btn-outline"
-              onClick={() => onMoveSceneDown(scene.id)}
-              title="Move Scene Down"
-            >
+            <button className="btn btn-xs btn-outline" onClick={() => onMoveSceneDown(scene.id)} title="Move Scene Down">
               <ChevronDown size={12} />
             </button>
           )}
-
-          {/* Duplicate Scene */}
           {onDuplicateScene && (
-            <button
-              className="btn btn-xs btn-secondary"
-              onClick={() => onDuplicateScene(scene.id)}
-              title="Duplicate Scene (and shots)"
-              data-testid={`duplicate-scene-${scene.id}`}
-            >
+            <button className="btn btn-xs btn-secondary" onClick={() => onDuplicateScene(scene.id)} title="Duplicate Scene (and shots)" data-testid={`duplicate-scene-${scene.id}`}>
               <Copy size={12} /> Duplicate
             </button>
           )}
-
-          {/* Lock/Unlock */}
-          <button
-            className="btn btn-xs btn-outline"
-            onClick={() => onToggleSceneLock(scene)}
-            title={scene.is_locked ? 'Unlock Scene' : 'Lock Scene'}
-          >
+          <button className="btn btn-xs btn-outline" onClick={() => onToggleSceneLock(scene)} title={scene.is_locked ? 'Unlock Scene' : 'Lock Scene'}>
             {scene.is_locked ? <Unlock size={12} /> : <Lock size={12} />}
             {scene.is_locked ? 'Unlock' : 'Lock'}
           </button>
-
           {!isEditing && (
             <button
               className="btn btn-xs btn-secondary"
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                resetEditor();
+                setIsEditing(true);
+              }}
               disabled={scene.is_locked}
-              title="Rename Scene"
+              title="Edit Scene narrative fields"
+              data-testid={`edit-scene-btn-${scene.id}`}
             >
               <Edit2 size={12} /> Edit
             </button>
           )}
-
           <button
             className="btn btn-xs btn-outline"
             onClick={() => {
@@ -204,19 +273,12 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
           >
             <Archive size={12} /> Archive
           </button>
-
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => onAddShot(scene.id)}
-            disabled={scene.is_locked}
-            data-testid={`add-shot-btn-${scene.id}`}
-          >
+          <button className="btn btn-sm btn-primary" onClick={() => onAddShot(scene.id)} disabled={scene.is_locked} data-testid={`add-shot-btn-${scene.id}`}>
             <Plus size={14} /> Add Shot
           </button>
         </div>
       </div>
 
-      {/* Shots Grid */}
       {sortedShots.length === 0 ? (
         <div
           style={{
@@ -232,13 +294,7 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
           No shots planned for this scene yet. Click "+ Add Shot" or use "Create Full Storyboard" above.
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-            gap: '16px',
-          }}
-        >
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '16px' }}>
           {sortedShots.map((shot, idx) => (
             <ShotCard
               key={shot.id}
@@ -249,34 +305,10 @@ export const SceneSection: React.FC<SceneSectionProps> = ({
               canMoveUp={idx > 0}
               canMoveDown={idx < sortedShots.length - 1}
               onSelect={() => onSelectShot(shot)}
-              onToggleSelect={
-                onToggleSelectShot
-                  ? (e) => {
-                      e.stopPropagation();
-                      onToggleSelectShot(shot.id);
-                    }
-                  : undefined
-              }
-              onMoveUp={
-                onMoveShotUp
-                  ? (e) => {
-                      e.stopPropagation();
-                      onMoveShotUp(scene.id, shot.id);
-                    }
-                  : undefined
-              }
-              onMoveDown={
-                onMoveShotDown
-                  ? (e) => {
-                      e.stopPropagation();
-                      onMoveShotDown(scene.id, shot.id);
-                    }
-                  : undefined
-              }
-              onToggleLock={(e) => {
-                e.stopPropagation();
-                onToggleShotLock(shot);
-              }}
+              onToggleSelect={onToggleSelectShot ? (e) => { e.stopPropagation(); onToggleSelectShot(shot.id); } : undefined}
+              onMoveUp={onMoveShotUp ? (e) => { e.stopPropagation(); onMoveShotUp(scene.id, shot.id); } : undefined}
+              onMoveDown={onMoveShotDown ? (e) => { e.stopPropagation(); onMoveShotDown(scene.id, shot.id); } : undefined}
+              onToggleLock={(e) => { e.stopPropagation(); onToggleShotLock(shot); }}
             />
           ))}
         </div>
