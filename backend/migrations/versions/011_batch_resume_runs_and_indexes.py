@@ -15,6 +15,21 @@ depends_on = None
 
 
 def upgrade():
+    # Alembic creates alembic_version.version_num as VARCHAR(32) by default.
+    # This revision id is longer than 32 characters, so PostgreSQL must widen
+    # the version column before Alembic records this revision after upgrade().
+    # Keep the historical revision id/graph unchanged; existing wider columns
+    # are safe to widen again, and downgrade intentionally does not shrink it.
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=sa.String(length=32),
+            type_=sa.String(length=255),
+            existing_nullable=False,
+        )
+
     # 1. Create batch_runs table
     op.create_table(
         "batch_runs",
