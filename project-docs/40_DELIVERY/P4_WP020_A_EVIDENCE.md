@@ -1,8 +1,10 @@
 # P4-WP020-A — Deterministic Zero-Billing E2E / Integration Evidence
 
-Status: **EVIDENCE EXECUTION IN PROGRESS**
+Status: **FINDINGS COMPLETE / PASS AS EVIDENCE STAGE**
 
 Base `main` at authorization: `b684c27416138543d6e875244336eb4626c8401d`
+
+Verification checkpoint before this final docs-only status sync: `0d9b34f3b177fe105414dc2c28a201af08141e7f` — Backend Tests #119 PASS; Frontend Tests #111 PASS.
 
 ## 1. Contract
 
@@ -94,9 +96,7 @@ Bounded corrective boundary:
 - prove corrected STORY Assembly contains the expected placements;
 - rerun E2E-01 plus assembly/QC/subtitle/render regressions.
 
-## 7. Current release consequence
-
-If exact-head CI passes while intentionally asserting these blocked truths, the expected evidence-stage verdict is:
+## 7. Evidence-stage verdict
 
 ```text
 P4-WP020-A = FINDINGS COMPLETE / PASS AS EVIDENCE STAGE
