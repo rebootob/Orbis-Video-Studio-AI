@@ -29,7 +29,7 @@ The existing focused suites remain authoritative for retry/reconciliation, locks
 
 | ID | Scenario | WP020-A evidence result |
 |---|---|---|
-| E2E-01 | STORY deep full path | **BLOCKED — S1-A01** |
+| E2E-01 | STORY deep full path | **BLOCKED — S1-A01 + S1-A03** |
 | E2E-02 | SHORT / 9:16 / subtitle | **PASS downstream and mode smoke; generated-video path shares S1-A01** |
 | E2E-03 | LOOP path | **PASS bounded mode smoke** |
 | E2E-04 | SCENE path | **PASS bounded mode smoke** |
@@ -48,73 +48,62 @@ The existing focused suites remain authoritative for retry/reconciliation, locks
 
 ## 4. S1-A01 — Completed VIDEO job is not materialized into durable Orbis VIDEO Asset / Shot truth
 
-### Observed behavior
+A VIDEO `GenerationJob` can complete with provider `video_url` and settled cost, and orchestration then counts the Shot as production-ready. The completion path does not persist that generated video into Orbis object storage as a `VIDEO` Asset or bind it to `Shot.source_asset_id`.
 
-1. A VIDEO `GenerationJob` completes with a provider identity, `video_url`, and cost evidence.
-2. Queue state becomes `COMPLETED` and cost settlement completes.
-3. Orchestration counts that completed job as a production-ready Shot and allows `TRANSITION_TO_FINAL_REVIEW`.
-4. No completed-provider path materializes the video into Orbis object storage as a `VIDEO` Asset or binds it to `Shot.source_asset_id`.
-5. Assembly therefore cannot consume the generated video. With a keyframe it falls back to `KEYFRAME`; without a fallback it would be missing.
+**Severity: S1.** Generated video must become durable project truth before Assembly/QC/Render.
 
-### Severity
-
-**S1 Core V1 release blocker.** Generated video must become durable project truth before Assembly/QC/Render.
-
-### Bounded corrective boundary
-
-A separately authorized corrective should only:
-
-- safely retrieve completed provider video output;
-- persist it in Orbis object storage;
-- create auditable `VIDEO` Asset lineage tied to the exact GenerationJob/Shot;
-- avoid destructive overwrite of prior video history;
-- change production-readiness to require durable usable output, not job status alone;
-- preserve idempotency/retry/reconciliation/cost fencing;
-- fail closed for provider download or post-provider persistence uncertainty;
-- re-run E2E-01 and affected regressions.
+Bounded corrective boundary:
+- retrieve completed provider output safely;
+- persist durable object-storage media and immutable/auditable VIDEO Asset lineage;
+- bind the exact completed GenerationJob output to the Shot without destroying prior history;
+- make production-readiness depend on durable usable output, not job status alone;
+- preserve retry/reconciliation/idempotency/cost fencing;
+- fail closed on provider download or post-provider persistence uncertainty;
+- rerun E2E-01 and affected regressions.
 
 ## 5. S1-A02 — FULL_SELF_CONTAINED export fails on real AudioClip history
 
-### Observed behavior
-
-The downstream integration successfully reaches:
+The integrated downstream flow successfully reaches:
 
 `Audio -> Assembly -> Subtitle -> QC -> Approval -> Master Render -> Multi-output`
 
-but the subsequent `.orbis` export fails inside `ProjectExportService` when audio history exists:
+The subsequent `.orbis` export fails in `ProjectExportService` because the exporter queries `AudioClipHistory.audio_clip_id` while the canonical model field is `clip_id`. Python raises `AttributeError` before archive construction completes.
 
-- exporter queries `AudioClipHistory.audio_clip_id`;
-- the current AudioClipHistory model exposes the canonical relation field as `clip_id`;
-- Python raises `AttributeError` before archive construction can complete.
+**Severity: S1.** Core V1 FULL_SELF_CONTAINED portability must work after normal Audio history exists.
 
-This gap was not exposed by the earlier archive tests because those fixtures did not bind the full Core V1 Audio history into an integrated export path.
+Bounded corrective boundary:
+- align archive AudioClipHistory query/serialization/import references with the canonical model field;
+- prove export/validate/CLONE and RESTORE collision with AudioPlan/AudioClip history present;
+- preserve exact history and imported historical job/ledger fencing;
+- verify subtitle portable state after corrected CLONE;
+- run archive/security regressions and E2E-13/14 again.
 
-### Severity
+## 6. S1-A03 — STORY-linked scenes are omitted by Assembly project-scene query
 
-**S1 Core V1 release blocker.** `.orbis` FULL_SELF_CONTAINED portability is required for Core V1 and must work after normal audio production/history has occurred.
+The canonical STORY flow creates scenes connected through `Story.project_id` / `Scene.story_id`. The zero-billing deep path proves these STORY scenes and Shots exist, but `AssemblyService.auto_assemble_timeline()` queries only `Scene.project_id == project_id` when building the assembly graph. In the STORY fixture that returns no scenes, producing an active timeline with **0 Shot placements**.
 
-### Bounded corrective boundary
+This is independent of S1-A01: even if generated video output were materialized correctly, Assembly would still omit the STORY graph when the scene is represented through Story lineage rather than direct `Scene.project_id`.
 
-A separately authorized corrective should only:
+**Severity: S1.** STORY is the required deep Core V1 path and cannot truthfully reach Assembly/QC/Render with zero placements.
 
-- align archive AudioClipHistory query/serialization/import references with the actual canonical model field;
-- prove export/validate/CLONE and RESTORE-collision behavior with AudioPlan/AudioClip history present;
-- preserve history exactly and keep imported historical jobs/ledgers fenced;
-- verify subtitle portable mirror survives the corrected integrated CLONE;
-- run archive/security regressions and WP020-A E2E-13/14 again.
+Bounded corrective boundary:
+- resolve canonical active scenes using the same project-or-Story lineage rule already used by orchestration/queue services;
+- exclude archived scenes/shots consistently;
+- preserve manual assembly ordering/moves/locks/history;
+- add direct-project and Story-linked regression fixtures;
+- prove corrected STORY Assembly contains the expected placements;
+- rerun E2E-01 plus assembly/QC/subtitle/render regressions.
 
-No archive production corrective is authorized by WP020-A itself.
+## 7. Current release consequence
 
-## 6. Current release consequence
-
-If exact-head CI passes while intentionally asserting these current blocked truths, the expected evidence-stage verdict is:
+If exact-head CI passes while intentionally asserting these blocked truths, the expected evidence-stage verdict is:
 
 ```text
 P4-WP020-A = FINDINGS COMPLETE / PASS AS EVIDENCE STAGE
 CORE_V1_RELEASE_READINESS = BLOCKED
 OPEN_S0 = 0
-OPEN_S1 = 2 (S1-A01, S1-A02)
+OPEN_S1 = 3 (S1-A01, S1-A02, S1-A03)
 LIVE_PAID_UAT = NOT YET APPROPRIATE
 ```
 
-WP020-LIVE must not start until both blockers are corrected and the affected zero-billing E2E scenarios pass.
+WP020-LIVE must not start until all three blockers are corrected and the affected zero-billing E2E scenarios pass.
