@@ -93,8 +93,8 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         except (TypeError, ValueError):
             return False
 
-    @staticmethod
     def _failure(
+        self,
         code: str,
         *,
         status_code: Optional[int] = None,
@@ -102,6 +102,16 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         uncertain: bool = False,
         job_id: str = "",
     ) -> ImageJobResult:
+        sanitized_evidence = None
+        if status_code is not None:
+            sanitized_evidence = {
+                "provider": self.provider_id,
+                "model": self._model,
+                "http_status": status_code,
+                "error_code": code,
+                "retryable": retryable,
+                "submission_uncertain": uncertain,
+            }
         return ImageJobResult(
             provider_job_id=job_id,
             status="FAILED",
@@ -110,6 +120,7 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
             status_code=status_code,
             retryable=retryable,
             submission_uncertain=uncertain,
+            raw_response=sanitized_evidence,
         )
 
     def _resolve_references(self, params: ImageGenerationParams):
