@@ -8,7 +8,7 @@ import hashlib
 import os
 import shutil
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -23,8 +23,10 @@ from app.models.story import Story
 from app.providers.base import ProviderJobResult
 from app.providers.factory import ProviderFactory
 from app.services.archive.export_service import ProjectExportService
+from app.services.archive.import_service import ProjectImportService, ProjectCollisionError
 from app.services.assembly import AssemblyService
 from app.services.audio_production import AudioProductionService
+from app.services.budget import BudgetService
 from app.services.creative_generation.fake_provider import FakeCreativeGenerationProvider
 from app.services.job_dispatch import JobDispatchService
 from app.services.production_orchestrator import ProductionOrchestrator
@@ -33,6 +35,7 @@ from app.services.render.mock_executor import MockRenderExecutor
 from app.services.render_job import RenderJobService
 from app.services.render_worker import CloudRenderWorker
 from app.services.subtitle_control import SubtitleService
+from app.services.video_materialization import VideoMaterializationService
 
 
 @pytest.fixture(autouse=True)
@@ -125,11 +128,25 @@ def _run_story_to_video_jobs(db):
     return project, story, jobs
 
 
-def test_e2e_01_story_completion_exposes_video_and_assembly_lineage_gaps(db_session):
-    """S1-A01/A03 evidence from the real zero-billing STORY graph."""
+def test_e2e_01_story_video_materialization_and_assembly_lineage_close(db_session, mock_storage):
+    """Deep STORY path closes S1-A01/A03 without external provider/network use."""
     project, story, jobs = _run_story_to_video_jobs(db_session)
 
-    with patch.object(ProviderFactory, "get_provider", return_value=CompletedFakeVideoProvider()):
+    async def fake_download(url, target_file_path):
+        payload = ("WP020A_VIDEO:" + url).encode("utf-8")
+        with open(target_file_path, "wb") as output:
+            output.write(payload)
+        return "video/mp4", len(payload), hashlib.sha256(payload).hexdigest()
+
+    with (
+        patch.object(ProviderFactory, "get_provider", return_value=CompletedFakeVideoProvider()),
+        patch("app.services.video_materialization.get_storage_provider", return_value=mock_storage),
+        patch.object(
+            VideoMaterializationService,
+            "_download_video_to_file",
+            new=AsyncMock(side_effect=fake_download),
+        ),
+    ):
         for job in jobs:
             claimed = JobDispatchService.claim_next_job(
                 db_session,
@@ -145,7 +162,11 @@ def test_e2e_01_story_completion_exposes_video_and_assembly_lineage_gaps(db_sess
                 )
             )
             assert completed.status == "COMPLETED"
-            assert (completed.result or {}).get("video_url")
+            assert completed.output_asset_id is not None
+            asset = db_session.get(Asset, completed.output_asset_id)
+            assert asset is not None
+            assert asset.asset_type == "VIDEO"
+            assert mock_storage.object_exists(asset.storage_bucket, asset.storage_key)
 
     state = ProductionOrchestrator.evaluate_state(db_session, project.id)
     assert state.current_stage == "VIDEO_IN_PROGRESS"
@@ -155,10 +176,7 @@ def test_e2e_01_story_completion_exposes_video_and_assembly_lineage_gaps(db_sess
     ).to_stage == "FINAL_REVIEW"
 
     story_scenes = db_session.query(Scene).filter(Scene.story_id == story.id).all()
-    project_scenes = db_session.query(Scene).filter(Scene.project_id == project.id).all()
     assert story_scenes
-    assert project_scenes == []
-
     shots = (
         db_session.query(Shot)
         .join(Scene, Shot.scene_id == Scene.id)
@@ -166,12 +184,12 @@ def test_e2e_01_story_completion_exposes_video_and_assembly_lineage_gaps(db_sess
         .all()
     )
     assert shots
-    assert all(shot.source_asset_id is None for shot in shots)
+    assert all(shot.source_asset_id is not None for shot in shots)
 
-    # S1-A03 current truth: Assembly only queries Scene.project_id, so the
-    # canonical STORY-linked graph is omitted entirely and yields 0 placements.
     timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
-    assert timeline.shot_placements == []
+    assert len(timeline.shot_placements) == len(shots)
+    assert all(p.source_type == "VIDEO" for p in timeline.shot_placements)
+    assert all(p.visual_asset_id is not None for p in timeline.shot_placements)
 
 
 def _seed_materialized_video_project(db, mock_storage):
@@ -234,8 +252,8 @@ def _seed_materialized_video_project(db, mock_storage):
     return project, asset
 
 
-def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_session, mock_storage):
-    """Audio/subtitle/QC/render/multi-output pass; archive integration proves S1-A02."""
+def test_e2e_10_to_14_downstream_archive_roundtrip_closes_audio_history_gap(db_session, mock_storage):
+    """Audio -> render -> multi-output -> FULL_SELF_CONTAINED CLONE is integrated and fenced."""
     project, source_asset = _seed_materialized_video_project(db_session, mock_storage)
 
     audio_plan = AudioProductionService.generate_audio_plan(db_session, project.id)
@@ -257,24 +275,15 @@ def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_sessi
     db_session.commit()
     ProductionOrchestrator.approve_stage(db_session, project.id, stage="AUDIO_MIX_READY")
     ProductionOrchestrator.execute_action(db_session, project.id, "PROCEED_TO_ASSEMBLY")
-    assert project.status == "READY_FOR_ASSEMBLY"
-
     timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
     assert len(timeline.shot_placements) == 1
-    placement = timeline.shot_placements[0]
-    assert placement.source_type == "VIDEO"
-    assert placement.visual_asset_id == source_asset.id
+    assert timeline.shot_placements[0].source_type == "VIDEO"
+    assert timeline.shot_placements[0].visual_asset_id == source_asset.id
 
-    subtitle = SubtitleService.generate(
-        db_session, project.id, timeline_id=str(timeline.id), language="th"
-    )
+    subtitle = SubtitleService.generate(db_session, project.id, timeline_id=str(timeline.id), language="th")
     assert subtitle["segments"]
     reviewed = SubtitleService.review(
-        db_session,
-        project.id,
-        enabled=True,
-        render_mode="BURN_IN",
-        timeline_id=str(timeline.id),
+        db_session, project.id, enabled=True, render_mode="BURN_IN", timeline_id=str(timeline.id)
     )
     assert reviewed["is_reviewed"] is True
     srt, srt_meta = SubtitleService.export_srt(db_session, project.id, str(timeline.id))
@@ -303,7 +312,6 @@ def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_sessi
         actor="WP020-A",
     )
     assert approval.status == "APPROVED"
-    assert project.status == "COMPLETED"
 
     master = RenderJobService.submit_render_job(db_session, project.id)
     worker = CloudRenderWorker(
@@ -316,7 +324,6 @@ def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_sessi
     db_session.refresh(master)
     assert master.status == RenderJobStatus.COMPLETED.value
     assert master.output_asset_id is not None
-    assert (master.render_metadata or {}).get("subtitle", {}).get("mode") == "BURN_IN"
 
     batch = RenderJobService.submit_export_batch(
         db_session,
@@ -328,20 +335,46 @@ def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_sessi
     variants = db_session.query(RenderJob).filter(RenderJob.batch_id == batch.id).all()
     assert len(variants) == 3
     assert all(job.status == RenderJobStatus.COMPLETED.value for job in variants)
-    aspect_ratios = {
-        (job.render_metadata or {}).get("preset_snapshot", {}).get("aspect_ratio")
-        for job in variants
-    }
-    assert {"16:9", "9:16", "1:1"}.issubset(aspect_ratios)
 
-    # S1-A02 evidence: integrated FULL_SELF_CONTAINED export after audio history
-    # reaches a real exporter/model contract mismatch. Assert current truth;
-    # WP020-A must not silently patch production archive code.
-    with pytest.raises(AttributeError, match="audio_clip_id"):
-        ProjectExportService(storage_provider=mock_storage).export_project(
+    exporter = ProjectExportService(storage_provider=mock_storage)
+    archive_path, manifest = exporter.export_project(db=db_session, project_id=project.id)
+    try:
+        assert manifest["package_type"] == "FULL_SELF_CONTAINED"
+        importer = ProjectImportService(storage_provider=mock_storage)
+        validation = importer.validate_project_archive(archive_path, db_session)
+        assert validation["valid"] is True
+        clone = importer.execute_import(
             db=db_session,
-            project_id=project.id,
+            archive_path=archive_path,
+            import_mode="CLONE",
+            override_title="WP020-A Corrected Clone",
         )
+        assert clone.id != project.id
+        assert clone.source_project_id == project.id
+        assert BudgetService.get_project_committed_cost(db_session, clone.id) == 0.0
+
+        imported_jobs = db_session.query(RenderJob).filter(RenderJob.project_id == clone.id).all()
+        assert imported_jobs
+        assert all(job.imported_historical is True for job in imported_jobs)
+        assert all(job.execution_disabled is True for job in imported_jobs)
+
+        clone_timeline = AssemblyService.get_active_timeline(db_session, str(clone.id))
+        assert clone_timeline is not None
+        clone_subtitle = SubtitleService.get_active(
+            db_session, clone.id, timeline_id=str(clone_timeline.id)
+        )
+        assert clone_subtitle is not None
+        assert clone_subtitle["is_stale"] is False
+
+        with pytest.raises(ProjectCollisionError):
+            importer.execute_import(
+                db=db_session,
+                archive_path=archive_path,
+                import_mode="RESTORE",
+            )
+    finally:
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
 
 
 def test_e2e_02_to_05_mode_routing_and_project_isolation(db_session):

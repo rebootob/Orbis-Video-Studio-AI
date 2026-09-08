@@ -512,8 +512,12 @@ class ArchivePreflightValidator:
                 aid = parse_uuid(ac["asset_id"])
                 if not aid or aid not in self.asset_ids:
                     raise ArchivePreflightError(f"AudioClip '{ac.get('id')}' references nonexistent Asset '{aid}'")
+            if ac.get("video_asset_id"):
+                aid = parse_uuid(ac["video_asset_id"])
+                if not aid or aid not in self.asset_ids:
+                    raise ArchivePreflightError(f"AudioClip '{ac.get('id')}' references nonexistent video Asset '{aid}'")
         for ach in audio_data.get("audio_clip_histories", []):
-            cid = parse_uuid(ach.get("audio_clip_id"))
+            cid = parse_uuid(ach.get("clip_id") or ach.get("audio_clip_id"))
             if not cid or cid not in self.audio_clip_ids:
                 raise ArchivePreflightError(f"AudioClipHistory '{ach.get('id')}' references nonexistent AudioClip '{cid}'")
             if ach.get("asset_id"):
@@ -539,8 +543,9 @@ class ArchivePreflightValidator:
             shid = parse_uuid(asp.get("shot_id"))
             if not shid or shid not in self.shot_ids:
                 raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent Shot '{shid}'")
-            if asp.get("asset_id"):
-                aid = parse_uuid(asp["asset_id"])
+            visual_asset_raw = asp.get("visual_asset_id") or asp.get("asset_id")
+            if visual_asset_raw:
+                aid = parse_uuid(visual_asset_raw)
                 if not aid or aid not in self.asset_ids:
                     raise ArchivePreflightError(f"AssemblyShotPlacement '{asp.get('id')}' references nonexistent Asset '{aid}'")
         for chk in assembly_data.get("checkpoints", []):
@@ -1006,7 +1011,8 @@ class ProjectImportService:
                     new_scid = remap.get_or_create(old_scid, "SCENE")
                     db.add(Scene(
                         id=new_scid,
-                        project_id=new_project_id,
+                        story_id=remap.get_or_create(parse_uuid(sc.get("story_id")), "STORY"),
+                        project_id=new_project_id if sc.get("project_id") else None,
                         scene_number=sc.get("scene_number", 1),
                         heading=sc.get("heading"),
                         description=sc.get("description") or sc.get("summary"),
@@ -1148,8 +1154,9 @@ class ProjectImportService:
                     db.add(AudioPlan(
                         id=remap.get_or_create(parse_uuid(ap["id"]), "AUDIO_PLAN"),
                         project_id=new_project_id,
-                        version_number=ap.get("version_number", 1),
                         status=ap.get("status", "DRAFT"),
+                        plan_data=ap.get("plan_data"),
+                        version=ap.get("version", ap.get("version_number", 1)),
                         created_at=parse_datetime(ap.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(ap.get("updated_at")) or datetime.now(timezone.utc),
                     ))
@@ -1157,8 +1164,13 @@ class ProjectImportService:
                     db.add(AudioPlanVersion(
                         id=remap.get_or_create(parse_uuid(apv["id"]), "AUDIO_PLAN_VERSION"),
                         audio_plan_id=remap.get_or_create(parse_uuid(apv["audio_plan_id"]), "AUDIO_PLAN"),
+                        project_id=new_project_id,
                         version_number=apv.get("version_number", 1),
+                        status=apv.get("status", "DRAFT"),
                         plan_data=apv.get("plan_data"),
+                        actor=apv.get("actor", "USER"),
+                        action=apv.get("action", "CREATE"),
+                        change_reason=apv.get("change_reason"),
                         created_at=parse_datetime(apv.get("created_at")) or datetime.now(timezone.utc),
                     ))
                 for ac in aud.get("audio_clips", []):
@@ -1167,23 +1179,60 @@ class ProjectImportService:
                         project_id=new_project_id,
                         scene_id=remap.get_or_create(parse_uuid(ac.get("scene_id")), "SCENE"),
                         shot_id=remap.get_or_create(parse_uuid(ac.get("shot_id")), "SHOT"),
+                        video_asset_id=remap.get_or_create(parse_uuid(ac.get("video_asset_id")), "ASSET"),
                         asset_id=remap.get_or_create(parse_uuid(ac.get("asset_id")), "ASSET"),
-                        audio_type=ac.get("audio_type", "VOICEOVER"),
+                        audio_type=ac.get("audio_type", "VO"),
+                        source_type=ac.get("source_type", "IMPORTED_AUDIO"),
+                        generation_mode=ac.get("generation_mode", "SEPARATE_AUDIO"),
+                        scope=ac.get("scope", "PROJECT"),
                         name=ac.get("name", "clip"),
-                        duration_seconds=ac.get("duration_seconds", 0.0),
-                        timeline_start_seconds=ac.get("timeline_start_seconds", 0.0),
-                        volume=ac.get("volume", 1.0),
-                        is_muted=ac.get("is_muted", False),
-                        ducking_role=ac.get("ducking_role"),
+                        prompt=ac.get("prompt"),
+                        start_time=float(ac.get("start_time", ac.get("timeline_start_seconds", 0.0)) or 0.0),
+                        duration_seconds=ac.get("duration_seconds"),
+                        volume=float(ac.get("volume", 1.0) or 0.0),
+                        mute=bool(ac.get("mute", ac.get("is_muted", False))),
+                        fade_in=float(ac.get("fade_in", 0.0) or 0.0),
+                        fade_out=float(ac.get("fade_out", 0.0) or 0.0),
+                        ducking_role=ac.get("ducking_role", "BACKGROUND"),
+                        ducking_amount_db=float(ac.get("ducking_amount_db", -12.0) or 0.0),
+                        language=ac.get("language"),
+                        speaker=ac.get("speaker"),
+                        is_locked=bool(ac.get("is_locked", False)),
+                        version=int(ac.get("version", 1) or 1),
+                        provenance=ac.get("provenance"),
+                        status=ac.get("status", "PENDING"),
                         created_at=parse_datetime(ac.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(ac.get("updated_at")) or datetime.now(timezone.utc),
                     ))
                 for ach in aud.get("audio_clip_histories", []):
+                    raw_clip_id = ach.get("clip_id") or ach.get("audio_clip_id")
                     db.add(AudioClipHistory(
                         id=remap.get_or_create(parse_uuid(ach["id"]), "AUDIO_CLIP_HISTORY"),
-                        audio_clip_id=remap.get_or_create(parse_uuid(ach["audio_clip_id"]), "AUDIO_CLIP"),
+                        clip_id=remap.get_or_create(parse_uuid(raw_clip_id), "AUDIO_CLIP"),
+                        project_id=new_project_id,
+                        version_number=int(ach.get("version_number", ach.get("iteration_number", 1)) or 1),
+                        audio_type=ach.get("audio_type", "VO"),
+                        source_type=ach.get("source_type", "IMPORTED_AUDIO"),
+                        generation_mode=ach.get("generation_mode", "SEPARATE_AUDIO"),
+                        scope=ach.get("scope", "PROJECT"),
+                        name=ach.get("name", "clip"),
+                        prompt=ach.get("prompt"),
+                        start_time=float(ach.get("start_time", ach.get("timeline_start_seconds", 0.0)) or 0.0),
+                        duration_seconds=ach.get("duration_seconds"),
+                        volume=float(ach.get("volume", 1.0) or 0.0),
+                        mute=bool(ach.get("mute", ach.get("is_muted", False))),
+                        fade_in=float(ach.get("fade_in", 0.0) or 0.0),
+                        fade_out=float(ach.get("fade_out", 0.0) or 0.0),
+                        ducking_role=ach.get("ducking_role", "BACKGROUND"),
+                        ducking_amount_db=float(ach.get("ducking_amount_db", -12.0) or 0.0),
+                        language=ach.get("language"),
+                        speaker=ach.get("speaker"),
+                        is_locked=bool(ach.get("is_locked", False)),
+                        status=ach.get("status", "PENDING"),
                         asset_id=remap.get_or_create(parse_uuid(ach.get("asset_id")), "ASSET"),
-                        iteration_number=ach.get("iteration_number", 1),
+                        provenance=ach.get("provenance"),
+                        actor=ach.get("actor", "USER"),
+                        action=ach.get("action", "CREATE"),
                         change_reason=ach.get("change_reason"),
                         created_at=parse_datetime(ach.get("created_at")) or datetime.now(timezone.utc),
                     ))
@@ -1200,6 +1249,7 @@ class ProjectImportService:
                         version=tm.get("version", 1),
                         is_active=tm.get("is_active", False),
                         status=tm.get("status", "DRAFT"),
+                        subtitle_state=tm.get("subtitle_state"),
                         created_at=parse_datetime(tm.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(tm.get("updated_at")) or datetime.now(timezone.utc),
                     ))
@@ -1208,34 +1258,40 @@ class ProjectImportService:
                         id=remap.get_or_create(parse_uuid(asc["id"]), "ASSEMBLY_SCENE"),
                         timeline_id=remap.get_or_create(parse_uuid(asc["timeline_id"]), "TIMELINE"),
                         scene_id=remap.get_or_create(parse_uuid(asc["scene_id"]), "SCENE"),
-                        scene_order=asc.get("scene_order", 1),
+                        scene_order=asc.get("scene_order", 0),
                         created_at=parse_datetime(asc.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(asc.get("updated_at")) or datetime.now(timezone.utc),
                     ))
                 for asp in asm.get("assembly_shot_placements", []):
+                    visual_raw = asp.get("visual_asset_id") or asp.get("asset_id")
                     db.add(AssemblyShotPlacement(
                         id=remap.get_or_create(parse_uuid(asp["id"]), "ASSEMBLY_SHOT_PLACEMENT"),
                         timeline_id=remap.get_or_create(parse_uuid(asp["timeline_id"]), "TIMELINE"),
                         assembly_scene_id=remap.get_or_create(parse_uuid(asp["assembly_scene_id"]), "ASSEMBLY_SCENE"),
+                        scene_id=remap.get_or_create(parse_uuid(asp.get("scene_id")), "SCENE"),
                         shot_id=remap.get_or_create(parse_uuid(asp["shot_id"]), "SHOT"),
-                        asset_id=remap.get_or_create(parse_uuid(asp.get("asset_id")), "ASSET"),
-                        placement_order=asp.get("placement_order", 1),
-                        duration_seconds=asp.get("duration_seconds", 0.0),
-                        start_time_seconds=asp.get("start_time_seconds", 0.0),
-                        trim_in_seconds=asp.get("trim_in_seconds", 0.0),
-                        trim_out_seconds=asp.get("trim_out_seconds", 0.0),
-                        transition_type=asp.get("transition_type", "CUT"),
-                        transition_duration_seconds=asp.get("transition_duration_seconds", 0.0),
-                        is_locked=asp.get("is_locked", False),
+                        shot_order=int(asp.get("shot_order", asp.get("placement_order", 0)) or 0),
+                        visual_asset_id=remap.get_or_create(parse_uuid(visual_raw), "ASSET"),
+                        source_type=asp.get("source_type", "VIDEO"),
+                        trim_in=float(asp.get("trim_in", asp.get("trim_in_seconds", 0.0)) or 0.0),
+                        trim_out=asp.get("trim_out", asp.get("trim_out_seconds")),
+                        effective_duration=float(asp.get("effective_duration", asp.get("duration_seconds", 4.0)) or 4.0),
+                        still_duration=float(asp.get("still_duration", 4.0) or 4.0),
+                        transition_to_next=asp.get("transition_to_next", asp.get("transition_type", "CUT")),
+                        is_locked=bool(asp.get("is_locked", False)),
+                        version=int(asp.get("version", 1) or 1),
                         created_at=parse_datetime(asp.get("created_at")) or datetime.now(timezone.utc),
                         updated_at=parse_datetime(asp.get("updated_at")) or datetime.now(timezone.utc),
                     ))
                 for chk in asm.get("checkpoints", []):
                     db.add(TimelineCheckpoint(
                         id=remap.get_or_create(parse_uuid(chk["id"]), "TIMELINE_CHECKPOINT"),
+                        project_id=new_project_id,
                         timeline_id=remap.get_or_create(parse_uuid(chk["timeline_id"]), "TIMELINE"),
+                        checkpoint_number=int(chk.get("checkpoint_number", 1) or 1),
                         label=chk.get("label", "checkpoint"),
-                        checkpoint_data=chk.get("checkpoint_data"),
+                        snapshot_data=chk.get("snapshot_data", chk.get("checkpoint_data", {})),
+                        actor=chk.get("actor", "system"),
                         created_at=parse_datetime(chk.get("created_at")) or datetime.now(timezone.utc),
                     ))
 
@@ -1258,24 +1314,36 @@ class ProjectImportService:
                         updated_at=parse_datetime(qr.get("updated_at")) or datetime.now(timezone.utc),
                     ))
                 for qf in qcd.get("qc_findings", []):
+                    target_type = qf.get("target_type") or qf.get("entity_type")
+                    target_raw = qf.get("target_id") or qf.get("entity_id")
                     db.add(QCFinding(
                         id=remap.get_or_create(parse_uuid(qf["id"]), "QC_FINDING"),
+                        project_id=new_project_id,
                         qc_run_id=remap.get_or_create(parse_uuid(qf["qc_run_id"]), "QC_RUN"),
+                        timeline_id=remap.get_or_create(parse_uuid(qf.get("timeline_id")), "TIMELINE"),
                         rule_code=qf.get("rule_code", ""),
                         severity=qf.get("severity", "WARNING"),
                         message=qf.get("message", ""),
-                        entity_type=qf.get("entity_type"),
-                        entity_id=remap.remap_polymorphic(qf.get("entity_type", ""), parse_uuid(qf.get("entity_id"))),
+                        why_it_matters=qf.get("why_it_matters"),
+                        recommended_fix=qf.get("recommended_fix"),
+                        target_type=target_type,
+                        target_id=remap.remap_polymorphic(target_type or "", parse_uuid(target_raw)),
+                        target_label=qf.get("target_label"),
+                        action_type=qf.get("action_type"),
                         created_at=parse_datetime(qf.get("created_at")) or datetime.now(timezone.utc),
                     ))
                 for wd in qcd.get("warning_decisions", []):
                     db.add(WarningDecision(
                         id=remap.get_or_create(parse_uuid(wd["id"]), "WARNING_DECISION"),
+                        project_id=new_project_id,
+                        qc_run_id=remap.get_or_create(parse_uuid(wd.get("qc_run_id")), "QC_RUN"),
                         finding_id=remap.get_or_create(parse_uuid(wd["finding_id"]), "QC_FINDING"),
-                        decision=wd.get("decision", "ACCEPTED"),
+                        timeline_id=remap.get_or_create(parse_uuid(wd.get("timeline_id")), "TIMELINE"),
+                        decision=wd.get("decision", "ACCEPTED_WITH_REASON"),
                         reason=wd.get("reason"),
-                        decided_by=wd.get("decided_by", "system"),
-                        created_at=parse_datetime(wd.get("created_at")) or datetime.now(timezone.utc),
+                        actor=wd.get("actor", wd.get("decided_by", "USER")),
+                        decided_at=parse_datetime(wd.get("decided_at") or wd.get("created_at")) or datetime.now(timezone.utc),
+                        decision_sequence=int(wd.get("decision_sequence", 1) or 1),
                     ))
                 for app in qcd.get("approvals", []):
                     db.add(ApprovalRecord(

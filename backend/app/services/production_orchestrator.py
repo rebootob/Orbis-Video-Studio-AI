@@ -2600,6 +2600,7 @@ class ProductionOrchestrator:
                             GenerationJob.shot_id.in_(active_shot_ids),
                             GenerationJob.imported_historical.isnot(True),
                             GenerationJob.status == "COMPLETED",
+                            GenerationJob.output_asset_id.isnot(None),
                         )
                         .distinct()
                         .all()
@@ -2614,7 +2615,7 @@ class ProductionOrchestrator:
 
             production_ready_shot_ids = {
                 s.id for s in active_shots
-                if (s.id in completed_job_shot_ids) or (
+                if (s.id in completed_job_shot_ids and s.source_asset_id is not None) or (
                     s.shot_type not in ("AI_GENERATED", "MIXED")
                     and (s.source_asset_id is not None or s.status == "COMPLETED")
                 )
