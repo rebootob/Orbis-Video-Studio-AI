@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     # Reference Library Context Limit
     MAX_REFERENCE_CONTEXT_CHARACTERS: int = 50000
 
+    # Gemini production ImageProvider settings (Core V1 R3)
+    GEMINI_API_KEY: str = ""
+    GEMINI_IMAGE_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image"
+    GEMINI_IMAGE_TIMEOUT_SECONDS: float = 60.0
+    # Core V1 R3 is intentionally bounded to 1K. Larger image outputs are a
+    # separate product/cost decision rather than a hidden per-shot override.
+    GEMINI_IMAGE_SIZE: str = "1K"
+    GEMINI_IMAGE_MAX_REFERENCE_COUNT: int = 14
+    GEMINI_IMAGE_MAX_INLINE_REFERENCE_BYTES: int = 18874368  # 18 MiB under API inline request limit
+    # Current Gemini Developer API rates are configurable, not hard-coded in domain logic.
+    # Defaults reflect the provider decision evidence captured for R3 on 2026-09-08.
+    GEMINI_IMAGE_INPUT_COST_PER_MILLION_USD: float = 0.50
+    GEMINI_IMAGE_OUTPUT_TEXT_COST_PER_MILLION_USD: float = 3.00
+    GEMINI_IMAGE_OUTPUT_IMAGE_COST_PER_MILLION_USD: float = 60.00
+
     # Vidu Video Generation Provider Settings
     VIDU_API_KEY: str = ""
     VIDU_BASE_URL: str = "https://api.vidu.com/ent/v2"
@@ -57,10 +73,22 @@ class Settings(BaseSettings):
     VIDU_MAX_RETRIES: int = 3
 
     # Provider Routing Configuration
+    # Production defaults must never silently resolve to deterministic fake providers.
+    DEFAULT_IMAGE_PROVIDER: str = "gemini_image"
     DEFAULT_VIDEO_PROVIDER: str = "vidu"
 
-    # Provider Pricing Configuration (Replaceable / Configurable via settings)
-    PROVIDER_PRICING_CONFIG: Optional[dict] = None
+    # Provider Pricing Configuration (Replaceable / Configurable via settings).
+    # $0.08 is a conservative 1K pre-dispatch reservation: current 1K image
+    # output is about $0.067 before input/reference tokens. Actual cost is later
+    # reconciled from provider-reported token usage by the adapter.
+    PROVIDER_PRICING_CONFIG: Optional[dict] = {
+        "gemini_image:IMAGE_GENERATION": {
+            "provider": "gemini_image",
+            "operation": "IMAGE_GENERATION",
+            "cost_per_generation": 0.08,
+            "currency": "USD",
+        }
+    }
 
     SQLALCHEMY_DATABASE_URI_OVERRIDE: Optional[str] = None
 
