@@ -1,0 +1,117 @@
+name: WP020 LIVE No-Paid Preflight R3
+
+on:
+  push:
+    branches:
+      - ai/wp020-preflight-r3
+    paths:
+      - .github/workflows/wp020-live-preflight-r3.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: orbis_uat
+          POSTGRES_PASSWORD: orbis_uat_password
+          POSTGRES_DB: orbis_live_preflight
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbis_uat -d orbis_live_preflight"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AUTHORIZED_MAIN_SHA: b0233729e1882267123c863d98df861c50a66a3b
+      ENVIRONMENT: uat
+      DEBUG: "false"
+      POSTGRES_SERVER: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: orbis_uat
+      POSTGRES_PASSWORD: orbis_uat_password
+      POSTGRES_DB: orbis_live_preflight
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_BUCKET: orbis-live-preflight
+      OBJECT_STORAGE_ACCESS_KEY: orbisminio
+      OBJECT_STORAGE_SECRET_KEY: orbisminiosecret
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_SECURE: "false"
+
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_CREATIVE_MODEL: gpt-4o
+      OPENAI_MAX_RETRIES: "0"
+      DEFAULT_CREATIVE_PROFILE: FAST
+
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_IMAGE_MODEL: gemini-3.1-flash-image
+      GEMINI_IMAGE_SIZE: 1K
+
+      VIDU_API_KEY: ${{ secrets.VIDU_API_KEY }}
+      VIDU_DEFAULT_MODEL: viduq2
+
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      ELEVENLABS_DEFAULT_VOICE_ID: ${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}
+
+      DEFAULT_IMAGE_PROVIDER: gemini_image
+      DEFAULT_VIDEO_PROVIDER: vidu
+      DEFAULT_AUDIO_PROVIDER: elevenlabs_audio
+
+      PROVIDER_PRICING_CONFIG: >-
+        {"openai:STORY_GENERATION:gpt-4o":{"provider":"openai","operation":"STORY_GENERATION","model":"gpt-4o","cost_per_1k_prompt_tokens":0.0025,"cost_per_1k_completion_tokens":0.0100,"currency":"USD"},"gemini_image:IMAGE_GENERATION:gemini-3.1-flash-image":{"provider":"gemini_image","operation":"IMAGE_GENERATION","model":"gemini-3.1-flash-image","cost_per_generation":0.08,"currency":"USD"},"vidu:VIDEO_GENERATION:viduq2":{"provider":"vidu","operation":"VIDEO_GENERATION","model":"viduq2","cost_per_generation":0.05,"cost_per_second":0.025,"currency":"USD"}}
+
+    steps:
+      - name: Checkout preflight branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard authorized base ancestry
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$AUTHORIZED_MAIN_SHA" HEAD
+          echo "Authorized main base is an ancestor of preflight HEAD"
+
+      - name: Start ephemeral MinIO
+        shell: bash
+        run: |
+          docker run -d --rm --name orbis-live-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER="$OBJECT_STORAGE_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$OBJECT_STORAGE_SECRET_KEY" \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              echo "Ephemeral object storage ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Ephemeral object storage failed health check" >&2
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Run no-paid LIVE preflight
+        working-directory: backend
+        run: python ../.github/scripts/wp020_live_preflight.py
+
+      - name: Confirm no provider execution
+        run: echo "PREFLIGHT_ONLY_COMPLETE — this workflow contains no provider-generation invocation"
