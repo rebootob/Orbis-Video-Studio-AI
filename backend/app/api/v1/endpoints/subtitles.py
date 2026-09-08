@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.subtitle import SubtitleGenerateRequest, SubtitleReviewRequest, SubtitleTrackRead
-from app.services.subtitle import SubtitleService
+from app.services.subtitle_control import SubtitleService
 
 router = APIRouter(prefix="/projects/{project_id}/subtitles")
 
