@@ -31,82 +31,108 @@ MANDATORY STARTUP
    project-docs/40_DELIVERY/WORK_PACKAGES.md
    project-docs/40_DELIVERY/P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md
    project-docs/40_DELIVERY/P4_WP020_LIVE_R2_C1.md
-3. Inspect Issue #63 and recent P4-WP020 workflow evidence when making any live/status decision.
+   project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md
+   project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md
+3. Inspect Issue #63 and recent P4-WP020 workflow evidence for any live/status decision.
 4. Newer repository/workflow/Issue #63 truth overrides stale text.
 
-CURRENT KNOWN TRUTH AT C1 START
-- canonical main: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
+CURRENT KNOWN TRUTH AT R3 PRE1 START
+- canonical main: d706acacd1f51224c955fb9c8d0d9eab3deda186
 - P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 - completed planned Core V1 work packages = 19 / 20
 - P4-WP020 = ACTIVE / NOT CLOSED
 - Core V1 release = NOT DECLARED
 
-LIVE R1
+R1
 - consumed / immutable
 - bounded OpenAI request returned HTTP 429
-- STOP enforced
 - never rerun R1
 
-LIVE R2
+R2
 - execution ID: LIVE-20260909-BB75-R2
 - run ID: 34287696335
 - main: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
 - no-paid preflight PASS
-- EXECUTION_STARTED fence written => R2 consumed
+- execution fence consumed
 - OpenAI STORY SUCCESS
 - OpenAI usage: 544 prompt / 585 completion tokens
-- last known confirmed/committed UAT cost at STOP: USD 0.0072
-- Gemini IMAGE reached provider, returned non-success HTTP, surfaced as HTTP_ERROR
-- exact Gemini HTTP status was not retained in durable R2 evidence
+- last known confirmed/committed cost at STOP: USD 0.0072
+- Gemini IMAGE reached provider and returned non-success HTTP surfaced as HTTP_ERROR
+- exact historical Gemini HTTP status unavailable
 - chargeable requests conservatively consumed: 2/6
-- Vidu NOT EXECUTED
-- ElevenLabs NOT EXECUTED
-- downstream live proof NOT EXECUTED
-- STOP enforced
+- Vidu / ElevenLabs / downstream live proof NOT EXECUTED
 - never rerun R2
 
-ACTIVE CORRECTIVE
-P4-WP020-LIVE-R2-C1 — Gemini HTTP Evidence + Control-Truth Corrective
+C1
+- P4-WP020-LIVE-R2-C1 = PASS / MERGED
+- PR #74
+- reviewed HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
+- merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
+- future Gemini non-2xx evidence now retains sanitized HTTP status/classification
+- C1 provider calls: 0
+- C1 spend: USD 0.00
+
+ACTIVE TASK
+P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync
 
 Owner-authorized boundary:
-- NO-PAID / CODE + TEST + CONTROL-DOC only
-- provider calls allowed: 0
+- NO-PAID PRE1 only
+- base main: d706acacd1f51224c955fb9c8d0d9eab3deda186
+- working branch: ai/p4-wp020-live-r3-pre1
+- provider generation calls allowed: 0
 - paid spend allowed: USD 0.00
-- working branch: ai/p4-wp020-live-r2-c1-gemini-evidence
 
-C1 ALLOWED
-- persist sanitized Gemini non-2xx evidence through existing GenerationJob.result
-- retain only provider/model/http_status/error_code/retryable/submission_uncertain
-- never persist provider error body, headers, API keys, credentials or reference bytes
-- test HTTP 400/401/403/429/503
-- verify deterministic failure vs RECONCILIATION_REQUIRED behavior
+PRE1 ALLOWED
+- prepare manual-only Gemini metadata probe
+- after merge, exactly one authenticated GET /v1beta/models/gemini-3.1-flash-image
+- sanitize output to status/provider/model/http_status/error classification only
+- explicit generation_request_sent=false / paid_generation_calls=0
+- tests for 200/400/401/403/404/429/5xx with no network
+- prove no API-key/provider-body leakage
 - sync control docs
-- run normal CI/migrations
+- draft R3 contract
 
-C1 FORBIDDEN
-- no real provider call
+PRE1 FORBIDDEN
+- no OpenAI request
+- no Gemini generation request or /interactions
+- no Vidu/ElevenLabs request
 - no paid workflow dispatch
 - no R1/R2 rerun
-- no R3 paid execution
-- no model/endpoint/pricing/retry-policy change
-- no schema migration
-- no release tag or production deployment
+- no R3 execution fence or paid authorization marker
+- no release tag / production deployment / Core V1 release declaration
 
-C1 MERGE-READINESS EVIDENCE REQUIRED
-- targeted Gemini tests PASS
+R3 DRAFT ONLY — NOT AUTHORIZED
+R2 used ephemeral PostgreSQL/MinIO, so retained R2 evidence cannot be reused as canonical Story/project state. A future coherent end-to-end LIVE PASS is proposed as:
+- OpenAI STORY x1
+- Gemini IMAGE x1
+- Vidu VIDEO x1
+- ElevenLabs AUDIO x3
+- max 6 chargeable requests
+- hard cap USD 1.00
+- sequential only
+- OpenAI retries 0
+- new execution ID and exact main SHA assigned only after execution tooling merge
+- fresh Owner paid/live authorization required
+
+PRE1 MERGE-READINESS
+- targeted PRE1 tests PASS
 - full backend CI PASS
 - fresh PostgreSQL migrations PASS
 - frontend CI PASS if triggered
+- workflow_dispatch only
+- permissions contents: read only
+- static no-generation guard PASS
 - secret/provider-body leakage = 0
-- paid workflow dispatch during C1 = 0
-- exact diff remains inside C1 scope
+- no paid/live workflow dispatch during implementation
+- exact diff PRE1-only
 
 NEXT GATE
-- Independently review exact C1 branch HEAD and CI.
-- STOP for Owner merge decision.
-- Do NOT auto-start R3.
-- A later R3 requires a new execution ID, fresh no-paid preflight, bounded resume/cost contract, fresh Owner paid/live authorization tied to exact then-current main, and a new one-shot fence.
-- Prefer resuming from Gemini rather than repeating already-proven OpenAI work unless evidence requires otherwise.
+- independently review exact PRE1 branch HEAD + CI
+- STOP for Owner merge decision
+- after merge, manually run metadata-only probe on main
+- probe PASS still does NOT authorize paid R3 execution
+- do NOT auto-start R3
+- do NOT declare Core V1 released
 
 OWNER-LOCKED PRODUCT DIRECTION
 - Orbis = AI Video Production Orchestrator / Production Control Plane
