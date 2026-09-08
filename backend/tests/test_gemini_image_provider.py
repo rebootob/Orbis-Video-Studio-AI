@@ -4,9 +4,11 @@ import hashlib
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.models.asset import Asset
+from app.models.generation_job import GenerationJob
 from app.models.project import Project
 from app.models.scene import Scene
 from app.models.shot import Shot
@@ -80,6 +82,29 @@ def _success_payload(image_bytes=b"jpeg-bytes", interaction_id="int-123", includ
             "total_thought_tokens": 0,
         }
     return payload
+
+
+def _make_keyframe_target(db_session, title):
+    project = Project(
+        title=title,
+        video_mode="STORY",
+        status="SHOT_PLAN_APPROVED",
+        budget_limit=1.0,
+    )
+    db_session.add(project)
+    db_session.flush()
+    scene = Scene(project_id=project.id, scene_number=1)
+    db_session.add(scene)
+    db_session.flush()
+    shot = Shot(
+        scene_id=scene.id,
+        shot_number=1,
+        shot_type="AI_GENERATED",
+        visual_prompt="A production keyframe",
+    )
+    db_session.add(shot)
+    db_session.commit()
+    return project, shot
 
 
 def test_factory_registers_real_provider_without_removing_mock():
@@ -244,8 +269,26 @@ def test_unsupported_seed_size_override_and_unknown_provider_params_fail_before_
     assert unknown.error_code == "UNSUPPORTED_PROVIDER_PARAMETERS"
 
 
-def test_http_503_is_retryable_and_submission_uncertain(monkeypatch):
-    _patch_http(monkeypatch, _FakeResponse(503, {"error": {"message": "do not persist me"}}))
+@pytest.mark.parametrize(
+    ("status_code", "retryable", "uncertain"),
+    [
+        (400, False, False),
+        (401, False, False),
+        (403, False, False),
+        (429, True, False),
+        (503, True, True),
+    ],
+)
+def test_http_failure_classification_and_sanitized_evidence(
+    monkeypatch, status_code, retryable, uncertain
+):
+    _patch_http(
+        monkeypatch,
+        _FakeResponse(
+            status_code,
+            {"error": {"message": "do not persist me", "api_key": "test-key"}},
+        ),
+    )
     adapter = GeminiImageProviderAdapter(api_key="test-key")
     result = asyncio.run(
         adapter.generate_image(
@@ -254,10 +297,91 @@ def test_http_503_is_retryable_and_submission_uncertain(monkeypatch):
     )
     assert result.status == "FAILED"
     assert result.error_code == "HTTP_ERROR"
-    assert result.status_code == 503
-    assert result.retryable is True
-    assert result.submission_uncertain is True
-    assert result.raw_response is None
+    assert result.status_code == status_code
+    assert result.retryable is retryable
+    assert result.submission_uncertain is uncertain
+    assert result.raw_response == {
+        "provider": "gemini_image",
+        "model": settings.GEMINI_IMAGE_MODEL,
+        "http_status": status_code,
+        "error_code": "HTTP_ERROR",
+        "retryable": retryable,
+        "submission_uncertain": uncertain,
+    }
+    assert "do not persist me" not in str(result.raw_response)
+    assert "test-key" not in str(result.raw_response)
+
+
+def test_keyframe_service_persists_deterministic_gemini_http_failure_evidence(
+    monkeypatch, db_session
+):
+    ProviderPricingService.reset()
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    _patch_http(
+        monkeypatch,
+        _FakeResponse(403, {"error": {"message": "private provider detail", "api_key": "test-key"}}),
+    )
+    project, shot = _make_keyframe_target(db_session, "Gemini 403 Evidence Project")
+
+    with pytest.raises(HTTPException) as exc_info:
+        KeyframeGenerationService.generate_shot_keyframe(
+            db=db_session,
+            project_id=project.id,
+            shot_id=shot.id,
+            provider_name="gemini_image",
+            cost_authorized=True,
+        )
+
+    assert exc_info.value.status_code == 500
+    job = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot.id).one()
+    assert job.status == "FAILED"
+    assert job.cost_usd == pytest.approx(0.0)
+    assert job.result == {
+        "provider": "gemini_image",
+        "model": settings.GEMINI_IMAGE_MODEL,
+        "http_status": 403,
+        "error_code": "HTTP_ERROR",
+        "retryable": False,
+        "submission_uncertain": False,
+    }
+    assert "private provider detail" not in str(job.result)
+    assert "test-key" not in str(job.result)
+
+
+def test_keyframe_service_persists_uncertain_gemini_http_failure_evidence(
+    monkeypatch, db_session
+):
+    ProviderPricingService.reset()
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    _patch_http(
+        monkeypatch,
+        _FakeResponse(503, {"error": {"message": "private provider detail", "api_key": "test-key"}}),
+    )
+    project, shot = _make_keyframe_target(db_session, "Gemini 503 Evidence Project")
+
+    with pytest.raises(HTTPException) as exc_info:
+        KeyframeGenerationService.generate_shot_keyframe(
+            db=db_session,
+            project_id=project.id,
+            shot_id=shot.id,
+            provider_name="gemini_image",
+            cost_authorized=True,
+        )
+
+    assert exc_info.value.status_code == 502
+    job = db_session.query(GenerationJob).filter(GenerationJob.shot_id == shot.id).one()
+    assert job.status == "RECONCILIATION_REQUIRED"
+    assert job.cost_usd == pytest.approx(0.08)
+    assert job.result == {
+        "provider": "gemini_image",
+        "model": settings.GEMINI_IMAGE_MODEL,
+        "http_status": 503,
+        "error_code": "HTTP_ERROR",
+        "retryable": True,
+        "submission_uncertain": True,
+    }
+    assert "private provider detail" not in str(job.result)
+    assert "test-key" not in str(job.result)
 
 
 def test_keyframe_service_persists_gemini_asset_lineage_and_metered_cost(
