@@ -64,6 +64,15 @@ def configure_test_storage(mock_storage: InMemoryObjectStorageProvider):
     set_storage_provider_override(None)
 
 
+@pytest.fixture(autouse=True)
+def configure_test_image_provider():
+    """Production defaults stay real; tests explicitly route deterministic image work to mock."""
+    previous = settings.DEFAULT_IMAGE_PROVIDER
+    settings.DEFAULT_IMAGE_PROVIDER = "mock_image"
+    yield
+    settings.DEFAULT_IMAGE_PROVIDER = previous
+
+
 @pytest.fixture
 def client(db_session: Session, mock_storage: InMemoryObjectStorageProvider) -> Generator[TestClient, None, None]:
     def override_get_db():
@@ -82,4 +91,3 @@ def client(db_session: Session, mock_storage: InMemoryObjectStorageProvider) -> 
         yield test_client
 
     fastapi_app.dependency_overrides.clear()
-
