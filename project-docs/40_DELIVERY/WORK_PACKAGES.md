@@ -26,20 +26,24 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R3-PRE1
+ACTIVE_WORK_PACKAGE: NONE
 P4-WP020: ACTIVE / NOT CLOSED
+R3 PRE1: PASS / COMPLETED
 Core V1 release: NOT DECLARED
-Paid/live R3 execution: NOT AUTHORIZED
+R3 execution tooling: NOT AUTHORIZED
+R3 paid/live execution: NOT AUTHORIZED
 ```
 
-Current canonical baseline at PRE1 start:
+Current canonical baseline:
 
 ```text
-main HEAD: d706acacd1f51224c955fb9c8d0d9eab3deda186
+main HEAD: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
 P4-WP020 LIVE R2-C1 PR #74: MERGED / CLOSED
-C1 reviewed HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
 C1 merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
-Active PRE1 branch: ai/p4-wp020-live-r3-pre1
+P4-WP020 LIVE R3-PRE1 PR #75: MERGED / COMPLETED
+PRE1 reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+PRE1 merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+PRE1 metadata probe run: 34291500281 / ACCESS_PROBE_PASS / HTTP 200
 ```
 
 ---
@@ -93,8 +97,9 @@ P4-WP019 must not be reopened unless a proven regression is found.
 
 ```text
 Status: ACTIVE / NOT CLOSED
-Current sub-gate: P4-WP020-LIVE-R3-PRE1
-Current authorization: NO-PAID PRE1 ONLY
+Current sub-gate: NONE
+Last completed sub-gate: P4-WP020-LIVE-R3-PRE1 = PASS / COMPLETED
+Next proposed gate: R3 execution-tooling preparation / NOT AUTHORIZED
 Core V1 release declaration: NOT AUTHORIZED
 ```
 
@@ -128,23 +133,28 @@ R2:
 R2-C1:
 - Gemini HTTP Evidence + Control-Truth Corrective;
 - PR #74 merged;
-- future Gemini non-2xx evidence now preserves sanitized HTTP status/classification;
+- future Gemini non-2xx evidence preserves sanitized HTTP status/classification;
 - C1 provider calls = 0;
 - C1 spend = USD 0.00.
 
-### Active R3-PRE1
+### R3-PRE1 — PASS / COMPLETED
 
 `P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
 
-Authorized as NO-PAID only:
+```text
+PR: #75
+Reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
+Merge: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Probe run: 34291500281
+Probe result: ACCESS_PROBE_PASS
+HTTP status: 200
+Model: gemini-3.1-flash-image
+generation_request_sent: false
+paid_generation_calls: 0
+PRE1 spend: USD 0.00
+```
 
-- prepare manual-only Gemini `models.get` metadata probe;
-- after merge, exactly one authenticated GET to `models/gemini-3.1-flash-image`;
-- no generation request, no prompt/image payload, no paid dispatch;
-- sanitize evidence to model/status/http/error classification;
-- tests for success/failure classification and secret/body non-leakage;
-- synchronize control truth;
-- draft R3 resume contract.
+PRE1 confirms metadata-level Gemini credential/model visibility only. It does not prove the image-generation submission path will succeed and it does not authorize R3 execution tooling or paid/live execution.
 
 Detailed contract: `P4_WP020_LIVE_R3_PRE1.md`.
 
@@ -163,7 +173,7 @@ Sequential only
 OpenAI retries: 0
 ```
 
-R3 execution identity and exact authorized main SHA are intentionally unassigned until later tooling is merged and fresh Owner paid/live authorization is recorded.
+R3 execution identity and exact authorized main SHA remain unassigned until separately authorized execution tooling is reviewed and merged, followed by fresh Owner paid/live authorization.
 
 Draft contract: `P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
 
@@ -213,7 +223,7 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 ## 8. Execution Rule
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-PRE1
+ACTIVE_WORK_PACKAGE = NONE
 ```
 
-Only the explicitly authorized NO-PAID PRE1 scope may proceed. PRE1 does not authorize R3 paid execution, release mutation, production deployment, or Core V1 release declaration.
+No R3 tooling, paid execution, release mutation, production deployment, or Core V1 release declaration may start without a new explicit Owner authorization tied to a separately presented exact gate.
