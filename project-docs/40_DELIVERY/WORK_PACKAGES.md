@@ -26,19 +26,20 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: NONE
-P4-WP020: PROPOSED / NOT AUTHORIZED
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R3-PRE1
+P4-WP020: ACTIVE / NOT CLOSED
+Core V1 release: NOT DECLARED
+Paid/live R3 execution: NOT AUTHORIZED
 ```
 
-Canonical main truth after WP019:
+Current canonical baseline at PRE1 start:
 
 ```text
-main HEAD: a09fcab835515679bf4f0bbfce8aec84f7e15062
-P4-WP019 PR #50: MERGED / CLOSED
-P4-WP019 final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-P4-WP019 final review: PASS / READY FOR OWNER MERGE DECISION
-P4-WP019 final review ID: 5135969695
-P4-WP019 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
+main HEAD: d706acacd1f51224c955fb9c8d0d9eab3deda186
+P4-WP020 LIVE R2-C1 PR #74: MERGED / CLOSED
+C1 reviewed HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
+C1 merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
+Active PRE1 branch: ai/p4-wp020-live-r3-pre1
 ```
 
 ---
@@ -67,15 +68,6 @@ P4-WP019 merge commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
 | P4-WP018 | Multi-Output & Platform Export Presets | PASS / CLOSED / MERGED |
 | P4-WP019 | Project Export/Import Archive Package (`.orbis`) | PASS / CLOSED / MERGED |
 
-Key recent merge truth:
-
-```text
-P3-WP017 PR #44 merge: 72065b9c29350e54dd7811a00d7198c6765004d1
-P4-WP018 PR #47 merge: 09e62876543ee7990919beb43600a1c748be545d
-P4-WP019 PRE1 PR #49 merge: 5f3ccbbcd0ee528bb85501a32efb64c5b13fbce5
-P4-WP019 implementation PR #50 merge: a09fcab835515679bf4f0bbfce8aec84f7e15062
-```
-
 ---
 
 ## 4. P4-WP019 Closure Detail
@@ -87,35 +79,8 @@ Status: PASS / CLOSED / MERGED
 PR: #50
 Branch: ai/p4-wp019-orbis-archive
 Final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-Final Review ID: 5135969695
 Merge Commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
 Proposal: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
-```
-
-Accepted scope delivered:
-
-- `.orbis` ZIP-compatible archive format.
-- canonical manifest/checksum trust root and canonical JSON.
-- secure path validation and archive size/count/compression guards.
-- Core V1 `FULL_SELF_CONTAINED` export contract.
-- full project graph serialization.
-- CLONE mode with fresh UUID/FK remap and source lineage.
-- RESTORE mode with fail-closed collision handling.
-- Phase-3 graph/referential-integrity preflight.
-- asset completeness and payload/catalog/database size consistency.
-- historical RenderJob/GenerationJob preservation and worker fencing.
-- historical UsageLedger preservation, partial-index fencing and budget exclusion.
-- transaction rollback and storage compensation.
-- REST API export/import endpoints.
-- frontend Export/Import UX.
-
-Final exact-head verification before merge:
-
-```text
-Backend: 412 passed, 2 skipped
-Frontend: 52/52 tests PASS
-Frontend build/typecheck: PASS
-Frontend lint: 0 errors
 ```
 
 P4-WP019 must not be reopened unless a proven regression is found.
@@ -127,30 +92,80 @@ P4-WP019 must not be reopened unless a proven regression is found.
 ### P4-WP020 — End-to-End System Integration, UAT & Core V1 Release
 
 ```text
-Status: PROPOSED / NOT AUTHORIZED
-Implementation authorization: NONE
+Status: ACTIVE / NOT CLOSED
+Current sub-gate: P4-WP020-LIVE-R3-PRE1
+Current authorization: NO-PAID PRE1 ONLY
+Core V1 release declaration: NOT AUTHORIZED
 ```
 
-Purpose:
+Purpose remains:
 
 - verify the already-delivered Core V1 system end to end;
 - execute bounded UAT across the supported Core V1 modes and critical production path;
 - verify failure/recovery, cost, history, approval, render/export and archive behavior at system level;
-- close release-blocking defects only within the authorized WP020 contract;
+- close release-blocking defects only within authorized WP020 contracts;
 - collect release evidence and make the final Core V1 release decision.
 
-Before any implementation, ChatGPT must inspect repository truth and present a bounded WP020 contract containing at minimum:
+### LIVE history
 
-1. exact scope and explicit exclusions;
-2. E2E scenario matrix;
-3. UAT scenario matrix;
-4. critical regression gates;
-5. release-blocking severity rules;
-6. test/evidence requirements;
-7. rollback/recovery requirements;
-8. Core V1 release closure criteria.
+R1:
+- consumed / immutable;
+- bounded OpenAI call returned HTTP 429;
+- STOP enforced.
 
-Owner authorization is mandatory before WP020 implementation starts.
+R2:
+- execution ID `LIVE-20260909-BB75-R2`;
+- run `34287696335`;
+- execution fence consumed;
+- OpenAI STORY succeeded;
+- Gemini IMAGE returned non-success HTTP surfaced as `HTTP_ERROR`;
+- exact historical Gemini HTTP status was not durably retained;
+- conservative chargeable requests consumed = 2/6;
+- last known confirmed/committed UAT cost at STOP = USD 0.0072;
+- Vidu / ElevenLabs / downstream live proof not executed;
+- R2 must never be rerun.
+
+R2-C1:
+- Gemini HTTP Evidence + Control-Truth Corrective;
+- PR #74 merged;
+- future Gemini non-2xx evidence now preserves sanitized HTTP status/classification;
+- C1 provider calls = 0;
+- C1 spend = USD 0.00.
+
+### Active R3-PRE1
+
+`P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
+
+Authorized as NO-PAID only:
+
+- prepare manual-only Gemini `models.get` metadata probe;
+- after merge, exactly one authenticated GET to `models/gemini-3.1-flash-image`;
+- no generation request, no prompt/image payload, no paid dispatch;
+- sanitize evidence to model/status/http/error classification;
+- tests for success/failure classification and secret/body non-leakage;
+- synchronize control truth;
+- draft R3 resume contract.
+
+Detailed contract: `P4_WP020_LIVE_R3_PRE1.md`.
+
+### Proposed R3 — Not Authorized
+
+R2 used ephemeral PostgreSQL/MinIO and its retained artifact is historical evidence, not reusable canonical project state. The proposed future R3 therefore creates a new isolated UAT project and executes one coherent full provider chain:
+
+```text
+OpenAI STORY x1
+Gemini IMAGE x1
+Vidu VIDEO x1
+ElevenLabs AUDIO x3
+Maximum chargeable requests: 6
+Hard cap: USD 1.00
+Sequential only
+OpenAI retries: 0
+```
+
+R3 execution identity and exact authorized main SHA are intentionally unassigned until later tooling is merged and fresh Owner paid/live authorization is recorded.
+
+Draft contract: `P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
 
 ---
 
@@ -167,19 +182,7 @@ The following remain future work unless separately authorized:
 - heavyweight NLE/DAW capabilities;
 - realtime cloud project replication/sync.
 
-ComfyUI + Cloud GPU remains a future provider/execution candidate only:
-
-```text
-Orbis
--> GenerationJob
--> Provider Adapter
--> ComfyUI Provider
--> Cloud GPU Worker
--> Object Storage
--> Orbis Asset / Version / History
-```
-
-Status: `PROPOSED / NOT AUTHORIZED / NOT IMPLEMENTED`
+ComfyUI + Cloud GPU remains a future provider/execution candidate only and is not authorized by WP020.
 
 ---
 
@@ -202,32 +205,15 @@ CLOUD_AI = REQUIRED
 VENDOR_LOCK_IN = DISALLOWED
 ```
 
-Core V1 modes:
-
-```text
-STORY
-SHORT
-LOOP
-SCENE
-```
-
-Architecture-ready later only:
-
-```text
-PRODUCT
-EXPLAINER
-PRESENTER
-MONTAGE
-```
-
-Future-mode readiness must not silently expand an active WP.
+Core V1 modes: `STORY / SHORT / LOOP / SCENE`.
+Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ---
 
 ## 8. Execution Rule
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-PRE1
 ```
 
-No application-code implementation may start until the Owner explicitly authorizes P4-WP020 or another bounded work package.
+Only the explicitly authorized NO-PAID PRE1 scope may proceed. PRE1 does not authorize R3 paid execution, release mutation, production deployment, or Core V1 release declaration.
