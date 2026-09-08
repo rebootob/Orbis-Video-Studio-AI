@@ -1,28 +1,38 @@
+"""Explicitly started render worker: python -m app.services.render_worker.
+
+Importing the API application never starts rendering. The worker validates its
+runtime once, then drains eligible RenderJobs using the existing lease/fencing
+contract.
+"""
 import os
 import socket
 import tempfile
 import shutil
 import logging
 import hashlib
-from typing import Optional, Dict, Any
+import signal
+import threading
+from typing import Optional, Dict, Any, Callable
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.session import SessionLocal
 from app.services.render import RenderExecutor, FFmpegRenderExecutor
 from app.services.storage import get_storage_provider, ObjectStorageProvider
 from app.services.render_job import RenderJobService
-from app.models.render_job import RenderJob
-from app.models.assembly import AssemblyTimeline, AssemblyShotPlacement
+from app.models.assembly import AssemblyTimeline
 from app.models.asset import Asset
 from app.models.audio_clip import AudioClip
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_RENDER_WORKER_POLL_SECONDS = 1.0
+MIN_RENDER_WORKER_POLL_SECONDS = 0.1
+MAX_RENDER_WORKER_POLL_SECONDS = 30.0
+
 
 class CloudRenderWorker:
-    """
-    Stateless worker component that claims, renders, uploads, and settles RenderJobs.
-    """
+    """Stateless worker component that claims, renders, uploads, and settles RenderJobs."""
 
     def __init__(
         self,
@@ -33,6 +43,16 @@ class CloudRenderWorker:
         self.worker_id = worker_id or f"worker-{socket.gethostname()}-{os.getpid()}"
         self.storage_provider = storage_provider or get_storage_provider()
         self.render_executor = render_executor or FFmpegRenderExecutor()
+
+    def validate_runtime(self) -> None:
+        """Fail fast before polling when required render runtime/config is unavailable."""
+        bucket = str(getattr(settings, "OBJECT_STORAGE_BUCKET", "") or "").strip()
+        if not bucket:
+            raise RuntimeError("OBJECT_STORAGE_BUCKET is required for the render worker.")
+
+        validator = getattr(self.render_executor, "validate_runtime", None)
+        if callable(validator):
+            validator()
 
     def process_one_job(self, db: Session) -> bool:
         job = RenderJobService.claim_next_render_job(db, self.worker_id)
@@ -49,7 +69,6 @@ class CloudRenderWorker:
         upload_succeeded = False
 
         try:
-            # Load exact approved timeline revision from DB (FAIL CLOSED if exact version is missing)
             timeline = (
                 db.query(AssemblyTimeline)
                 .filter(
@@ -64,7 +83,6 @@ class CloudRenderWorker:
                     f"Exact AssemblyTimeline {job.timeline_id} version {job.timeline_version} not found in DB. Fail closed."
                 )
 
-            # Load shot placements and download visual assets
             placements = []
             total_duration = 0.0
 
@@ -90,7 +108,6 @@ class CloudRenderWorker:
                 ext = os.path.splitext(visual_asset.original_filename or ".mp4")[1] or ".mp4"
                 local_asset_path = os.path.join(scratch_dir, f"asset_{visual_asset.id}{ext}")
 
-                # Streaming download to disk
                 self.storage_provider.download_file_object(
                     bucket=visual_asset.storage_bucket,
                     key=visual_asset.storage_key,
@@ -121,7 +138,6 @@ class CloudRenderWorker:
             if total_duration <= 0.0:
                 total_duration = 10.0
 
-            # Resolve audio clips
             audio_clips_list = []
             db_audio_clips = db.query(AudioClip).filter(AudioClip.project_id == job.project_id).all()
             for ac in db_audio_clips:
@@ -173,7 +189,6 @@ class CloudRenderWorker:
             def progress_cb(pct: float):
                 RenderJobService.update_progress(db, job.id, job.claim_token, pct)
 
-            # Execute rendering
             render_meta = self.render_executor.render_timeline(
                 timeline_spec=timeline_spec,
                 scratch_dir=scratch_dir,
@@ -184,7 +199,6 @@ class CloudRenderWorker:
             if not os.path.exists(output_file_path):
                 raise RuntimeError(f"Render output file not found at {output_file_path}")
 
-            # Compute real file SHA-256 hash and size streaming without loading entire file into RAM
             sha256_hash = hashlib.sha256()
             file_size = os.path.getsize(output_file_path)
             with open(output_file_path, "rb") as f:
@@ -202,8 +216,6 @@ class CloudRenderWorker:
 
             bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-assets")
             self.storage_provider.ensure_bucket_exists(bucket)
-
-            # Stream upload file object to object storage
             self.storage_provider.upload_file_object(
                 bucket=bucket,
                 key=storage_key,
@@ -212,7 +224,6 @@ class CloudRenderWorker:
             )
             upload_succeeded = True
 
-            # Create output Asset row
             if is_export_variant:
                 asset = RenderJobService.create_render_output_asset(
                     db=db,
@@ -237,7 +248,6 @@ class CloudRenderWorker:
                     checksum_sha256=checksum_sha256,
                 )
 
-            # Complete render job and reconcile usage ledger cost
             actual_cost = round(file_size / (1024 * 1024) * 0.01 + 0.05, 4)
             RenderJobService.complete_render_job(
                 db=db,
@@ -269,3 +279,80 @@ class CloudRenderWorker:
 
         finally:
             shutil.rmtree(scratch_dir, ignore_errors=True)
+
+
+def _resolve_poll_seconds(value: Optional[float] = None) -> float:
+    if value is None:
+        raw = os.getenv("ORBIS_RENDER_WORKER_POLL_SECONDS", str(DEFAULT_RENDER_WORKER_POLL_SECONDS))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("ORBIS_RENDER_WORKER_POLL_SECONDS must be a number.") from exc
+
+    if not MIN_RENDER_WORKER_POLL_SECONDS <= value <= MAX_RENDER_WORKER_POLL_SECONDS:
+        raise RuntimeError(
+            "ORBIS_RENDER_WORKER_POLL_SECONDS must be between "
+            f"{MIN_RENDER_WORKER_POLL_SECONDS} and {MAX_RENDER_WORKER_POLL_SECONDS} seconds."
+        )
+    return value
+
+
+def run_once(
+    worker: CloudRenderWorker,
+    session_factory: Callable = SessionLocal,
+) -> bool:
+    """Process at most one render job in an isolated DB session."""
+    with session_factory() as db:
+        try:
+            processed = worker.process_one_job(db)
+            db.commit()
+            return processed
+        except Exception:
+            db.rollback()
+            raise
+
+
+def run_forever(
+    worker: Optional[CloudRenderWorker] = None,
+    session_factory: Callable = SessionLocal,
+    stop_event: Optional[threading.Event] = None,
+    poll_seconds: Optional[float] = None,
+) -> None:
+    """Run the persistent worker loop with bounded idle backoff and graceful stop."""
+    worker = worker or CloudRenderWorker()
+    stop_event = stop_event or threading.Event()
+    poll_seconds = _resolve_poll_seconds(poll_seconds)
+
+    worker.validate_runtime()
+    logger.info(
+        "Render worker %s started; idle poll interval %.2fs",
+        worker.worker_id,
+        poll_seconds,
+    )
+
+    while not stop_event.is_set():
+        processed = run_once(worker=worker, session_factory=session_factory)
+        if not processed:
+            stop_event.wait(poll_seconds)
+
+    logger.info("Render worker %s stopped", worker.worker_id)
+
+
+def _install_signal_handlers(stop_event: threading.Event) -> None:
+    def request_stop(signum, _frame):
+        logger.info("Render worker shutdown requested by signal %s", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+
+
+def main() -> None:
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+    stop_event = threading.Event()
+    _install_signal_handlers(stop_event)
+    run_forever(stop_event=stop_event)
+
+
+if __name__ == "__main__":
+    main()
