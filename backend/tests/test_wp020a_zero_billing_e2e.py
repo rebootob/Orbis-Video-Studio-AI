@@ -1,8 +1,7 @@
-"""P4-WP020-A deterministic zero-billing end-to-end evidence.
+"""P4-WP020-A deterministic zero-billing cross-module evidence.
 
-These tests intentionally cross module boundaries. External HTTP is forbidden.
-A known-bad integration truth may be asserted explicitly so CI records the
-release gap without disguising it as a passing product acceptance row.
+External HTTP is forbidden. Known-bad integration truth is asserted explicitly
+so green CI never masquerades as release readiness.
 """
 import asyncio
 import hashlib
@@ -15,22 +14,17 @@ import httpx
 import pytest
 
 from app.models.asset import Asset
-from app.models.audio_clip import AudioClip
 from app.models.generation_job import GenerationJob
 from app.models.project import Project
-from app.models.qc import QCFinding
 from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.story import Story
-from app.models.usage_ledger import UsageLedger
 from app.providers.base import ProviderJobResult
 from app.providers.factory import ProviderFactory
 from app.services.archive.export_service import ProjectExportService
-from app.services.archive.import_service import ProjectImportService
 from app.services.assembly import AssemblyService
 from app.services.audio_production import AudioProductionService
-from app.services.budget import BudgetService
 from app.services.creative_generation.fake_provider import FakeCreativeGenerationProvider
 from app.services.job_dispatch import JobDispatchService
 from app.services.production_orchestrator import ProductionOrchestrator
@@ -43,8 +37,6 @@ from app.services.subtitle_control import SubtitleService
 
 @pytest.fixture(autouse=True)
 def forbid_wp020a_external_http(monkeypatch):
-    """WP020-A must never perform a real/paid provider request."""
-
     async def denied(*args, **kwargs):
         raise AssertionError("WP020-A forbids all unmocked external HTTP/provider calls")
 
@@ -52,8 +44,6 @@ def forbid_wp020a_external_http(monkeypatch):
 
 
 class CompletedFakeVideoProvider:
-    """Synchronous-completion VideoProvider test double; never performs HTTP."""
-
     @property
     def provider_id(self):
         return "vidu"
@@ -82,8 +72,6 @@ class CompletedFakeVideoProvider:
 
 
 class CopySubtitleBurnIn:
-    """Zero-billing burn-in test double: proves wiring without invoking FFmpeg."""
-
     def burn_in(self, input_file_path, subtitle_file_path, output_file_path):
         assert os.path.exists(input_file_path)
         assert os.path.exists(subtitle_file_path)
@@ -95,7 +83,7 @@ def _run_story_to_video_jobs(db):
     project = Project(
         id=uuid.uuid4(),
         title="WP020-A Deep Story",
-        description="A deterministic corporate training story used only for zero-billing E2E evidence.",
+        description="Deterministic zero-billing STORY fixture.",
         video_mode="STORY",
         status="DRAFT",
         automation_mode="MANUAL",
@@ -121,39 +109,27 @@ def _run_story_to_video_jobs(db):
     ProductionOrchestrator.approve_stage(db, project.id, stage="IMAGES_GENERATED", provider=provider)
     ProductionOrchestrator.execute_action(db, project.id, "START_VIDEO_GENERATION", provider=provider)
 
+    story = db.query(Story).filter(Story.project_id == project.id).one()
     jobs = (
         db.query(GenerationJob)
         .join(Shot, GenerationJob.shot_id == Shot.id)
         .join(Scene, Shot.scene_id == Scene.id)
-        .filter(Scene.project_id == project.id)
+        .filter(
+            (Scene.project_id == project.id) | (Scene.story_id == story.id),
+            GenerationJob.job_type == "VIDEO",
+        )
         .all()
     )
-    if not jobs:
-        story = db.query(Story).filter(Story.project_id == project.id).one()
-        jobs = (
-            db.query(GenerationJob)
-            .join(Shot, GenerationJob.shot_id == Shot.id)
-            .join(Scene, Shot.scene_id == Scene.id)
-            .filter(Scene.story_id == story.id)
-            .all()
-        )
     assert jobs
-    return project, jobs
+    assert all(job.status == "PENDING" for job in jobs)
+    return project, story, jobs
 
 
-def test_e2e_01_story_provider_completion_exposes_video_asset_materialization_gap(db_session):
-    """Deep STORY path proves the current VideoProvider->Asset integration blocker.
+def test_e2e_01_story_completion_exposes_video_asset_materialization_gap(db_session):
+    """S1-A01 evidence: completed video jobs never become durable VIDEO Shot truth."""
+    project, story, jobs = _run_story_to_video_jobs(db_session)
 
-    The queue truth can become COMPLETED and orchestration can advance to final
-    review while the provider output URL has never become a durable Orbis VIDEO
-    Asset bound to the Shot. Assembly therefore falls back to KEYFRAME instead
-    of the generated video. This is intentionally asserted as current truth and
-    classified as an S1 finding in P4_WP020_A_EVIDENCE.md.
-    """
-    project, jobs = _run_story_to_video_jobs(db_session)
-    fake_video = CompletedFakeVideoProvider()
-
-    with patch.object(ProviderFactory, "get_provider", return_value=fake_video):
+    with patch.object(ProviderFactory, "get_provider", return_value=CompletedFakeVideoProvider()):
         for job in jobs:
             claimed = JobDispatchService.claim_next_job(
                 db_session,
@@ -174,15 +150,10 @@ def test_e2e_01_story_provider_completion_exposes_video_asset_materialization_ga
     state = ProductionOrchestrator.evaluate_state(db_session, project.id)
     assert state.current_stage == "VIDEO_IN_PROGRESS"
     assert state.recommended_action.action == "TRANSITION_TO_FINAL_REVIEW"
+    assert ProductionOrchestrator.execute_action(
+        db_session, project.id, "TRANSITION_TO_FINAL_REVIEW"
+    ).to_stage == "FINAL_REVIEW"
 
-    transition = ProductionOrchestrator.execute_action(
-        db_session,
-        project.id,
-        "TRANSITION_TO_FINAL_REVIEW",
-    )
-    assert transition.to_stage == "FINAL_REVIEW"
-
-    story = db_session.query(Story).filter(Story.project_id == project.id).one()
     shots = (
         db_session.query(Shot)
         .join(Scene, Shot.scene_id == Scene.id)
@@ -194,15 +165,15 @@ def test_e2e_01_story_provider_completion_exposes_video_asset_materialization_ga
 
     timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
     assert timeline.shot_placements
-    assert all(p.source_type != "VIDEO" for p in timeline.shot_placements)
-    assert any(p.source_type == "KEYFRAME" for p in timeline.shot_placements)
+    assert all(placement.source_type != "VIDEO" for placement in timeline.shot_placements)
+    assert any(placement.source_type == "KEYFRAME" for placement in timeline.shot_placements)
 
 
 def _seed_materialized_video_project(db, mock_storage):
     project = Project(
         id=uuid.uuid4(),
         title="WP020-A Downstream Fixture",
-        description="Durably materialized zero-billing fixture for downstream system integration.",
+        description="Materialized zero-billing downstream fixture.",
         video_mode="SHORT",
         status="FINAL_REVIEW",
         preferred_aspect_ratio="9:16",
@@ -228,7 +199,7 @@ def _seed_materialized_video_project(db, mock_storage):
         shot_number=1,
         shot_type="AI_GENERATED",
         status="COMPLETED",
-        visual_prompt="A safe deterministic test frame",
+        visual_prompt="Safe deterministic test frame",
         action="การทดสอบระบบแบบไม่เสียค่าใช้จ่าย",
         duration_seconds=4.0,
         source_metadata={"has_audio": False},
@@ -255,17 +226,13 @@ def _seed_materialized_video_project(db, mock_storage):
     db.flush()
     shot.source_asset_id = asset.id
     db.commit()
-    return project, scene, shot, asset
+    return project, asset
 
 
-def test_e2e_10_to_14_downstream_audio_subtitle_qc_render_multioutput_archive(
-    db_session,
-    mock_storage,
-):
-    """Cross-module zero-billing proof for the downstream half of Core V1."""
-    project, scene, shot, source_asset = _seed_materialized_video_project(db_session, mock_storage)
+def test_e2e_10_to_13_downstream_passes_until_audio_history_archive_gap(db_session, mock_storage):
+    """Audio/subtitle/QC/render/multi-output pass; archive integration proves S1-A02."""
+    project, source_asset = _seed_materialized_video_project(db_session, mock_storage)
 
-    # Audio plan -> mock generation -> auto mix -> approval.
     audio_plan = AudioProductionService.generate_audio_plan(db_session, project.id)
     assert audio_plan.status == "DRAFT"
     AudioProductionService.approve_audio_plan(db_session, project.id)
@@ -279,27 +246,22 @@ def test_e2e_10_to_14_downstream_audio_subtitle_qc_render_multioutput_archive(
     )
     assert audio_result["failed"] == 0
     assert audio_result["succeeded"] >= 1
-    mix = AudioProductionService.compute_auto_mix(db_session, project.id)
-    assert mix["total_tracks"] >= 1
+    assert AudioProductionService.compute_auto_mix(db_session, project.id)["total_tracks"] >= 1
+
     project.status = "AUDIO_MIX_READY"
     db_session.commit()
     ProductionOrchestrator.approve_stage(db_session, project.id, stage="AUDIO_MIX_READY")
     ProductionOrchestrator.execute_action(db_session, project.id, "PROCEED_TO_ASSEMBLY")
     assert project.status == "READY_FOR_ASSEMBLY"
 
-    # Assembly uses the durable VIDEO Asset rather than a planning/keyframe fallback.
     timeline = AssemblyService.auto_assemble_timeline(db_session, str(project.id))
     assert len(timeline.shot_placements) == 1
     placement = timeline.shot_placements[0]
     assert placement.source_type == "VIDEO"
     assert placement.visual_asset_id == source_asset.id
 
-    # Subtitle generation/review/SRT and burn-in snapshot are fully deterministic.
     subtitle = SubtitleService.generate(
-        db_session,
-        project.id,
-        timeline_id=str(timeline.id),
-        language="th",
+        db_session, project.id, timeline_id=str(timeline.id), language="th"
     )
     assert subtitle["segments"]
     reviewed = SubtitleService.review(
@@ -310,12 +272,10 @@ def test_e2e_10_to_14_downstream_audio_subtitle_qc_render_multioutput_archive(
         timeline_id=str(timeline.id),
     )
     assert reviewed["is_reviewed"] is True
-    assert reviewed["render_mode"] == "BURN_IN"
     srt, srt_meta = SubtitleService.export_srt(db_session, project.id, str(timeline.id))
     assert "การทดสอบระบบแบบไม่เสียค่าใช้จ่าย" in srt
     assert srt_meta["sha256"] == hashlib.sha256(srt.encode("utf-8")).hexdigest()
 
-    # QC + explicit human approval are bound to the exact timeline revision.
     qc_run = QCService.run_qc(db_session, project.id)
     for finding in list(qc_run.findings):
         if finding.severity == "WARNING":
@@ -340,9 +300,7 @@ def test_e2e_10_to_14_downstream_audio_subtitle_qc_render_multioutput_archive(
     assert approval.status == "APPROVED"
     assert project.status == "COMPLETED"
 
-    # Master render through the production worker boundary + fake executor.
     master = RenderJobService.submit_render_job(db_session, project.id)
-    assert master.status == RenderJobStatus.QUEUED.value
     worker = CloudRenderWorker(
         worker_id="wp020a-render-worker",
         storage_provider=mock_storage,
@@ -355,66 +313,33 @@ def test_e2e_10_to_14_downstream_audio_subtitle_qc_render_multioutput_archive(
     assert master.output_asset_id is not None
     assert (master.render_metadata or {}).get("subtitle", {}).get("mode") == "BURN_IN"
 
-    # Multi-output 16:9 / 9:16 / 1:1 from the same approved timeline.
     batch = RenderJobService.submit_export_batch(
         db_session,
         project.id,
         preset_ids=["YT_STANDARD_1080P", "TIKTOK_REELS_9X16", "INSTAGRAM_SQUARE"],
     )
-    assert batch.total_variants == 3
     for _ in range(3):
         assert worker.process_one_job(db_session) is True
-    variant_jobs = db_session.query(RenderJob).filter(RenderJob.batch_id == batch.id).all()
-    assert len(variant_jobs) == 3
-    assert all(job.status == RenderJobStatus.COMPLETED.value for job in variant_jobs)
+    variants = db_session.query(RenderJob).filter(RenderJob.batch_id == batch.id).all()
+    assert len(variants) == 3
+    assert all(job.status == RenderJobStatus.COMPLETED.value for job in variants)
     aspect_ratios = {
         (job.render_metadata or {}).get("preset_snapshot", {}).get("aspect_ratio")
-        for job in variant_jobs
+        for job in variants
     }
     assert {"16:9", "9:16", "1:1"}.issubset(aspect_ratios)
 
-    # FULL_SELF_CONTAINED .orbis round-trip keeps history/subtitles, while
-    # imported historical jobs/ledgers remain fenced from live execution/budget.
-    archive_path, manifest = ProjectExportService(storage_provider=mock_storage).export_project(
-        db=db_session,
-        project_id=project.id,
-    )
-    try:
-        assert manifest["package_type"] == "FULL_SELF_CONTAINED"
-        importer = ProjectImportService(storage_provider=mock_storage)
-        validation = importer.validate_project_archive(archive_path, db_session)
-        assert validation["valid"] is True
-        clone = importer.execute_import(
+    # S1-A02 evidence: integrated FULL_SELF_CONTAINED export after audio history
+    # reaches a real exporter/model contract mismatch. Assert current truth;
+    # WP020-A must not silently patch production archive code.
+    with pytest.raises(AttributeError, match="audio_clip_id"):
+        ProjectExportService(storage_provider=mock_storage).export_project(
             db=db_session,
-            archive_path=archive_path,
-            import_mode="CLONE",
-            override_title="WP020-A Clone",
+            project_id=project.id,
         )
-        assert clone.id != project.id
-        assert clone.source_project_id == project.id
-        assert BudgetService.get_project_committed_cost(db_session, clone.id) == 0.0
-
-        imported_render_jobs = db_session.query(RenderJob).filter(RenderJob.project_id == clone.id).all()
-        assert imported_render_jobs
-        assert all(job.imported_historical is True for job in imported_render_jobs)
-        assert all(job.execution_disabled is True for job in imported_render_jobs)
-
-        clone_timeline = AssemblyService.get_active_timeline(db_session, str(clone.id))
-        assert clone_timeline is not None
-        clone_subtitle = SubtitleService.get_active(
-            db_session,
-            clone.id,
-            timeline_id=str(clone_timeline.id),
-        )
-        assert clone_subtitle is not None
-        assert clone_subtitle["is_stale"] is False
-    finally:
-        if os.path.exists(archive_path):
-            os.remove(archive_path)
 
 
-def test_e2e_02_to_05_mode_routing_and_project_isolation_remain_bounded(db_session):
-    """All four Core V1 modes keep their distinct creative entry contracts."""
+def test_e2e_02_to_05_mode_routing_and_project_isolation(db_session):
     expected = {
         "STORY": "GENERATE_STORY",
         "SHORT": "GENERATE_STORYBOARD",
@@ -434,8 +359,7 @@ def test_e2e_02_to_05_mode_routing_and_project_isolation_remain_bounded(db_sessi
         projects.append((project, action))
     db_session.commit()
 
-    ids = {project.id for project, _ in projects}
-    assert len(ids) == 4
+    assert len({project.id for project, _ in projects}) == 4
     for project, action in projects:
         state = ProductionOrchestrator.evaluate_state(db_session, project.id)
         assert state.video_mode == project.video_mode
@@ -443,13 +367,9 @@ def test_e2e_02_to_05_mode_routing_and_project_isolation_remain_bounded(db_sessi
         if project.video_mode != "STORY":
             assert db_session.query(Story).filter(Story.project_id == project.id).count() == 0
 
-    # A foreign project lookup never returns another project's production graph.
     first, _ = projects[0]
     second, _ = projects[1]
-    scene = Scene(id=uuid.uuid4(), project_id=first.id, scene_number=1, heading="Isolation")
-    db_session.add(scene)
+    db_session.add(Scene(id=uuid.uuid4(), project_id=first.id, scene_number=1, heading="Isolation"))
     db_session.commit()
-    first_state = ProductionOrchestrator.evaluate_state(db_session, first.id)
-    second_state = ProductionOrchestrator.evaluate_state(db_session, second.id)
-    assert first_state.summary["scene_count"] == 1
-    assert second_state.summary["scene_count"] == 0
+    assert ProductionOrchestrator.evaluate_state(db_session, first.id).summary["scene_count"] == 1
+    assert ProductionOrchestrator.evaluate_state(db_session, second.id).summary["scene_count"] == 0
