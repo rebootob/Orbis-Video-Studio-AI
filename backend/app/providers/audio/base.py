@@ -60,6 +60,15 @@ class IAudioProviderAdapter(ABC):
         """Return provider capabilities (types, tts, music, sfx, etc.)."""
         pass
 
+    def estimate_cost(self, params: AudioGenerationParams) -> Optional[float]:
+        """Return a pre-dispatch USD estimate for the exact canonical request.
+
+        Providers with chargeable production execution should override this.
+        Returning None means pricing is not safely known and Core must fail closed
+        rather than fabricate a reservation.
+        """
+        return None
+
     @abstractmethod
     async def generate_audio(self, params: AudioGenerationParams) -> AudioJobResult:
         """Submit audio generation request or generate audio asset."""

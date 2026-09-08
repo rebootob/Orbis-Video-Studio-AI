@@ -8,6 +8,7 @@ import uuid
 import hashlib
 import asyncio
 import concurrent.futures
+import math
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import HTTPException, status
@@ -61,7 +62,6 @@ class AudioProductionService:
         """Auto-classify audio dimensions while strictly maintaining orthogonality.
         Human overrides are always preserved.
         """
-        # 1. Source Type Default
         eff_source = source_type
         if eff_source is None:
             if audio_type == AudioType.ORIGINAL_AUDIO:
@@ -69,7 +69,6 @@ class AudioProductionService:
             else:
                 eff_source = AudioSourceType.GENERATED_AUDIO
 
-        # 2. Generation Mode Default
         eff_mode = generation_mode
         if eff_mode is None:
             if audio_type == AudioType.ORIGINAL_AUDIO:
@@ -79,7 +78,6 @@ class AudioProductionService:
             else:
                 eff_mode = AudioGenerationMode.SEPARATE_AUDIO
 
-        # 3. Scope Default
         eff_scope = scope
         if eff_scope is None:
             if audio_type == AudioType.BGM:
@@ -91,7 +89,6 @@ class AudioProductionService:
             else:
                 eff_scope = AudioScope.SHOT
 
-        # 4. Ducking Role & DB reduction
         if audio_type in (AudioType.VO, AudioType.DIALOGUE):
             ducking_role = DuckingRole.FOREGROUND
             ducking_amount_db = 0.0
@@ -104,7 +101,7 @@ class AudioProductionService:
         elif audio_type == AudioType.ORIGINAL_AUDIO:
             ducking_role = DuckingRole.EMBEDDED
             ducking_amount_db = 0.0
-        else:  # SFX
+        else:
             ducking_role = DuckingRole.EVENT
             ducking_amount_db = 0.0
 
@@ -341,7 +338,6 @@ class AudioProductionService:
         if not project:
             raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-        # Query existing scenes and shots ordered
         scenes = (
             db.query(Scene)
             .filter(Scene.project_id == project_id)
@@ -359,11 +355,6 @@ class AudioProductionService:
                 .all()
             )
 
-        # 1. CANONICAL PROVIDER-CAPABILITY ROUTING
-        # Resolution order:
-        # A. Explicit / project-configured selected VideoProvider
-        # B. Latest canonical VIDEO GenerationJob provider (job_type == "VIDEO")
-        # C. ProviderFactory default video provider
         eff_video_provider = video_provider_name
 
         if not eff_video_provider and project:
@@ -409,7 +400,6 @@ class AudioProductionService:
         except Exception:
             video_supports_native_audio = False
 
-        # Get or create AudioPlan
         plan = db.query(AudioPlan).filter(AudioPlan.project_id == project_id).first()
         now = datetime.now(timezone.utc)
         if not plan:
@@ -428,7 +418,6 @@ class AudioProductionService:
             plan.status = "DRAFT"
             plan.updated_at = now
 
-        # Map existing clips by (audio_type, shot_id, scene_id, scope) to avoid duplicate recreation
         existing_clips = db.query(AudioClip).filter(AudioClip.project_id == project_id).all()
         existing_clip_map = {}
         for c in existing_clips:
@@ -437,7 +426,6 @@ class AudioProductionService:
 
         created_clips: List[AudioClip] = []
 
-        # 1. Project BGM Track
         bgm_key = (AudioType.BGM.value, None, None, AudioScope.PROJECT.value)
         if bgm_key not in existing_clip_map:
             bgm_cls = cls.auto_classify_clip(AudioType.BGM)
@@ -462,7 +450,6 @@ class AudioProductionService:
             db.add(bgm_clip)
             created_clips.append(bgm_clip)
 
-        # 2. Scene Ambience Tracks
         scene_time_offset = 0.0
         for sc in scenes:
             amb_key = (AudioType.AMBIENCE.value, None, sc.id, AudioScope.SCENE.value)
@@ -491,13 +478,10 @@ class AudioProductionService:
                 created_clips.append(amb_clip)
             scene_time_offset += 15.0
 
-        # 3. Shot-level VO, Dialogue, and Embedded Audio Tracks
         shot_time_offset = 0.0
         for sh in shots:
             shot_duration = float(sh.duration_seconds or 4.0)
-            
-            # Check for original embedded video audio
-            # Finding 4: Embedded Audio Truth. Verify referenced asset is VIDEO and verify audio presence metadata.
+
             if sh.source_asset_id:
                 source_asset = db.get(Asset, sh.source_asset_id)
                 is_video = bool(
@@ -519,7 +503,6 @@ class AudioProductionService:
                     else:
                         has_audio = None
 
-                    # If has_audio is False: truthfully omit ORIGINAL_AUDIO clip
                     if has_audio is not False:
                         orig_key = (AudioType.ORIGINAL_AUDIO.value, sh.id, sh.scene_id, AudioScope.VIDEO_CLIP.value)
                         if orig_key not in existing_clip_map:
@@ -555,7 +538,6 @@ class AudioProductionService:
                             db.add(orig_clip)
                             created_clips.append(orig_clip)
 
-            # Check for dialogue vs voiceover in shot attributes
             text_prompt = (
                 getattr(sh, "voiceover_text", None)
                 or getattr(sh, "dialogue_text", None)
@@ -604,7 +586,6 @@ class AudioProductionService:
                 db.add(v_clip)
                 created_clips.append(v_clip)
 
-            # Check for SFX prompt
             sfx_text = getattr(sh, "sound_effects", None)
             if sfx_text:
                 sfx_key = (AudioType.SFX.value, sh.id, sh.scene_id, AudioScope.SHOT.value)
@@ -635,7 +616,6 @@ class AudioProductionService:
 
             shot_time_offset += shot_duration
 
-        # Compute plan data summary
         total_clips = len(existing_clips) + len(created_clips)
         plan.plan_data = {
             "summary": {
@@ -659,12 +639,10 @@ class AudioProductionService:
             },
         }
 
-        # Update Project status if in video completed stage
         if project.status in ("VIDEO_IN_PROGRESS", "VIDEO_GENERATED", "VIDEO_APPROVED", "FINAL_REVIEW"):
             project.status = "AUDIO_PLAN_GENERATED"
             project.updated_at = now
 
-        # Finding 1: Full History Retention & Audit for created clips and plan
         for c in created_clips:
             cls.record_clip_history(db, c, actor="SYSTEM", action="CREATE", change_reason="Initial creation from audio plan")
 
@@ -722,8 +700,7 @@ class AudioProductionService:
         actor: str = "USER",
         provider_specific_params: Optional[Dict[str, Any]] = None,
     ) -> AudioClip:
-        """Generate audio for a single AudioClip with atomic pre-provider claim and budget reservation."""
-        # 1. Project lock for atomic budget check
+        """Generate audio with provider-priced budget reservation and fail-closed settlement."""
         project = db.query(Project).filter(Project.id == project_id).with_for_update().first()
         if not project:
             raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
@@ -750,9 +727,6 @@ class AudioProductionService:
                 detail=f"AudioClip '{clip_id}' requires reconciliation. Resolve ambiguous outcome first.",
             )
 
-        # 2. GENERATION_MODE MUST CONTROL EXECUTION
-        # Branch explicitly by generation_mode: EMBEDDED_EXISTING, WITH_VIDEO, SEPARATE_AUDIO
-
         if clip.generation_mode == AudioGenerationMode.EMBEDDED_EXISTING.value or clip.source_type == AudioSourceType.EMBEDDED_VIDEO_AUDIO.value:
             prov = clip.provenance or {}
             if prov.get("audio_presence") == "UNKNOWN":
@@ -769,9 +743,7 @@ class AudioProductionService:
             return clip
 
         if clip.generation_mode == AudioGenerationMode.WITH_VIDEO.value:
-            # CRITICAL: A WITH_VIDEO clip must NEVER silently call AudioProvider.
-            # Enforce Cost Safety & Hard Budget Check before video provider regeneration
-            estimated_cost = 0.10  # Video provider estimated cost
+            estimated_cost = 0.10
             budget_summary = BudgetService.get_budget_status(db, project_id)
             committed_cost = budget_summary.get("total_committed_cost", 0.0)
             limit = project.budget_limit
@@ -780,7 +752,7 @@ class AudioProductionService:
             ):
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=f"Project hard budget limit exceeded or will be exceeded by video generation.",
+                    detail="Project hard budget limit exceeded or will be exceeded by video generation.",
                 )
 
             default_cfg = getattr(project, "default_config", None) or {}
@@ -798,7 +770,6 @@ class AudioProductionService:
                     detail="Video provider regeneration is chargeable. Explicit cost authorization required.",
                 )
 
-            # Fail closed with explicit blocker string WITH_VIDEO_REQUIRES_VIDEO_REGENERATION
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="WITH_VIDEO_REQUIRES_VIDEO_REGENERATION: Native video provider regeneration for WITH_VIDEO audio is not implemented in WP014. Trigger video generation action or use SEPARATE_AUDIO mode.",
@@ -807,22 +778,56 @@ class AudioProductionService:
         eff_provider_name = provider_name or AudioProviderFactory.get_default_provider_name()
         provider = AudioProviderFactory.get_provider(eff_provider_name)
 
-        # Calculate estimated cost
-        estimated_cost = 0.05 if clip.audio_type == AudioType.BGM.value else 0.02
+        if not provider.validate_config({}):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Audio provider '{eff_provider_name}' configuration is invalid or incomplete.",
+            )
 
-        # 2. Hard budget check
+        capabilities = provider.get_capabilities()
+        if clip.audio_type not in capabilities.supported_audio_types:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Audio provider '{eff_provider_name}' does not support audio type '{clip.audio_type}'.",
+            )
+
+        params = AudioGenerationParams(
+            clip_id=str(clip.id),
+            audio_type=clip.audio_type,
+            prompt=clip.prompt or clip.name,
+            duration_seconds=clip.duration_seconds or 4.0,
+            speaker=clip.speaker,
+            language=clip.language or "en",
+            provider_specific_params=provider_specific_params,
+        )
+
+        estimated_cost = provider.estimate_cost(params)
+        if (
+            estimated_cost is None
+            or not isinstance(estimated_cost, (int, float))
+            or not math.isfinite(float(estimated_cost))
+            or float(estimated_cost) < 0
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Audio provider '{eff_provider_name}' cannot produce a safe pre-dispatch cost estimate for this request.",
+            )
+        estimated_cost = round(float(estimated_cost), 6)
+
         budget_summary = BudgetService.get_budget_status(db, project_id)
         committed_cost = budget_summary.get("total_committed_cost", 0.0)
         limit = project.budget_limit
         if budget_summary.get("is_hard_limit_exceeded") or (
-            limit is not None and round(committed_cost + estimated_cost, 4) > limit
+            limit is not None and round(committed_cost + estimated_cost, 6) > limit
         ):
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"Project hard budget limit exceeded or will be exceeded by audio generation (committed: {committed_cost:.2f}, estimated: {estimated_cost:.2f}, limit: {limit:.2f}).",
+                detail=(
+                    "Project hard budget limit exceeded or will be exceeded by audio generation "
+                    f"(committed: {committed_cost:.4f}, estimated: {estimated_cost:.4f}, limit: {limit:.4f})."
+                ),
             )
 
-        # 3. Cost authorization check for AUTO mode
         default_cfg = getattr(project, "default_config", None) or {}
         mode_cfg = getattr(project, "mode_config", None) or {}
         has_persisted = False
@@ -838,7 +843,6 @@ class AudioProductionService:
                 detail="Audio generation is chargeable. Explicit cost authorization required in AUTO mode.",
             )
 
-        # 4. ATOMIC PRE-PROVIDER CLAIM & COST RESERVATION
         now = datetime.now(timezone.utc)
         clip.status = "SUBMITTING"
         clip.version += 1
@@ -864,18 +868,6 @@ class AudioProductionService:
         )
         db.commit()
 
-        # Build Generation Params
-        params = AudioGenerationParams(
-            clip_id=str(clip.id),
-            audio_type=clip.audio_type,
-            prompt=clip.prompt or clip.name,
-            duration_seconds=clip.duration_seconds or 4.0,
-            speaker=clip.speaker,
-            language=clip.language or "en",
-            provider_specific_params=provider_specific_params,
-        )
-
-        # 5. EXECUTE GENERATION VIA PROVIDER
         def _invoke_provider() -> AudioJobResult:
             try:
                 loop = asyncio.get_event_loop()
@@ -888,25 +880,23 @@ class AudioProductionService:
 
         try:
             result: AudioJobResult = _invoke_provider()
-        except Exception as exc:
-            # Generic transport/timeout/connection/unknown exceptions must be treated as ambiguous.
+        except Exception:
             clip.status = "RECONCILIATION_REQUIRED"
-            clip.provenance = {"error": str(exc), "stage": "submission_exception"}
+            clip.provenance = {"error_code": "PROVIDER_INVOCATION_EXCEPTION", "stage": "submission_exception"}
             clip.updated_at = datetime.now(timezone.utc)
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Audio provider invocation failed with ambiguous outcome: {str(exc)}. Clip placed in RECONCILIATION_REQUIRED.",
+                detail="Audio provider invocation failed with ambiguous outcome. Clip placed in RECONCILIATION_REQUIRED.",
             )
 
         now_res = datetime.now(timezone.utc)
 
-        # 6. PROVIDER RESULT HANDLING
         if result.submission_uncertain:
             clip.status = "RECONCILIATION_REQUIRED"
             clip.provenance = {
                 "provider_job_id": result.provider_job_id,
-                "error": result.error_message or "Ambiguous provider submission",
+                "error_code": result.error_code or "SUBMISSION_UNCERTAIN",
             }
             clip.updated_at = now_res
             db.commit()
@@ -916,10 +906,24 @@ class AudioProductionService:
             )
 
         if result.status == "FAILED":
+            failure_cost = result.cost_usd if result.cost_usd is not None else 0.0
+            if not isinstance(failure_cost, (int, float)) or not math.isfinite(float(failure_cost)) or float(failure_cost) < 0:
+                clip.status = "RECONCILIATION_REQUIRED"
+                clip.provenance = {
+                    "provider_job_id": result.provider_job_id,
+                    "error_code": "INVALID_FAILURE_COST",
+                }
+                clip.updated_at = now_res
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Provider failure returned invalid cost evidence. Clip placed in RECONCILIATION_REQUIRED.",
+                )
+            failure_cost = round(float(failure_cost), 6)
             clip.status = "FAILED"
             clip.provenance = {
                 "provider_job_id": result.provider_job_id,
-                "error": result.error_message or "Audio generation failed",
+                "error_code": result.error_code or "AUDIO_GENERATION_FAILED",
             }
             clip.updated_at = now_res
             CostLedgerService.record_entry(
@@ -929,10 +933,10 @@ class AudioProductionService:
                 job_id=None,
                 provider=eff_provider_name,
                 operation=f"AUDIO_{clip.audio_type}",
-                estimated_cost=0.0,
-                actual_cost=0.0,
+                estimated_cost=estimated_cost,
+                actual_cost=failure_cost,
                 currency="USD",
-                cost_status=CostStatus.CANCELLED,
+                cost_status=CostStatus.CONFIRMED,
                 idempotency_key=ledger_key,
                 description=f"Failed audio generation for {clip.name}",
                 commit=False,
@@ -940,14 +944,48 @@ class AudioProductionService:
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Audio generation failed: {result.error_message or 'Unknown error'}",
+                detail=f"Audio generation failed: {result.error_code or 'PROVIDER_REJECTED'}",
             )
 
-        # Completed result
+        if result.status != "COMPLETED":
+            clip.status = "RECONCILIATION_REQUIRED"
+            clip.provenance = {
+                "provider_job_id": result.provider_job_id,
+                "error_code": "UNSUPPORTED_PROVIDER_JOB_STATE",
+            }
+            clip.updated_at = now_res
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Audio provider returned a non-terminal state unsupported by this dispatch path. Clip placed in RECONCILIATION_REQUIRED.",
+            )
+
+        if (
+            result.cost_usd is None
+            or not isinstance(result.cost_usd, (int, float))
+            or not math.isfinite(float(result.cost_usd))
+            or float(result.cost_usd) < 0
+        ):
+            clip.status = "RECONCILIATION_REQUIRED"
+            clip.provenance = {
+                "provider_job_id": result.provider_job_id,
+                "error_code": "COST_EVIDENCE_MISSING",
+            }
+            clip.updated_at = now_res
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Completed provider result lacks trustworthy cost evidence. Clip placed in RECONCILIATION_REQUIRED.",
+            )
+        actual_cost = round(float(result.cost_usd), 6)
+
         audio_bytes = result.audio_data or b""
         if not audio_bytes:
             clip.status = "FAILED"
-            clip.provenance = {"error": "Provider completed result missing audio content"}
+            clip.provenance = {
+                "provider_job_id": result.provider_job_id,
+                "error_code": "MISSING_AUDIO_CONTENT",
+            }
             clip.updated_at = now_res
             db.commit()
             raise HTTPException(
@@ -955,18 +993,31 @@ class AudioProductionService:
                 detail="Provider completed result missing audio content.",
             )
 
-        # Store into Object Storage
+        content_type = result.content_type or "audio/wav"
+        if content_type not in ("audio/wav", "audio/mpeg", "audio/mp3"):
+            clip.status = "RECONCILIATION_REQUIRED"
+            clip.provenance = {
+                "provider_job_id": result.provider_job_id,
+                "error_code": "UNSUPPORTED_AUDIO_FORMAT",
+            }
+            clip.updated_at = now_res
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Provider completed result uses unsupported audio format. Clip placed in RECONCILIATION_REQUIRED.",
+            )
+
         storage = get_storage_provider()
         asset_id = uuid.uuid4()
         storage_bucket = settings.OBJECT_STORAGE_BUCKET
-        ext = "mp3" if result.content_type == "audio/mpeg" else "wav"
+        ext = "mp3" if content_type in ("audio/mpeg", "audio/mp3") else "wav"
         storage_key = f"projects/{project_id}/audio/{clip.id}_{asset_id.hex[:8]}.{ext}"
 
         storage.put_object(
             bucket=storage_bucket,
             key=storage_key,
             data=audio_bytes,
-            content_type=result.content_type or "audio/wav",
+            content_type="audio/mpeg" if content_type == "audio/mp3" else content_type,
         )
 
         checksum = hashlib.sha256(audio_bytes).hexdigest()
@@ -976,7 +1027,7 @@ class AudioProductionService:
             name=f"{clip.name} Audio",
             original_filename=f"audio_{clip.id}_{clip.audio_type}.{ext}",
             asset_type="AUDIO",
-            content_type=result.content_type or "audio/wav",
+            content_type="audio/mpeg" if content_type == "audio/mp3" else content_type,
             file_size_bytes=len(audio_bytes),
             checksum_sha256=checksum,
             storage_bucket=storage_bucket,
@@ -987,18 +1038,16 @@ class AudioProductionService:
         db.add(asset)
         db.flush()
 
-        # Update clip and confirm cost
         clip.asset_id = asset.id
         clip.status = "READY"
         clip.duration_seconds = result.duration_seconds or clip.duration_seconds
         clip.provenance = {
             "provider": eff_provider_name,
             "provider_job_id": result.provider_job_id,
-            "cost_usd": result.cost_usd or estimated_cost,
+            "cost_usd": actual_cost,
         }
         clip.updated_at = now_res
 
-        actual_cost = result.cost_usd if result.cost_usd is not None else estimated_cost
         CostLedgerService.record_entry(
             db,
             project_id=project_id,
@@ -1036,7 +1085,6 @@ class AudioProductionService:
         if not project:
             raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-        # Target selection based on action
         query = db.query(AudioClip).filter(AudioClip.project_id == project_id)
 
         if action == "GENERATE_ALL_VO":
@@ -1121,7 +1169,6 @@ class AudioProductionService:
             .all()
         )
 
-        # 1. Gather foreground speech intervals (VO, Dialogue)
         speech_intervals: List[Dict[str, Any]] = []
         for c in clips:
             if c.ducking_role == DuckingRole.FOREGROUND.value and not c.mute:
@@ -1134,7 +1181,6 @@ class AudioProductionService:
                     "duck_attenuation_db": -12.0,
                 })
 
-        # 2. Build track mixing controls
         track_mixes = []
         for c in clips:
             is_background = c.ducking_role == DuckingRole.BACKGROUND.value
@@ -1165,7 +1211,6 @@ class AudioProductionService:
             "computed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Persist to AudioPlan
         plan = db.query(AudioPlan).filter(AudioPlan.project_id == project_id).first()
         if plan:
             data = plan.plan_data or {}

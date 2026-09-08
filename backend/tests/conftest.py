@@ -39,9 +39,9 @@ def db_session() -> Generator[Session, None, None]:
     connection = engine.connect()
     transaction = connection.begin()
     session = TestingSessionLocal(bind=connection)
-    
+
     yield session
-    
+
     session.close()
     if transaction.is_active:
         transaction.rollback()
@@ -71,6 +71,19 @@ def configure_test_image_provider():
     settings.DEFAULT_IMAGE_PROVIDER = "mock_image"
     yield
     settings.DEFAULT_IMAGE_PROVIDER = previous
+
+
+@pytest.fixture(autouse=True)
+def configure_test_audio_provider():
+    """Production defaults stay real; tests explicitly route deterministic audio work to mock."""
+    from app.providers.audio.factory import AudioProviderFactory
+
+    previous = settings.DEFAULT_AUDIO_PROVIDER
+    settings.DEFAULT_AUDIO_PROVIDER = "mock_audio"
+    AudioProviderFactory.reset_default_provider_name()
+    yield
+    settings.DEFAULT_AUDIO_PROVIDER = previous
+    AudioProviderFactory.reset_default_provider_name()
 
 
 @pytest.fixture
