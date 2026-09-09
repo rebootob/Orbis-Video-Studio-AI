@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,16 @@ def _load_contract():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_r3_python_tooling_parses():
+    for name in (
+        "wp020_live_r3_contract.py",
+        "wp020_live_r3_preflight.py",
+        "wp020_live_uat_r3.py",
+    ):
+        source = (SCRIPTS / name).read_text(encoding="utf-8")
+        ast.parse(source, filename=name)
 
 
 def test_r3_identity_and_markers_are_distinct_and_exact():
