@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> Canonical base `main` is at `46cd9e85d68b58e9d276673e6834c81167218de9` following merge of R5-PRE1 tooling (PR #89) and successful run `34351326791`.
+> This specification records the canonical state effective upon merge of PR #91 to canonical `main` (pre-merge baseline main at R1 start: `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
@@ -13,7 +13,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_R5_PRE1_CLOSE_START: 46cd9e85d68b58e9d276673e6834c81167218de9
+R1_BASE_MAIN: 817539b619c4b28f22273ff01df733c612a2a386
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -31,12 +31,12 @@ P4-WP020-LIVE-R4-C1-CLOSE-R1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
 P4-WP020-LIVE-R4-BILL1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID
-P4-WP020-LIVE-R5-PRE1-CLOSE: CLOSURE RECORD / EFFECTIVE ON MERGE TO MAIN
+P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
 
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R5-PRE1-CLOSE
-CURRENT_GATE: CHATGPT_REVIEW_AND_OWNER_MERGE_APPROVAL
-ACTIVE_WORK_PACKAGE_AFTER_MERGE: NONE
-NEXT_GATE_AFTER_MERGE: OWNER DECISION REQUIRED
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
+NEXT_GATE: OWNER DECISION REQUIRED
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -102,7 +102,7 @@ Accepted preflight evidence:
   paid_live_dispatch = false
   ```
 
-Closure authorization: Issue #63 comment `5601980565`.
+Closure authorization: Issue #63 comment `5601980565` (merged to main in PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
@@ -198,9 +198,9 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Post-R5-PRE1-CLOSE Rule
+## Post-R5-PRE1-CLOSE-R1 Rule
 
-Once this closure record is on canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
+With R5-PRE1-CLOSE and R5-PRE1-CLOSE-R1 merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
 
 A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
 

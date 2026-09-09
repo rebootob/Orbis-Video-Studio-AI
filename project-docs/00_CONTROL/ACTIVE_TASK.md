@@ -4,19 +4,26 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> Canonical base `main` is at `46cd9e85d68b58e9d276673e6834c81167218de9` following merge of R5-PRE1 tooling (PR #89) and successful run `34351326791`. This specification governs `P4-WP020-LIVE-R5-PRE1-CLOSE`.
+> This specification records the canonical state effective upon merge of PR #91 to canonical `main` (pre-merge baseline main at R1 start: `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-PRE1-CLOSE
-ACTIVE_STATUS = AUTHORIZED / CONTROL-DOC-ONLY
-CANONICAL_BASE_MAIN = 46cd9e85d68b58e9d276673e6834c81167218de9
-ACTIVE_BRANCH = ai/p4-wp020-live-r5-pre1-close
-CLOSURE_AUTH_COMMENT = 5601980565
-NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
+R1_BASE_MAIN = 817539b619c4b28f22273ff01df733c612a2a386
+NEXT_GATE = OWNER DECISION REQUIRED
+
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1
+LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
+R1_AUTH_COMMENT = 5602341968
+R1_MERGE_PR = #91
+PARENT_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE
+PARENT_AUTH_COMMENT = 5601980565
+PARENT_MERGE_PR = #90
+PARENT_MERGE_COMMIT = 817539b619c4b28f22273ff01df733c612a2a386
 
 PRE1_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1
 PRE1_STATUS = PASS / COMPLETED / NO-PAID
@@ -42,10 +49,6 @@ R5_PAID_EXECUTION = NOT AUTHORIZED
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
-
-AFTER_CLOSURE_MERGE:
-ACTIVE_WORK_PACKAGE = NONE
-NEXT_GATE = OWNER DECISION REQUIRED
 ```
 
 ---
@@ -76,7 +79,7 @@ Accepted preflight evidence:
   paid_live_dispatch = false
   ```
 
-Closure authorization: Issue #63 comment `5601980565`.
+Closure authorization: Issue #63 comment `5601980565` (merged to main in PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
@@ -132,9 +135,9 @@ Provider sequence reached:
 
 ---
 
-## Post-R5-PRE1-CLOSE Rule
+## Post-R5-PRE1-CLOSE-R1 Rule
 
-Once this closure record is on canonical `main`:
+With R5-PRE1-CLOSE and R5-PRE1-CLOSE-R1 merged to canonical `main`:
 - `ACTIVE_WORK_PACKAGE = NONE`;
 - `NEXT_GATE = OWNER DECISION REQUIRED`.
 
