@@ -17,9 +17,9 @@ Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
 ACTIVE_WORK_PACKAGE = NONE
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
-C1_CLOSURE_SYNC = PR #79 / CONTROL-DOC ONLY
-R4 = NOT AUTHORIZED
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1
+R4_PRE1_CLOSURE_SYNC = CONTROL-DOC ONLY / OWNER AUTHORIZED
+R4_PAID_EXECUTION = NOT AUTHORIZED
 ```
 
 ---
@@ -27,28 +27,53 @@ R4 = NOT AUTHORIZED
 ## Current Canonical Truth
 
 ```text
-Canonical main after C1 merge:
-1c63045497eb7ee708cd81876f6bf7a011907f77
+Canonical main:
+170e82d19315e80cc7393922d7daa1b1c7f2093b
 
-C1:
-PR: #78
-Exact reviewed head: b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6
-Status: PASS / MERGED / CLOSED
-Backend CI: 34298997460 SUCCESS
-Backend tests: 511 passed / 2 skipped / 3 warnings
-Migrations: fresh-head PASS / from-revision-010 PASS
-Frontend CI: 34298997360 SUCCESS
-Provider calls: 0
-Spend: USD 0.00
+R3-C1-CLOSE:
+PR #79 merged
+Status: PASS / MERGED / COMPLETE
+
+R4-PRE1:
+Status: PASS / COMPLETED / NO-PAID
+Full runtime preflight run: 34302711166 SUCCESS
+Gemini metadata-only probe run: 34302730786 SUCCESS
+Exact main for both runs: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Provider generation calls: 0
+Spend added: USD 0.00
+Execution fence written: false
 ```
 
-C1 added strict sanitized Gemini HTTP 429 structured evidence classification and a second nested allowlist for STOP artifacts. It did not change model, endpoint, pricing, retry policy, provider routing, or paid workflow behavior.
+---
+
+## R4-PRE1 Evidence
+
+Full runtime preflight `34302711166`:
+- required credentials present;
+- PostgreSQL migrations PASS;
+- ephemeral MinIO/object storage PASS;
+- provider routing/pricing/budget checks PASS;
+- estimated reservation USD 0.2739 under USD 1.00;
+- `generation_request_sent=false`;
+- `paid_provider_calls=0`;
+- `execution_fence_written=false`.
+
+Gemini metadata-only probe `34302730786`:
+- static no-generation guard PASS;
+- current GitHub Actions Gemini credential authenticated;
+- target model `gemini-3.1-flash-image` visible;
+- HTTP 200;
+- `ACCESS_PROBE_PASS`;
+- `generation_request_sent=false`;
+- `paid_generation_calls=0`.
+
+The secret value is never exposed or persisted. The two NO-PAID runs briefly overlapped in time, but both used the same exact main SHA and neither touched paid mutable execution state or a fence, so the evidence remains valid.
 
 ---
 
 ## Confirmed External Gemini Remediation
 
-Owner-provided Google AI Studio evidence now shows:
+Owner-provided Google AI Studio evidence:
 
 ```text
 Project: Orbis-Video-Production
@@ -61,11 +86,9 @@ Nano Banana 2 (Gemini 3.1 Flash Image):
 Prior Free-tier image quota observation: 0 / 0 / 0
 ```
 
-This supports the prior R3 Gemini HTTP 429 as an account/quota condition caused by Free-tier image quota zero, rather than a proven application-code defect.
+This supports the prior R3 Gemini HTTP 429 as an account/quota condition caused by Free-tier image quota zero rather than a proven application-code defect. R4-PRE1 then proved that the currently configured GitHub Actions Gemini credential can authenticate and read metadata for the target image model.
 
-Owner also reported replacing the GitHub Actions `GEMINI_API_KEY` secret with the new Orbis project key. The secret value must never be exposed or persisted. Runtime adoption of the new secret is not yet proven.
-
-No provider request or R4 execution is authorized by this evidence.
+No provider generation or R4 paid execution is authorized by this evidence.
 
 ---
 
@@ -90,28 +113,6 @@ Downstream: NOT STARTED
 R3 rerun: FORBIDDEN
 ```
 
-Issue #63 evidence:
-- execution fence comment `5594141834`;
-- STOP evidence comment `5594143482`.
-
-The failed Gemini request is counted conservatively as chargeable request #2. The repository does not prove whether Google externally billed that failed request.
-
----
-
-## Closed Corrective — R3-C1
-
-`P4-WP020-LIVE-R3-C1 — Gemini 429 Quota/Rate-Limit Evidence Corrective`
-
-Closure facts:
-- Owner-authorized NO-PAID only;
-- PR #78 merged;
-- canonical main advanced to `1c63045497eb7ee708cd81876f6bf7a011907f77`;
-- exact-head CI and independent review passed;
-- provider calls 0;
-- spend USD 0.00;
-- R3 remains consumed / never rerun;
-- R4 remains NOT AUTHORIZED.
-
 ---
 
 ## Immutable Earlier History
@@ -122,16 +123,25 @@ Closure facts:
 - R3-PRE1 metadata probe run `34291500281` PASS / HTTP 200 / zero generation calls.
 - R3 TOOL1 merged PR #77.
 - R3 PF1 run `34296382370` PASS / zero provider calls / reservation USD 0.2739.
+- R3-C1 merged PR #78.
+- R3-C1-CLOSE merged PR #79.
 
 ---
 
 ## Next Gate
 
-No active implementation package exists after C1 closure.
+No active implementation or paid/live execution exists.
 
-After PR #79 C1-CLOSE merges, the next candidate is `P4-WP020-LIVE-R4-PRE1` — NO-PAID runtime readiness validation. It requires separate Owner authorization and must not perform image generation, paid execution, or fence consumption.
+After `P4-WP020-LIVE-R4-PRE1-CLOSE` merges, the next candidate is a separately Owner-authorized R4 paid execution planning/authorization gate.
 
-If R4-PRE1 later passes, a new R4 paid execution plan still requires a new identity, fresh exact-main authorization, new one-shot fence, and separate Owner run authorization.
+A future R4 paid attempt must:
+1. create a new immutable R4 execution identity;
+2. bind authorization to exact then-current main;
+3. preserve hard cap USD 1.00 / max 6 chargeable requests unless separately changed by Owner;
+4. rerun fresh no-paid preflight immediately before fence consumption;
+5. create a new one-shot execution fence;
+6. require separate explicit Owner run authorization;
+7. STOP on uncertainty, unknown cost, contract drift, or new S0/S1.
 
 No gate auto-authorizes the next one.
 

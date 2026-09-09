@@ -11,16 +11,18 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN: 1c63045497eb7ee708cd81876f6bf7a011907f77
+CANONICAL_MAIN: 170e82d19315e80cc7393922d7daa1b1c7f2093b
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
-P4-WP020_LIVE_STATE: R3 STOPPED / CONSUMED / GEMINI HTTP 429
+P4-WP020_LIVE_STATE: R3 STOPPED / CONSUMED / NEVER RERUN
 P4-WP020-LIVE-R3-C1: PASS / MERGED / CLOSED
-P4-WP020-LIVE-R3-C1-CLOSE: CONTROL-DOC ONLY / OWNER AUTHORIZED / PR #79
+P4-WP020-LIVE-R3-C1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R4-PRE1: PASS / COMPLETED / NO-PAID
+P4-WP020-LIVE-R4-PRE1-CLOSE: CONTROL-DOC ONLY / OWNER AUTHORIZED
 
 ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: C1-CLOSE DOC SYNC -> EXACT-HEAD REVIEW -> OWNER MERGE DECISION
+CURRENT_GATE: R4-PRE1-CLOSE DOC SYNC -> EXACT-HEAD REVIEW -> OWNER MERGE DECISION
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -30,32 +32,57 @@ ANTIGRAVITY: BOUNDED ONLY WHEN EXPLICITLY AUTHORIZED
 CODEX: STOP
 CLAUDE_CODE: STOP
 PAID_LIVE_EXECUTION: STOP / NOT AUTHORIZED
-R4: NOT AUTHORIZED
+R4_PAID_EXECUTION: NOT AUTHORIZED
+R4_EXECUTION_ID: NONE
+R4_EXECUTION_FENCE: NONE
 ```
 
 ---
 
-## C1 Closure Evidence
+## R4-PRE1 Closure Evidence
 
-- PR #78 merged exact reviewed HEAD `b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6`.
-- Merge commit / canonical main = `1c63045497eb7ee708cd81876f6bf7a011907f77`.
-- Backend CI run `34298997460` = SUCCESS.
-- Backend tests = 511 passed / 2 skipped / 3 warnings.
-- PostgreSQL migration paths `fresh-head` and `from-revision-010` = PASS.
-- Frontend CI run `34298997360` = SUCCESS.
-- Independent review = PASS before Owner merge.
-- C1 provider calls = 0.
-- C1 spend = USD 0.00.
-- No model/endpoint/pricing/retry-policy change.
-- No provider generation request, paid workflow dispatch, release, tag, or deploy.
+Owner authorized `P4-WP020-LIVE-R4-PRE1 — NO-PAID Runtime Readiness Verification` on exact canonical main `170e82d19315e80cc7393922d7daa1b1c7f2093b`.
 
-C1 now provides strict sanitized Gemini HTTP 429 structured evidence and a second nested allowlist for STOP artifacts. Raw provider message/body/headers, credentials, prompts, arbitrary project dimensions, and unknown debug/help data remain excluded.
+Observed GitHub Actions evidence:
+
+```text
+Full runtime preflight:
+  workflow: wp020-live-r3-preflight.yml
+  run: 34302711166
+  conclusion: SUCCESS
+  head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+  status: PREFLIGHT_PASS
+  required_credentials_present: true
+  generation_request_sent: false
+  paid_provider_calls: 0
+  execution_fence_written: false
+
+Gemini metadata-only access probe:
+  workflow: wp020-live-r3-pre1-gemini-access.yml
+  run: 34302730786
+  conclusion: SUCCESS
+  head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+  provider: gemini_image
+  model: gemini-3.1-flash-image
+  HTTP status: 200
+  status: ACCESS_PROBE_PASS
+  generation_request_sent: false
+  paid_generation_calls: 0
+```
+
+The current GitHub Actions Gemini credential successfully authenticated against the configured image model in runtime. The secret value is not readable, exposed, or persisted.
+
+The two NO-PAID runs overlapped briefly in wall-clock time. This does not invalidate the evidence because both ran on the same exact main SHA, neither performed generation, neither consumed a paid execution fence, and neither shared paid mutable execution state.
+
+R4-PRE1 provider generation calls = 0.
+R4-PRE1 spend added = USD 0.00.
+R4 paid execution remains NOT AUTHORIZED.
 
 ---
 
 ## External Gemini Billing / Quota Remediation Evidence
 
-Owner-supplied Google AI Studio evidence after C1 merge confirms the account-side corrective:
+Owner-supplied Google AI Studio evidence confirms:
 
 ```text
 Gemini project: Orbis-Video-Production
@@ -68,11 +95,9 @@ Nano Banana 2 (Gemini 3.1 Flash Image):
 Prior Free-tier observation for the image model: 0 / 0 / 0
 ```
 
-The prior R3 Gemini HTTP 429 is therefore consistent with the old Free-tier image quota-zero condition, not a proven Orbis code defect.
+The prior R3 Gemini HTTP 429 is therefore consistent with the old Free-tier image quota-zero condition rather than a proven Orbis code defect. The later R4-PRE1 runtime probe now also proves that the currently configured GitHub Actions Gemini credential can authenticate and see `gemini-3.1-flash-image` without generation.
 
-Owner also reported updating the repository GitHub Actions `GEMINI_API_KEY` secret to the new Orbis project key. The secret value is intentionally not readable or recorded in repository evidence. Runtime adoption of the new secret has **not yet been validated**; that requires a separately authorized NO-PAID preflight.
-
-This external remediation evidence does not authorize R4 or any provider request.
+This evidence does not authorize R4 paid/live execution.
 
 ---
 
@@ -97,38 +122,16 @@ Execution fence: CONSUMED
 - Vidu / ElevenLabs / downstream = NOT EXECUTED;
 - never rerun R2.
 
-### R2-C1
-- PR #74 merged at `d706acacd1f51224c955fb9c8d0d9eab3deda186`;
-- future Gemini non-2xx status/classification became durable;
-- provider calls 0 / spend USD 0.00.
-
-### R3-PRE1
-- PR #75 merged;
-- metadata probe run `34291500281` = PASS / HTTP 200;
-- model `gemini-3.1-flash-image` visible;
-- generation calls 0 / spend USD 0.00.
-
-### R3 TOOL1 / PF1
-- TOOL1 merged via PR #77;
-- paid tooling main at R3 execution = `82ce42116e3f866227dd598814cf79c0b9c640c4`;
-- PF1 run `34296382370` = `PREFLIGHT_PASS`;
-- estimated reservation USD 0.2739 < USD 1.00;
-- PF1 generation calls 0 / fence false.
-
-### R3 LIVE
+### R3
 ```text
 Execution ID: LIVE-20260909-363F-R3
 Run ID: 34297314995
 Execution Main SHA: 82ce42116e3f866227dd598814cf79c0b9c640c4
-Execution fence comment: 5594141834
-STOP evidence comment: 5594143482
 Execution fence: CONSUMED
 Status: STOPPED
 Phase: LIVE-02-GEMINI-IMAGE
 ```
-
-Observed:
-- immediate pre-fence no-paid preflight = PASS;
+- immediate no-paid preflight = PASS;
 - OpenAI STORY = SUCCESS;
 - OpenAI usage = 546 prompt / 513 completion tokens;
 - last known committed/actual Orbis UAT cost at STOP = USD 0.0065;
@@ -144,12 +147,16 @@ USD 0.0065 is known Orbis UAT cost evidence only; failed Gemini external billing
 
 ## Next Gate
 
-There is no active implementation package after C1 closure.
+There is no active implementation package.
 
-After C1-CLOSE merges, the next candidate is a separately Owner-authorized `P4-WP020-LIVE-R4-PRE1` NO-PAID runtime readiness check to prove credential/config presence and runtime adoption without image generation, spend, or execution fence.
+After `P4-WP020-LIVE-R4-PRE1-CLOSE` merges, the next candidate is a separately Owner-authorized R4 paid execution planning/authorization gate. It must first create a new immutable R4 execution identity and bind it to the exact then-current canonical main.
 
-R4 paid/live execution remains NOT AUTHORIZED.
-
-Any future paid execution requires a new execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot fence, and separate Owner run authorization.
+Any future R4 paid execution still requires:
+1. a new immutable R4 execution identity;
+2. fresh exact-main Owner paid/live authorization;
+3. fresh no-paid preflight immediately before fence consumption;
+4. a new one-shot execution fence;
+5. separate explicit Owner run authorization;
+6. bounded hard-cap/call-count enforcement and STOP-on-uncertainty semantics.
 
 No gate auto-authorizes the next one.
