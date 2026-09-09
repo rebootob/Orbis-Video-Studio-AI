@@ -20,7 +20,7 @@ ROLE MODEL
 - repository truth is authoritative
 
 MANDATORY STARTUP
-1. Fresh-fetch canonical main before any status/merge/authorization/execution decision.
+1. Fresh-fetch canonical main and any active PR before status/merge/authorization/execution decisions.
 2. Read:
    project-docs/00_CONTROL/START_HERE.md
    project-docs/00_CONTROL/CURRENT_STATE.md
@@ -82,9 +82,11 @@ R4 IMMUTABLE EXECUTION TRUTH
 - ElevenLabs TTS/Music/Ambience = NOT CALLED
 - NEVER RERUN R4
 
-BILL1-CLOSE
-- P4-WP020-LIVE-R4-BILL1-CLOSE is CONTROL-DOC ONLY
-- no source/test/workflow/provider implementation change
+BILL1-CLOSE ROUTING
+- BILL1-CLOSE is CONTROL-DOC ONLY
+- if an active BILL1-CLOSE PR exists, review its exact head and CI, then STOP for explicit Owner merge decision
+- once BILL1-CLOSE is merged to canonical main, ACTIVE_WORK_PACKAGE = NONE
+- no source/test/workflow/provider implementation change is authorized by BILL1-CLOSE
 - no Vidu API call
 - no provider generation
 - no R4 rerun
@@ -94,13 +96,12 @@ BILL1-CLOSE
 - no paid/live workflow dispatch
 - no billing adjustment
 - no release/tag/deploy
-- after exact-head CI + independent review, STOP for explicit Owner merge decision
 
 R5 / FUTURE LIVE
 - R5 identity = NONE
 - R5 = NOT AUTHORIZED
 - no future provider call is authorized
-- a future R5 readiness/preflight requires separate explicit Owner authorization
+- a future R5 NO-PAID readiness/preflight requires separate explicit Owner authorization
 - completion of BILL1-CLOSE does not auto-authorize readiness or paid execution
 
 R3 IMMUTABLE
