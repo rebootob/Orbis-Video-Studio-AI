@@ -85,6 +85,12 @@ jobs:
             echo "Consuming VIDU1 execution fence..."
             gh issue comment "${ISSUE_NUMBER}" --body "${FENCE_MARKER}"
             echo "VIDU1 execution fence consumed successfully."
+
+            # Export verified live execution permit to runner environment
+            echo "VIDU1_OWNER_AUTHORIZATION_CONFIRMED=true" >> "$GITHUB_ENV"
+            echo "EXECUTION_FENCE_CONFIRMED=true" >> "$GITHUB_ENV"
+            echo "AUTHORIZED_MAIN_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+            echo "CURRENT_EXECUTION_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
           else
             echo "Dry-run / preflight mode: zero provider generation calls, no fence consumed."
           fi

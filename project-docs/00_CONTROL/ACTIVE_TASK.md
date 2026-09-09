@@ -70,9 +70,9 @@ R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
 Owner authorized `P4-WP020-LIVE-R5-VIDU1-PREP — NO-PAID Dedicated Vidu 1-Call Probe Tooling` in Issue #63 (comment `5602834080`) on canonical main `5107e3e9ef7702c8403fe74146062ab68e8e50b9`.
 
 Tooling Delivered:
-- `.github/scripts/wp020_live_r5_vidu1.py`: dedicated probe runner with hard 1-POST cap, fail-closed handling of ambiguous transport outcomes, GET-only polling, and sanitized evidence export;
-- `.github/workflows/wp020-live-r5-vidu1.yml`: dedicated manual `workflow_dispatch` workflow;
-- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: contract test suite validating safety guards, single POST cap, and evidence sanitization;
+- `.github/scripts/wp020_live_r5_vidu1.py`: dedicated probe runner with independent runner-side live permit guard (`validate_live_execution_permit`), hard 1-POST cap, exact `720P` resolution lock, safe credit semantics (`provider_credits_reported` preserved, `vidu_credits_consumed = null / UNKNOWN`), fail-closed handling of ambiguous transport outcomes, GET-only polling, and sanitized evidence export;
+- `.github/workflows/wp020-live-r5-vidu1.yml`: dedicated manual `workflow_dispatch` workflow exporting confirmed live permit to runner upon fence consumption;
+- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: contract test suite validating safety guards, behavioral tests A through E, single POST cap, and evidence sanitization;
 - `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md`: delivery specification.
 
 PREP Safety Invariants:

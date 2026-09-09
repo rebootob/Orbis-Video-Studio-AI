@@ -5,12 +5,14 @@ NO provider generation calls or credit consumption occur during PREP.
 Future execution requires separate explicit Owner authorization and dedicated fence.
 
 Safety invariants:
-- Provider: Vidu only (viduq2, text2video, 4s, 720p)
+- Provider: Vidu only (viduq2, text2video, 4s, 720P)
 - Max generation POST: exactly 1 (hard capped; ambiguous transport fails closed without retry)
 - GET polling only after confirmed submission
 - OpenAI / Gemini / ElevenLabs calls = 0
 - Never reuses consumed R4 / R3 / R2 / R1 execution identities
+- Live runner boundary fails closed unless exact live authorization, fence, and SHA permit exist
 - Sanitized evidence only; no raw response bodies, secrets, or credits-to-USD conversion
+- provider_credits reported from adapter is NOT inferred as consumed credits
 """
 from __future__ import annotations
 
@@ -34,8 +36,11 @@ TARGET_PROVIDER = "vidu"
 TARGET_MODEL = "viduq2"
 TARGET_MODE = "text-to-video"
 TARGET_DURATION_SECONDS = 4.0
-TARGET_RESOLUTION = "720p"
-TARGET_PROMPT = "Cinematic slow aerial shot of calm turquoise ocean waves breaking on a golden sand beach at dawn, soft warm morning lighting, photorealistic, 4k"
+TARGET_RESOLUTION = "720P"
+TARGET_PROMPT = (
+    "Cinematic slow aerial shot of calm turquoise ocean waves breaking on a golden sand beach at dawn, "
+    "soft warm morning lighting, photorealistic, 4k"
+)
 
 FORBIDDEN_REUSED_EXECUTION_IDS = frozenset({
     "LIVE-20260909-DE17-R4",
@@ -62,6 +67,47 @@ def validate_execution_identity(execution_id: str) -> None:
         raise ValueError(
             f"VIDU1 STOP: Execution identity {execution_id!r} cannot reference R1-R4 historical runs"
         )
+
+
+def validate_live_execution_permit(
+    *,
+    execution_id: str,
+    authorized_main_sha: Optional[str] = None,
+    current_sha: Optional[str] = None,
+    auth_confirmed: Optional[bool] = None,
+    fence_confirmed: Optional[bool] = None,
+    ref_name: Optional[str] = None,
+) -> None:
+    """Fail closed unless runtime execution is explicitly authorized and bound to the consumed fence."""
+    validate_execution_identity(execution_id)
+
+    if authorized_main_sha is None:
+        authorized_main_sha = os.environ.get("AUTHORIZED_MAIN_SHA")
+    if current_sha is None:
+        current_sha = os.environ.get("CURRENT_EXECUTION_SHA") or os.environ.get("GITHUB_SHA")
+    if auth_confirmed is None:
+        auth_confirmed = os.environ.get("VIDU1_OWNER_AUTHORIZATION_CONFIRMED", "").lower() in ("true", "1")
+    if fence_confirmed is None:
+        fence_confirmed = os.environ.get("EXECUTION_FENCE_CONFIRMED", "").lower() in ("true", "1")
+    if ref_name is None:
+        ref_name = os.environ.get("GITHUB_REF_NAME")
+
+    if not auth_confirmed:
+        raise RuntimeError("VIDU1 STOP: Owner live execution authorization is not confirmed")
+    if not fence_confirmed:
+        raise RuntimeError("VIDU1 STOP: One-shot execution fence is not confirmed")
+    if not authorized_main_sha or not _SHA_RE.fullmatch(authorized_main_sha):
+        raise RuntimeError("VIDU1 STOP: Missing or invalid AUTHORIZED_MAIN_SHA (must be 40-character hex SHA)")
+    if not current_sha or not _SHA_RE.fullmatch(current_sha):
+        raise RuntimeError(
+            "VIDU1 STOP: Missing or invalid CURRENT_EXECUTION_SHA / GITHUB_SHA (must be 40-character hex SHA)"
+        )
+    if current_sha != authorized_main_sha:
+        raise RuntimeError(
+            f"VIDU1 STOP: Execution SHA mismatch (current={current_sha}, authorized={authorized_main_sha})"
+        )
+    if ref_name is not None and ref_name != "main":
+        raise RuntimeError(f"VIDU1 STOP: Execution must run on canonical 'main' branch, got {ref_name!r}")
 
 
 def authorization_marker(execution_id: str, main_sha: str) -> str:
@@ -98,8 +144,9 @@ def sanitize_evidence(state: Dict[str, Any]) -> Dict[str, Any]:
         "provider_job_id",
         "provider_status",
         "provider_error_code",
-        "provider_credits",
-        "credits_consumed",
+        "provider_credits_reported",
+        "vidu_credits_consumed",
+        "vidu_credits_consumed_confirmed",
         "video_url_present",
         "error",
         "error_type",
@@ -110,11 +157,16 @@ def sanitize_evidence(state: Dict[str, Any]) -> Dict[str, Any]:
     sanitized: Dict[str, Any] = {}
     for key in safe_fields:
         val = state.get(key)
-        if key == "provider_credits" or key == "credits_consumed":
+        if key == "provider_credits_reported":
             if val is not None and isinstance(val, (int, float)) and math.isfinite(val):
                 sanitized[key] = float(val)
             else:
                 sanitized[key] = None
+        elif key == "vidu_credits_consumed":
+            # Never infer consumed credits from provider_credits alone
+            sanitized[key] = None
+        elif key == "vidu_credits_consumed_confirmed":
+            sanitized[key] = False
         elif key == "provider_error_code":
             if val is not None and _SAFE_ERROR_CODE_RE.fullmatch(str(val)):
                 sanitized[key] = str(val)
@@ -157,8 +209,9 @@ class Vidu1ProbeRunner:
             "provider_job_id": None,
             "provider_status": None,
             "provider_error_code": None,
-            "provider_credits": None,
-            "credits_consumed": None,
+            "provider_credits_reported": None,
+            "vidu_credits_consumed": None,
+            "vidu_credits_consumed_confirmed": False,
             "video_url_present": False,
             "error": None,
             "error_type": None,
@@ -176,7 +229,6 @@ class Vidu1ProbeRunner:
 
     def run_preflight_check(self) -> Dict[str, Any]:
         """Validate config and environment without making any provider calls."""
-        # Ensure backend is in path
         backend_dir = REPO_ROOT / "backend"
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
@@ -203,8 +255,30 @@ class Vidu1ProbeRunner:
         adapter: Any = None,
         max_poll_attempts: int = 30,
         poll_interval_seconds: float = 10.0,
+        authorized_main_sha: Optional[str] = None,
+        current_sha: Optional[str] = None,
+        auth_confirmed: Optional[bool] = None,
+        fence_confirmed: Optional[bool] = None,
+        ref_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute exactly one generation POST, followed by GET polling only."""
+        # 1. HARD FAIL-CLOSED LIVE PERMIT GUARD: verify before adapter creation, count increment, or submission
+        try:
+            validate_live_execution_permit(
+                execution_id=self.execution_id,
+                authorized_main_sha=authorized_main_sha,
+                current_sha=current_sha,
+                auth_confirmed=auth_confirmed,
+                fence_confirmed=fence_confirmed,
+                ref_name=ref_name,
+            )
+        except Exception as exc:
+            self.state["status"] = "STOPPED"
+            self.state["error"] = str(exc)[:200]
+            self.state["error_type"] = type(exc).__name__
+            self.write_evidence()
+            raise
+
         if self.generation_post_count >= MAX_GENERATION_POSTS:
             raise RuntimeError(
                 f"VIDU1 STOP: Generation POST cap reached ({self.generation_post_count}/{MAX_GENERATION_POSTS})"
@@ -260,8 +334,8 @@ class Vidu1ProbeRunner:
             self.state["error"] = submission_result.error_code or "PROVIDER_FAILED"
             self.state["provider_status"] = submission_result.provider_status or "failed"
             self.state["provider_error_code"] = submission_result.provider_error_code or submission_result.error_code
-            self.state["provider_credits"] = submission_result.provider_credits
-            self.state["credits_consumed"] = submission_result.provider_credits
+            if submission_result.provider_credits is not None:
+                self.state["provider_credits_reported"] = submission_result.provider_credits
             self.write_evidence()
             return sanitize_evidence(self.state)
 
@@ -270,8 +344,7 @@ class Vidu1ProbeRunner:
         self.state["provider_job_id"] = job_id
         self.state["provider_status"] = submission_result.provider_status or submission_result.status
         if submission_result.provider_credits is not None:
-            self.state["provider_credits"] = submission_result.provider_credits
-            self.state["credits_consumed"] = submission_result.provider_credits
+            self.state["provider_credits_reported"] = submission_result.provider_credits
 
         if submission_result.status == "COMPLETED":
             self.state["status"] = "SUCCESS"
@@ -285,15 +358,13 @@ class Vidu1ProbeRunner:
             try:
                 poll_result = await adapter.check_job_status(job_id)
             except Exception as exc:
-                # Transient GET poll error: record and continue unless terminal
                 self.state["error"] = f"POLL_EXCEPTION: {type(exc).__name__}"
                 await asyncio.sleep(poll_interval_seconds)
                 continue
 
             self.state["provider_status"] = poll_result.provider_status or poll_result.status
             if poll_result.provider_credits is not None:
-                self.state["provider_credits"] = poll_result.provider_credits
-                self.state["credits_consumed"] = poll_result.provider_credits
+                self.state["provider_credits_reported"] = poll_result.provider_credits
 
             if poll_result.status == "COMPLETED":
                 self.state["status"] = "SUCCESS"
@@ -342,7 +413,7 @@ def main() -> None:
         print("PREFLIGHT SUCCESS: Zero provider generation calls made.")
         return
 
-    # Live execution: strictly gated
+    # Live execution: strictly gated by validate_live_execution_permit
     print(f"=== VIDU1 PAID PROBE EXECUTION: {args.execution_id} ===")
     evidence = asyncio.run(runner.execute_probe())
     print(json.dumps(evidence, indent=2))
