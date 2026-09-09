@@ -9,114 +9,73 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
-STATUS = WAITING FOR OWNER NEXT-GATE AUTHORIZATION
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-TOOL1
+TITLE = Bounded One-Shot Execution Tooling Preparation
+TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
+STATUS = OWNER AUTHORIZED / IMPLEMENTATION + CI REVIEW
+BRANCH = ai/p4-wp020-live-r3-tool1
+BASE_MAIN = 363ffe6a0bd325c7c557b80daa665ee3575df6f8
+R3_EXECUTION_ID = LIVE-20260909-363F-R3
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 PAID_LIVE_EXECUTION = NOT AUTHORIZED
+TOOL1_PROVIDER_CALLS = 0
+TOOL1_SPEND_AUTHORIZATION = USD 0.00
 ```
-
-PRE1 is complete. Completion does not auto-authorize R3 execution tooling or paid/live execution.
 
 ---
 
-## Most Recent Completed Gate
+## Authorized TOOL1 Scope
 
-`P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
+1. Manual-only R3 no-paid preflight workflow and script.
+2. Manual-only R3 one-shot paid workflow, inert until later exact Owner paid/live authorization.
+3. Exact Owner marker + unused identity + one-shot fence controls.
+4. New R3 runner for the locked six-call full chain.
+5. Exact sequential call counter and USD 1.00 fail-closed budget guard.
+6. Durable sanitized failure evidence before ephemeral runtime teardown.
+7. Tests for identity/SHA/fence/call order/call ceiling/budget/non-success/reconciliation/secret-leak behavior.
+8. Control-document synchronization only.
+
+Locked future paid sequence:
 
 ```text
-Status: PASS / COMPLETED
-PR: #75
-Reviewed PRE1 HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
-Merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Metadata probe run: 34291500281
-Probe result: ACCESS_PROBE_PASS
-HTTP status: 200
-Model: gemini-3.1-flash-image
-generation_request_sent: false
-paid_generation_calls: 0
-PRE1 spend: USD 0.00
+1 OpenAI STORY
+2 Gemini IMAGE
+3 Vidu VIDEO
+4 ElevenLabs Thai TTS
+5 ElevenLabs BGM
+6 ElevenLabs Ambience
 ```
 
-The probe proves metadata-level authentication/model visibility only. It does not authorize generation and does not prove that the Gemini image-generation submission path will succeed.
+No regeneration, quality retry, second shot, provider expansion, release, deploy, or R1/R2 reuse is authorized.
 
 ---
 
-## Immutable Prior LIVE Truth
+## Immutable Prior Truth
 
-### R1
-
-- consumed / immutable;
-- bounded OpenAI request returned HTTP 429;
-- never rerun R1.
-
-### R2
-
-- execution ID `LIVE-20260909-BB75-R2`;
-- run `34287696335`;
-- execution fence consumed;
-- OpenAI STORY succeeded;
-- Gemini IMAGE returned non-success HTTP surfaced as `HTTP_ERROR`;
-- exact historical Gemini HTTP status unavailable;
-- conservative chargeable requests consumed = 2/6;
-- last known confirmed/committed UAT cost at STOP = USD 0.0072;
-- Vidu / ElevenLabs / downstream live proof not executed;
-- never rerun R2.
-
-### R2-C1
-
-- PASS / MERGED / CLOSED via PR #74;
-- merge commit `d706acacd1f51224c955fb9c8d0d9eab3deda186`;
-- future Gemini non-2xx evidence now retains sanitized HTTP status/classification;
-- C1 provider calls = 0;
-- C1 spend = USD 0.00.
+- R1 = consumed / HTTP 429 / never rerun.
+- R2 = consumed / OpenAI PASS / Gemini `HTTP_ERROR` STOP / 2/6 conservative calls / last known committed cost USD 0.0072 / never rerun.
+- R2-C1 = PASS / merged PR #74 / sanitized Gemini HTTP evidence path added / zero provider calls.
+- R3-PRE1 = PASS / completed / probe run `34291500281` / HTTP 200 / `generation_request_sent=false` / zero provider calls.
 
 ---
 
-## Proposed Next Gate — Not Authorized
+## TOOL1 Stop / Review Rule
 
-The next proposed work is **R3 paid one-shot execution-tooling preparation**, not R3 execution itself.
+TOOL1 must stop after implementation + exact-head CI + independent review and wait for Owner merge decision.
 
-Draft R3 bounds remain:
+Even if TOOL1 is merged:
 
-```text
-OpenAI x1 -> Gemini x1 -> Vidu x1 -> ElevenLabs x3
-Maximum chargeable requests: 6
-Hard cap: USD 1.00
-Sequential only
-OpenAI retries: 0
-```
+- do not dispatch R3 no-paid preflight without the next operational gate;
+- do not record `FRESH_OWNER_AUTHORIZED_R3` automatically;
+- do not write `EXECUTION_STARTED: LIVE-20260909-363F-R3` automatically;
+- do not dispatch the paid R3 workflow;
+- do not declare P4-WP020 or Core V1 closed/released.
 
-Before any R3 tooling implementation, ChatGPT must fresh-review canonical `main` and present a bounded tooling contract for explicit Owner authorization.
-
-R3 execution identity and exact binding main SHA remain unassigned.
-
----
-
-## Explicitly Forbidden Without a New Owner Gate
-
-- no R3 execution-tooling implementation;
-- no OpenAI/Gemini/Vidu/ElevenLabs generation request;
-- no R3 paid workflow dispatch;
-- no R3 execution fence;
-- no R3 paid authorization marker;
-- no R1/R2 rerun;
-- no release tag;
-- no production deployment;
-- no Core V1 release declaration.
-
----
-
-## Roles
-
-```text
-Owner = final human authority / authorization / merge / paid-live gates
-ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-Antigravity = bounded low-credit Execution Plane only when explicitly authorized
-Codex = STOP
-Claude Code = STOP
-```
+Required later sequence:
+`Owner merge -> fresh no-paid preflight -> fresh exact-SHA Owner paid authorization -> separate Owner run authorization -> R3 LIVE`.
 
 Contracts:
 - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_TOOL1.md`
 - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`

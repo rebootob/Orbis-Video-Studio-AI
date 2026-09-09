@@ -6,9 +6,7 @@
 
 ## 1. Roadmap Overview
 
-Orbis Video Studio AI is delivered through discrete, bounded Work Packages. Every WP requires explicit Owner authorization before implementation. Completion of one WP never auto-authorizes the next.
-
-The product direction is automation-first: Orbis orchestrates external Creative, Image, Video and Audio AI services behind adapters while owning production state, approvals, history, cost control, QC, assembly, render, export and project portability.
+Orbis Video Studio AI is delivered through discrete, bounded Work Packages. Every WP and every paid/live sub-gate requires explicit Owner authorization. Completion of one gate never auto-authorizes the next.
 
 ```mermaid
 graph TD
@@ -26,24 +24,22 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: NONE
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R3-TOOL1
 P4-WP020: ACTIVE / NOT CLOSED
 R3 PRE1: PASS / COMPLETED
+R3 TOOL1: OWNER AUTHORIZED / NO-PAID IMPLEMENTATION + CI REVIEW
 Core V1 release: NOT DECLARED
-R3 execution tooling: NOT AUTHORIZED
 R3 paid/live execution: NOT AUTHORIZED
 ```
 
-Current canonical baseline:
+Tooling baseline:
 
 ```text
-main HEAD: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-P4-WP020 LIVE R2-C1 PR #74: MERGED / CLOSED
-C1 merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
-P4-WP020 LIVE R3-PRE1 PR #75: MERGED / COMPLETED
-PRE1 reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
-PRE1 merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-PRE1 metadata probe run: 34291500281 / ACCESS_PROBE_PASS / HTTP 200
+main at TOOL1 start: 363ffe6a0bd325c7c557b80daa665ee3575df6f8
+branch: ai/p4-wp020-live-r3-tool1
+R3 execution identity: LIVE-20260909-363F-R3
+TOOL1 provider generation calls: 0
+TOOL1 spend authorization: USD 0.00
 ```
 
 ---
@@ -74,93 +70,64 @@ PRE1 metadata probe run: 34291500281 / ACCESS_PROBE_PASS / HTTP 200
 
 ---
 
-## 4. P4-WP019 Closure Detail
-
-### P4-WP019 — Project Export/Import Archive Package (`.orbis`)
-
-```text
-Status: PASS / CLOSED / MERGED
-PR: #50
-Branch: ai/p4-wp019-orbis-archive
-Final reviewed HEAD: df691035f54c1a9ffea4934b6f43134fde35d391
-Merge Commit: a09fcab835515679bf4f0bbfce8aec84f7e15062
-Proposal: project-docs/40_DELIVERY/P4_WP019_PROPOSAL.md
-```
-
-P4-WP019 must not be reopened unless a proven regression is found.
-
----
-
-## 5. Remaining Core V1 Roadmap
+## 4. Remaining Core V1 Roadmap
 
 ### P4-WP020 — End-to-End System Integration, UAT & Core V1 Release
 
 ```text
 Status: ACTIVE / NOT CLOSED
-Current sub-gate: NONE
-Last completed sub-gate: P4-WP020-LIVE-R3-PRE1 = PASS / COMPLETED
-Next proposed gate: R3 execution-tooling preparation / NOT AUTHORIZED
+Current sub-gate: P4-WP020-LIVE-R3-TOOL1
+Current sub-gate type: NO-PAID TOOLING PREPARATION
+Last completed sub-gate: R3 PRE1 PASS / COMPLETED
+Paid LIVE execution: NOT AUTHORIZED
 Core V1 release declaration: NOT AUTHORIZED
 ```
 
-Purpose remains:
+Purpose remains to verify the already-delivered Core V1 system end to end, collect bounded provider and downstream evidence, close only proven release-blocking defects inside authorized WP020 contracts, and stop for the final Owner release decision.
 
-- verify the already-delivered Core V1 system end to end;
-- execute bounded UAT across the supported Core V1 modes and critical production path;
-- verify failure/recovery, cost, history, approval, render/export and archive behavior at system level;
-- close release-blocking defects only within authorized WP020 contracts;
-- collect release evidence and make the final Core V1 release decision.
-
-### LIVE history
+### Immutable LIVE history
 
 R1:
 - consumed / immutable;
-- bounded OpenAI call returned HTTP 429;
-- STOP enforced.
+- bounded OpenAI request returned HTTP 429;
+- never rerun.
 
 R2:
-- execution ID `LIVE-20260909-BB75-R2`;
-- run `34287696335`;
-- execution fence consumed;
+- `LIVE-20260909-BB75-R2` / run `34287696335`;
+- fence consumed;
 - OpenAI STORY succeeded;
-- Gemini IMAGE returned non-success HTTP surfaced as `HTTP_ERROR`;
-- exact historical Gemini HTTP status was not durably retained;
-- conservative chargeable requests consumed = 2/6;
-- last known confirmed/committed UAT cost at STOP = USD 0.0072;
-- Vidu / ElevenLabs / downstream live proof not executed;
-- R2 must never be rerun.
+- Gemini IMAGE stopped on non-success `HTTP_ERROR`;
+- exact historical Gemini HTTP status unavailable;
+- conservative calls = 2/6;
+- last known confirmed/committed UAT cost = USD 0.0072;
+- Vidu / ElevenLabs / downstream not executed;
+- never rerun.
 
 R2-C1:
-- Gemini HTTP Evidence + Control-Truth Corrective;
-- PR #74 merged;
-- future Gemini non-2xx evidence preserves sanitized HTTP status/classification;
-- C1 provider calls = 0;
-- C1 spend = USD 0.00.
+- PR #74 PASS / MERGED / CLOSED;
+- future Gemini non-2xx job evidence retains sanitized HTTP status/classification;
+- provider calls = 0; spend = USD 0.00.
 
-### R3-PRE1 — PASS / COMPLETED
+R3-PRE1:
+- PR #75 PASS / COMPLETED;
+- metadata probe run `34291500281` = `ACCESS_PROBE_PASS` / HTTP 200;
+- `gemini-3.1-flash-image` metadata visible;
+- `generation_request_sent=false`;
+- paid generation calls = 0; spend = USD 0.00.
 
-`P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
+### R3-TOOL1 — Active / NO-PAID
 
-```text
-PR: #75
-Reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
-Merge: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Probe run: 34291500281
-Probe result: ACCESS_PROBE_PASS
-HTTP status: 200
-Model: gemini-3.1-flash-image
-generation_request_sent: false
-paid_generation_calls: 0
-PRE1 spend: USD 0.00
-```
+Owner authorized `P4-WP020-LIVE-R3-TOOL1 — Bounded One-Shot Execution Tooling Preparation`.
 
-PRE1 confirms metadata-level Gemini credential/model visibility only. It does not prove the image-generation submission path will succeed and it does not authorize R3 execution tooling or paid/live execution.
+Authorized tooling includes:
+- exact R3 identity/SHA/fence/call/budget guards;
+- manual-only R3 no-paid preflight;
+- manual-only one-shot R3 execution workflow that remains inert without later exact Owner authorization;
+- new full-chain R3 runner, not a dynamic R1 snapshot patch;
+- durable sanitized failure evidence before ephemeral runtime teardown;
+- regression/static tests and control-doc sync.
 
-Detailed contract: `P4_WP020_LIVE_R3_PRE1.md`.
-
-### Proposed R3 — Not Authorized
-
-R2 used ephemeral PostgreSQL/MinIO and its retained artifact is historical evidence, not reusable canonical project state. The proposed future R3 therefore creates a new isolated UAT project and executes one coherent full provider chain:
+Locked future paid chain:
 
 ```text
 OpenAI STORY x1
@@ -171,32 +138,40 @@ Maximum chargeable requests: 6
 Hard cap: USD 1.00
 Sequential only
 OpenAI retries: 0
+Execution ID: LIVE-20260909-363F-R3
 ```
 
-R3 execution identity and exact authorized main SHA remain unassigned until separately authorized execution tooling is reviewed and merged, followed by fresh Owner paid/live authorization.
+TOOL1 itself authorizes **zero provider generation calls and USD 0.00 spend**.
 
-Draft contract: `P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
+Detailed TOOL1 contract: `P4_WP020_LIVE_R3_TOOL1.md`.
+Draft paid contract: `P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
+
+---
+
+## 5. Required Gates After TOOL1
+
+```text
+TOOL1 implementation
+-> exact-head backend/frontend/migration CI
+-> independent review
+-> Owner merge approval
+-> fresh R3 no-paid preflight on post-merge main
+-> fresh exact-SHA Owner paid authorization
+-> separate Owner run authorization
+-> R3 LIVE
+```
+
+No step auto-authorizes the next one. A STOP after R3 fence consumption permanently consumes that execution identity.
 
 ---
 
 ## 6. Post-Core V1 / V1.x — Not Part of WP020 by Default
 
-The following remain future work unless separately authorized:
-
-- full Hermes / n8n / external-agent operational gateway;
-- new production modes beyond STORY / SHORT / LOOP / SCENE;
-- new provider implementations beyond currently accepted Core V1 boundaries;
-- cloud-hosted ComfyUI provider implementation;
-- social publishing automation;
-- marketplace/provider ecosystem;
-- heavyweight NLE/DAW capabilities;
-- realtime cloud project replication/sync.
-
-ComfyUI + Cloud GPU remains a future provider/execution candidate only and is not authorized by WP020.
+Unless separately authorized, WP020 does not include new production modes, new provider implementations, cloud ComfyUI implementation, social publishing automation, marketplace/provider ecosystem work, heavyweight NLE/DAW capability, or realtime cloud project replication/sync.
 
 ---
 
-## 7. Product Locks Governing Future WPs
+## 7. Product Locks
 
 ```text
 MULTI_PROJECT = REQUIRED
@@ -204,7 +179,6 @@ FULL_HISTORY_RETENTION = REQUIRED
 AUDITABLE_CHANGES = REQUIRED
 NO_SILENT_HISTORY_LOSS = REQUIRED
 AUTOMATION_FIRST = REQUIRED
-HUMAN_REVIEW_NOT_HUMAN_MICROMANAGEMENT = REQUIRED
 APPROVAL_GATED_AUTOMATION = REQUIRED
 GUIDED_FLEXIBILITY = REQUIRED
 AUDIO_PRODUCTION_CORE_V1 = REQUIRED
@@ -222,8 +196,10 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-```text
-ACTIVE_WORK_PACKAGE = NONE
-```
+While TOOL1 is active:
 
-No R3 tooling, paid execution, release mutation, production deployment, or Core V1 release declaration may start without a new explicit Owner authorization tied to a separately presented exact gate.
+- do not dispatch R3 workflows;
+- do not write R3 paid authorization/fence markers;
+- do not call providers;
+- do not release/tag/deploy;
+- stop at the Owner merge gate after exact-head CI and independent review.
