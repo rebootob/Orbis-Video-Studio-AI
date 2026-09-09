@@ -139,6 +139,11 @@ jobs:
           EXECUTION_FENCE_CONFIRMED: "true"
         run: PYTHONPATH=.:../.github/scripts python ../.github/scripts/wp020_live_uat_r3.py
 
+      - name: Enrich sanitized R3 STOP artifact from durable creative audit
+        if: failure()
+        working-directory: backend
+        run: PYTHONPATH=.:../.github/scripts python ../.github/scripts/wp020_live_r3_failure_export.py
+
       - name: Post Issue 63 sanitized evidence
         if: always()
         shell: bash
