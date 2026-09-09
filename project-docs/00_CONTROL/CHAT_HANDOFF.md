@@ -2,9 +2,9 @@
 
 > Canonical location: `project-docs/00_CONTROL/CHAT_HANDOFF.md`
 >
-> Repository truth newer than this handoff is authoritative.
+> Repository/workflow/Issue #63 truth newer than this file is authoritative.
 
-Repository: `rebootob/Orbis-Video-Studio-AI`  
+Repository: `rebootob/Orbis-Video-Studio-AI`
 Canonical branch: `main`
 
 ---
@@ -16,7 +16,7 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
 ```
 
 ---
@@ -24,139 +24,79 @@ ACTIVE_WORK_PACKAGE = NONE
 ## Current Canonical Truth
 
 ```text
-Canonical main:
-dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+Canonical main at C1 start:
+82ce42116e3f866227dd598814cf79c0b9c640c4
 
-R2-C1:
-PASS / MERGED / CLOSED
-PR #74
-Merge: d706acacd1f51224c955fb9c8d0d9eab3deda186
-
-R3-PRE1:
-PASS / COMPLETED
-PR #75
-Reviewed HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
-Merge: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Metadata probe run: 34291500281
-Probe: ACCESS_PROBE_PASS / HTTP 200
-Model: gemini-3.1-flash-image
-generation_request_sent: false
-paid_generation_calls: 0
-PRE1 spend: USD 0.00
-
-R3 paid/live execution: NOT AUTHORIZED
-R3 execution tooling: NOT AUTHORIZED
+R3:
+Execution ID: LIVE-20260909-363F-R3
+Run: 34297314995
+Status: STOPPED / CONSUMED
+STOP phase: LIVE-02-GEMINI-IMAGE
+OpenAI STORY: SUCCESS
+OpenAI usage: 546 prompt / 513 completion
+Known committed/actual Orbis UAT cost at STOP: USD 0.0065
+Gemini IMAGE: HTTP 429
+Gemini retryable: true
+Gemini submission_uncertain: false
+Conservative calls: 2/6
+Vidu: NOT CALLED
+ElevenLabs: NOT CALLED
+Downstream: NOT STARTED
+R3 rerun: FORBIDDEN
 ```
+
+Issue #63 evidence:
+- Owner run authorization recorded before execution;
+- execution fence comment `5594141834`;
+- STOP evidence comment `5594143482`.
+
+The failed Gemini request is counted conservatively as chargeable request #2. The repository does not prove whether Google externally billed that failed request.
 
 ---
 
-## P4-WP020 LIVE History That Must Not Be Lost
+## Active Corrective
 
-### R1
+`P4-WP020-LIVE-R3-C1 — Gemini 429 Quota/Rate-Limit Evidence Corrective`
 
-- consumed / immutable;
-- bounded OpenAI request returned HTTP 429;
-- STOP enforced;
-- never rerun R1.
+Owner authorization:
+- NO-PAID only;
+- provider calls = 0;
+- spend authorization = USD 0.00;
+- branch `ai/p4-wp020-live-r3-c1-gemini-429-evidence`;
+- base main `82ce42116e3f866227dd598814cf79c0b9c640c4`.
 
-### R2
+C1 purpose:
+- retain a strict allowlist of structured Google 429 metadata;
+- classify observable quota/rate categories without persisting message/body/headers/secrets;
+- prove behavior with simulated tests;
+- sync control truth.
 
-```text
-Execution ID: LIVE-20260909-BB75-R2
-Run ID: 34287696335
-Main SHA: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
-No-paid preflight: PASS
-EXECUTION_STARTED fence: WRITTEN / CONSUMED
-```
-
-Observed R2 sequence:
-
-1. OpenAI STORY succeeded.
-2. OpenAI usage = 544 prompt / 585 completion tokens.
-3. Last known confirmed/committed cost at STOP = USD 0.0072.
-4. Gemini IMAGE reached provider and returned non-success HTTP surfaced as `HTTP_ERROR`.
-5. Exact historical HTTP status was not retained.
-6. Chargeable requests conservatively consumed = 2/6.
-7. STOP enforced.
-8. Vidu, ElevenLabs and downstream live proof were not executed.
-9. Never rerun R2.
-
-C1 made future Gemini non-2xx status/classification durable but cannot reconstruct the R2 status retroactively.
+C1 does NOT authorize R4, provider calls, paid execution, model/endpoint changes, release or deploy.
 
 ---
 
-## R3 PRE1 Accepted Evidence
+## Immutable Earlier History
 
-PRE1 was Owner-authorized as NO-PAID only and is now complete.
-
-Accepted post-merge probe evidence:
-
-```text
-Workflow: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
-Run: 34291500281
-Main: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Conclusion: success
-ACCESS_PROBE_PASS
-HTTP 200
-gemini-3.1-flash-image
-generation_request_sent=false
-paid_generation_calls=0
-```
-
-Interpretation:
-- configured Gemini credential can authenticate to current model metadata;
-- target model is visible through metadata access;
-- no image-generation submission was made;
-- this does not prove the generation path itself will succeed;
-- no R3 paid authorization or execution fence exists.
-
-Detailed PRE1 contract:
-`project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
-
----
-
-## Proposed R3 Direction — Not Authorized
-
-R2 used ephemeral PostgreSQL and MinIO. Retained R2 evidence is historical proof, not reusable canonical project state. A future coherent end-to-end LIVE PASS is therefore proposed as a new isolated UAT project and one bounded chain:
-
-```text
-OpenAI STORY x1
-Gemini IMAGE x1
-Vidu VIDEO x1
-ElevenLabs AUDIO x3
-Maximum calls: 6
-Hard cap: USD 1.00
-Sequential only
-OpenAI retries: 0
-```
-
-R3 execution ID and exact binding main SHA remain unassigned.
-
-Draft:
-`project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`
+- R1 consumed / HTTP 429 / never rerun.
+- R2 consumed / OpenAI PASS / Gemini generic HTTP_ERROR / 2/6 / USD 0.0072 known cost / never rerun.
+- R2-C1 merged PR #74, adding durable sanitized HTTP status evidence.
+- R3-PRE1 metadata probe run `34291500281` PASS / HTTP 200 / zero generation calls.
+- R3 TOOL1 merged PR #77.
+- R3 PF1 run `34296382370` PASS / zero provider calls / reservation USD 0.2739.
 
 ---
 
 ## Next Gate
 
-No next work package is auto-authorized.
+C1 implementation -> exact-head CI -> independent review -> Owner merge decision.
 
-The next proposed gate is **R3 paid one-shot execution-tooling preparation only**. Before any implementation:
-
-1. fresh-fetch canonical `main`;
-2. review current control docs, Issue #63, and latest workflow history;
-3. present a bounded tooling-only contract to the Owner;
-4. obtain explicit Owner authorization;
-5. implement only that tooling scope;
-6. STOP again for review/merge before any paid authorization or execution.
-
-PRE1 PASS by itself does not authorize tooling, paid provider calls, a R3 fence, release tagging, deployment, or Core V1 release.
+Do not auto-start R4. After C1 merge, fresh-review evidence and determine whether the remaining problem is account/quota configuration or requires any additional no-paid tooling before proposing another paid attempt.
 
 ---
 
 ## Owner-Locked Product Direction
 
-Orbis remains an AI Video Production Orchestrator / Production Control Plane with provider-neutral boundaries:
+Orbis remains an AI Video Production Orchestrator / Production Control Plane with separate provider boundaries:
 
 ```text
 CreativeProvider
@@ -177,28 +117,7 @@ AUTOMATION_FIRST = REQUIRED
 APPROVAL_GATED_AUTOMATION = REQUIRED
 GUIDED_FLEXIBILITY = REQUIRED
 AUDIO_PRODUCTION_CORE_V1 = REQUIRED
-PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
 LOCAL_AI = DISALLOWED
 CLOUD_AI = REQUIRED
 VENDOR_LOCK_IN = DISALLOWED
 ```
-
----
-
-## Mandatory Resume Procedure
-
-1. Fresh-fetch current `main`.
-2. Read in order:
-   - `project-docs/00_CONTROL/START_HERE.md`
-   - `project-docs/00_CONTROL/CURRENT_STATE.md`
-   - `project-docs/00_CONTROL/ACTIVE_TASK.md`
-   - `project-docs/00_CONTROL/DOCUMENT_INDEX.md`
-   - `project-docs/00_CONTROL/CHAT_HANDOFF.md`
-   - `project-docs/00_CONTROL/NEXT_CHAT_PROMPT.md`
-   - `project-docs/40_DELIVERY/WORK_PACKAGES.md`
-   - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`
-   - `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`
-3. Inspect Issue #63 and recent workflow evidence for any live decision.
-4. Never reuse R1 or R2 execution identities.
-5. Never infer paid authorization from PRE1 PASS, a merge, metadata probe success, or generic approval outside the exact presented gate.
-6. Never auto-start R3 or declare Core V1 released.
