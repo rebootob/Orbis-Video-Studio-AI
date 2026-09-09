@@ -11,14 +11,14 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
+CANONICAL_MAIN_AT_TOOL1_START: 363ffe6a0bd325c7c557b80daa665ee3575df6f8
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
-P4-WP020_LIVE_STATE: R3 PRE1 PASS / COMPLETED / WAITING NEXT OWNER GATE
+P4-WP020_LIVE_STATE: R3 TOOL1 AUTHORIZED / IMPLEMENTATION IN PROGRESS / NO-PAID
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING OWNER AUTHORIZATION FOR R3 EXECUTION-TOOLING PREPARATION
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R3-TOOL1
+CURRENT_GATE: TOOLING IMPLEMENTATION -> CI -> INDEPENDENT REVIEW -> OWNER MERGE DECISION
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -32,89 +32,66 @@ PAID_LIVE_EXECUTION: STOP / NOT AUTHORIZED
 
 ---
 
-## P4-WP020 LIVE History
+## Immutable LIVE History
 
 ### R1
-
 - consumed and immutable;
-- first bounded OpenAI request returned HTTP 429;
-- STOP enforced;
+- bounded OpenAI request returned HTTP 429;
 - never rerun R1.
 
 ### R2
-
 ```text
 Execution ID: LIVE-20260909-BB75-R2
 Run ID: 34287696335
 Main SHA: 570acda49245ecae7ae48e1e66ed8839e4bfc2e2
-No-paid preflight: PASS
 Execution fence: CONSUMED
 ```
+- OpenAI STORY = SUCCESS;
+- Gemini IMAGE = non-success surfaced as `HTTP_ERROR`;
+- exact historical Gemini HTTP status unavailable;
+- conservative chargeable requests consumed = 2/6;
+- last known confirmed/committed UAT cost = USD 0.0072;
+- Vidu / ElevenLabs / downstream live proof = NOT EXECUTED;
+- never rerun R2.
 
-Accepted R2 evidence:
+### R2-C1
+- PR #74 = PASS / MERGED / CLOSED;
+- merge `d706acacd1f51224c955fb9c8d0d9eab3deda186`;
+- future Gemini non-2xx failures retain sanitized HTTP status/classification in durable job evidence;
+- provider calls = 0; spend = USD 0.00.
 
-1. OpenAI STORY = SUCCESS.
-2. OpenAI usage = 544 prompt tokens / 585 completion tokens.
-3. Last known confirmed/committed UAT cost at STOP = USD 0.0072.
-4. Gemini IMAGE reached provider and returned a non-success HTTP result surfaced as `HTTP_ERROR`.
-5. Exact R2 Gemini HTTP status was not durably retained.
-6. Chargeable requests conservatively consumed = 2/6.
-7. Vidu = NOT EXECUTED.
-8. ElevenLabs = NOT EXECUTED.
-9. Downstream live proof = NOT EXECUTED.
-10. R2 must never be rerun.
+### R3-PRE1
+- PR #75 = PASS / MERGED / COMPLETED;
+- merge `dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b`;
+- metadata probe run `34291500281` = `ACCESS_PROBE_PASS` / HTTP 200;
+- model `gemini-3.1-flash-image` visible;
+- `generation_request_sent=false`;
+- `paid_generation_calls=0`;
+- spend = USD 0.00.
+
+PRE1 proves metadata-level authentication/model visibility only, not image-generation success.
 
 ---
 
-## R2-C1 Corrective
+## Active Gate — R3 TOOL1
 
-`P4-WP020-LIVE-R2-C1 — Gemini HTTP Evidence + Control-Truth Corrective`
+`P4-WP020-LIVE-R3-TOOL1 — Bounded One-Shot Execution Tooling Preparation`
 
 ```text
-Status: PASS / MERGED / CLOSED
-PR: #74
-Reviewed implementation HEAD: 6c66650312ebbd2433e5b00c7864c086ea37e28e
-Merge commit: d706acacd1f51224c955fb9c8d0d9eab3deda186
-Provider calls during C1: 0
-Paid spend during C1: USD 0.00
+Owner authorization: APPROVED
+Type: NO-PAID / CODE + TEST + CONTROL-DOC
+Branch: ai/p4-wp020-live-r3-tool1
+Base main: 363ffe6a0bd325c7c557b80daa665ee3575df6f8
+R3 execution identity: LIVE-20260909-363F-R3
+R3 paid/live authorization: NOT AUTHORIZED
+R3 execution fence: NOT WRITTEN
+TOOL1 provider generation calls: 0
+TOOL1 spend authorization: USD 0.00
 ```
 
-C1 made future Gemini non-2xx evidence durable using sanitized metadata only: provider, model, HTTP status, error code, retryable, and submission-uncertain. Provider error bodies, headers, credentials, API keys and reference bytes remain excluded.
+TOOL1 is authorized to prepare manual-only no-paid preflight and one-shot execution tooling, fail-closed call/budget/identity guards, durable sanitized failure evidence, tests, and control docs. It does not authorize dispatching either workflow.
 
----
-
-## R3-PRE1 Closure
-
-`P4-WP020-LIVE-R3-PRE1 — Gemini Access Probe + Resume Contract + Control-Truth Sync`
-
-```text
-Status: PASS / COMPLETED
-PR: #75
-Reviewed PRE1 HEAD: 28f8095d581556b27feed67e27f82c004ea07bbc
-Merge commit: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Metadata probe run: 34291500281
-Probe main SHA: dcb831e14b5ece6e56bd7e3c9a61370977c0ca1b
-Probe result: ACCESS_PROBE_PASS
-HTTP status: 200
-Model: gemini-3.1-flash-image
-generation_request_sent: false
-paid_generation_calls: 0
-PRE1 paid spend: USD 0.00
-```
-
-PRE1 proves the configured Gemini credential can authenticate to current model metadata and that `gemini-3.1-flash-image` is visible through the metadata endpoint. It does **not** prove that an image-generation submission will succeed and it does not reconstruct the exact historical R2 Gemini failure status.
-
-No R3 paid authorization or R3 execution fence exists from PRE1.
-
-Detailed PRE1 contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`.
-
----
-
-## Proposed R3 Direction — Not Authorized
-
-R2 used ephemeral PostgreSQL/MinIO. Its retained artifact is historical evidence, not reusable canonical Story/project state. Therefore a truthful later full LIVE PASS must create a new isolated UAT project and execute a coherent full provider chain.
-
-Proposed R3 bounds:
+Locked future R3 paid boundary:
 
 ```text
 OpenAI STORY x1
@@ -127,55 +104,32 @@ Sequential only
 OpenAI retries: 0
 ```
 
-R3 execution ID and exact binding main SHA are intentionally NOT assigned. They may be assigned only inside separately authorized R3 execution tooling, followed by fresh Owner paid/live authorization tied to the exact post-merge main.
-
-Draft contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
-
----
-
-## Locked Product Direction
-
-Orbis Video Studio AI remains a cloud-first, provider-independent AI Video Production Orchestrator / Production Control Plane.
-
-Provider boundaries:
-
-```text
-CreativeProvider
-ImageProvider
-VideoProvider
-AudioProvider
-```
-
-Core V1 modes: `STORY / SHORT / LOOP / SCENE`.
-Later architecture only: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
-
-```text
-MULTI_PROJECT = REQUIRED
-FULL_HISTORY_RETENTION = REQUIRED
-AUDITABLE_CHANGES = REQUIRED
-NO_SILENT_HISTORY_LOSS = REQUIRED
-AUTOMATION_FIRST = REQUIRED
-APPROVAL_GATED_AUTOMATION = REQUIRED
-GUIDED_FLEXIBILITY = REQUIRED
-AUDIO_PRODUCTION_CORE_V1 = REQUIRED
-PERFORMANCE_AND_SCALABILITY = REQUIRED_PRODUCT_QUALITY_ATTRIBUTE
-LOCAL_AI = DISALLOWED
-CLOUD_AI = REQUIRED
-VENDOR_LOCK_IN = DISALLOWED
-```
+Detailed TOOL1 contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_TOOL1.md`.
+Draft R3 paid contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`.
 
 ---
 
-## Next Allowed Action
+## Required Gates After TOOL1
 
-No next work package is auto-authorized.
+1. TOOL1 exact-head backend/frontend/migration CI PASS.
+2. Independent review PASS.
+3. Owner merge approval.
+4. Fresh no-paid R3 preflight on exact post-merge `main`.
+5. Fresh Owner paid/live authorization tied to exact post-merge main and immutable execution identity.
+6. Separate explicit Owner run authorization.
+7. Only then may the paid workflow consume the R3 one-shot fence immediately before first possible chargeable request.
 
-The next proposed gate is **R3 execution-tooling preparation only**. Before any implementation, ChatGPT must fresh-review canonical `main` and present a bounded tooling contract to the Owner.
+No gate auto-authorizes the next one.
 
-Until that separate Owner authorization exists:
+---
 
-- do not create or dispatch R3 paid execution;
-- do not write a R3 execution fence;
-- do not record a R3 paid authorization marker;
-- do not rerun R1 or R2;
-- do not declare Core V1 released.
+## Explicitly Forbidden During TOOL1
+
+- no OpenAI/Gemini/Vidu/ElevenLabs generation request;
+- no R3 workflow dispatch;
+- no R3 execution fence;
+- no R3 paid authorization marker;
+- no R1/R2 rerun or marker mutation;
+- no release tag;
+- no production deployment;
+- no Core V1 release declaration.
