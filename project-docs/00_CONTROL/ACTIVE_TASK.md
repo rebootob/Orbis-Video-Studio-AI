@@ -9,131 +9,125 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1
-LAST_CLOSED_TITLE = NO-PAID Runtime Readiness Verification
-LAST_CLOSED_STATUS = PASS / COMPLETED
-CLOSURE_SYNC = P4-WP020-LIVE-R4-PRE1-CLOSE
-CLOSURE_TYPE = CONTROL-DOC ONLY
-CANONICAL_MAIN = 170e82d19315e80cc7393922d7daa1b1c7f2093b
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1
+ACTIVE_TITLE = Bounded One-Shot Execution Tooling Preparation
+ACTIVE_TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
+OWNER_AUTHORIZED = YES
+TOOLING_BASE_MAIN = de17a125dcd3b8066a546369d03aba813a7b5641
+ACTIVE_BRANCH = ai/p4-wp020-live-r4-tool1
+
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1-CLOSE
+LAST_CLOSED_STATUS = PASS / MERGED / COMPLETE
+CANONICAL_MAIN_AT_TOOL1_START = de17a125dcd3b8066a546369d03aba813a7b5641
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
-PAID_LIVE_EXECUTION = STOP / NOT AUTHORIZED
+
 R3_EXECUTION_ID = LIVE-20260909-363F-R3
 R3_EXECUTION_FENCE = CONSUMED / NEVER RERUN
-R4_PAID_EXECUTION = NOT AUTHORIZED
-R4_EXECUTION_ID = NONE
+R4_EXECUTION_ID = LIVE-20260909-DE17-R4
+R4_PAID_AUTHORIZATION = NOT AUTHORIZED
 R4_EXECUTION_FENCE = NONE
-NEXT_CANDIDATE_GATE = R4 PAID EXECUTION PLANNING/AUTHORIZATION / REQUIRES SEPARATE OWNER AUTHORIZATION
+R4_PAID_EXECUTION = NOT AUTHORIZED
+
+TOOL1_PROVIDER_GENERATION_CALLS = 0
+TOOL1_SPEND_AUTHORIZATION = USD 0.00
+NEXT_GATE = EXACT-HEAD CI + INDEPENDENT REVIEW -> OWNER MERGE DECISION
 ```
+
+---
+
+## R4-TOOL1 Authorized Scope
+
+Owner authorized `P4-WP020-LIVE-R4-TOOL1 — NO-PAID Bounded One-Shot Tooling Preparation` after R4-PRE1 closure merged.
+
+Authorized work:
+- create immutable R4 execution contract for `LIVE-20260909-DE17-R4`;
+- create R4-specific one-shot authorization/fence helper;
+- create R4 no-paid preflight workflow/script;
+- create R4 paid one-shot workflow that remains inert without later Owner gates;
+- create R4 bounded runner adapter bound to the exact reviewed R3 implementation blob;
+- preserve sanitized durable STOP evidence;
+- add R4 tooling tests;
+- synchronize control/delivery documents.
+
+Explicitly NOT authorized during TOOL1:
+- provider generation;
+- R4 Owner paid-authorization marker;
+- R4 fence consumption;
+- paid workflow dispatch;
+- release/tag/deploy.
+
+Detailed contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`.
+
+---
+
+## Immutable R4 Tooling Contract
+
+```text
+Execution ID: LIVE-20260909-DE17-R4
+Tooling base: de17a125dcd3b8066a546369d03aba813a7b5641
+Issue: #63
+Hard cap: USD 1.00
+Maximum chargeable provider requests: 6
+Sequential only
+OpenAI retries: 0
+```
+
+Exact future paid-call order:
+
+1. `OPENAI_CREATIVE_STORY:gpt-4o`
+2. `GEMINI_IMAGE:gemini-3.1-flash-image:1K`
+3. `VIDU_VIDEO:viduq2:text2video:4s:720p`
+4. `ELEVENLABS_TTS:Thai:<=150chars`
+5. `ELEVENLABS_MUSIC:<=10s`
+6. `ELEVENLABS_AMBIENCE:<=3s`
+
+Future paid authorization marker:
+
+```text
+FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact post-merge main SHA>
+```
+
+Future fence:
+
+```text
+EXECUTION_STARTED: LIVE-20260909-DE17-R4
+```
+
+Neither marker is authorized to be written during TOOL1.
+
+---
+
+## R4 Runner Reuse Guard
+
+R4 reuses the already independently-reviewed R3 execution implementation only through a fail-closed adapter. The adapter requires the exact inherited R3 runner Git blob SHA:
+
+```text
+24150cdece623004443e03ceecea10490955822b
+```
+
+No dynamic source rewrite is permitted. If that inherited implementation drifts, R4 must STOP and return to review before any paid execution.
 
 ---
 
 ## Closed R4-PRE1 Evidence
 
-`P4-WP020-LIVE-R4-PRE1 — NO-PAID Runtime Readiness Verification`
-
-Owner-authorized boundary:
-- exact canonical main `170e82d19315e80cc7393922d7daa1b1c7f2093b`;
-- evidence-only/no-paid runtime validation;
-- no image generation;
-- no paid workflow execution;
-- no execution-fence consumption.
-
-Observed evidence:
-
 ```text
-Run 34302711166
-Workflow: WP020 LIVE R3 No-Paid Preflight
-Conclusion: SUCCESS
-Head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-PREFLIGHT_PASS
-required_credentials_present=true
-generation_request_sent=false
-paid_provider_calls=0
-execution_fence_written=false
-
-Run 34302730786
-Workflow: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
-Conclusion: SUCCESS
-Head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-provider=gemini_image
-model=gemini-3.1-flash-image
-http_status=200
-status=ACCESS_PROBE_PASS
-generation_request_sent=false
-paid_generation_calls=0
+Full runtime preflight run: 34302711166 = SUCCESS
+Gemini metadata-only probe: 34302730786 = SUCCESS / HTTP 200 / ACCESS_PROBE_PASS
+Exact main: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Generation requests: 0
+Paid generation/provider calls: 0
+Fence written: false
+Spend added: USD 0.00
 ```
 
-The current GitHub Actions Gemini credential successfully authenticated in runtime and could read metadata for `gemini-3.1-flash-image`. The secret value itself remains unreadable and is not recorded.
-
-The two NO-PAID runs overlapped briefly but used the same exact main SHA and no paid mutable execution state or fence, so the evidence remains valid.
-
-R4-PRE1 provider generation calls = 0.
-R4-PRE1 spend added = USD 0.00.
+Owner-provided account evidence confirmed `Orbis-Video-Production` Tier 1 / Prepay and Nano Banana 2 quota RPM 100 / TPM 200K / RPD 1K.
 
 ---
 
-## Confirmed External Gemini Remediation
+## Stop Rule
 
-Owner-supplied Google AI Studio evidence:
+TOOL1 must stop at the Owner merge decision after exact-head CI and independent review.
 
-```text
-Project: Orbis-Video-Production
-Billing: Tier 1 / Prepay
-Observed credit: USD 5.00
-Nano Banana 2 (Gemini 3.1 Flash Image):
-  RPM 100
-  TPM 200K
-  RPD 1K
-Prior Free-tier image quota: 0 / 0 / 0
-```
-
-Together with the successful runtime metadata probe, this closes the immediate credential/quota readiness blocker that caused the prior R3 Gemini HTTP 429. It does not authorize any new provider generation request.
-
----
-
-## Immutable LIVE Truth
-
-### R1
-- consumed / immutable / never rerun;
-- OpenAI HTTP 429 STOP.
-
-### R2
-- execution `LIVE-20260909-BB75-R2`;
-- consumed / never rerun;
-- OpenAI STORY PASS;
-- Gemini non-success `HTTP_ERROR`;
-- conservative calls 2/6;
-- last known committed UAT cost USD 0.0072.
-
-### R3
-```text
-Execution ID: LIVE-20260909-363F-R3
-Run ID: 34297314995
-Execution main: 82ce42116e3f866227dd598814cf79c0b9c640c4
-Execution fence: CONSUMED
-Status: STOPPED
-STOP phase: LIVE-02-GEMINI-IMAGE
-```
-
-Observed sequence:
-1. OpenAI STORY = SUCCESS.
-2. OpenAI usage = 546 prompt / 513 completion tokens.
-3. Last known committed/actual Orbis UAT cost at STOP = USD 0.0065.
-4. Gemini IMAGE = HTTP 429 / retryable true / submission_uncertain false.
-5. Conservative chargeable requests consumed = 2/6.
-6. Vidu / ElevenLabs / downstream = NOT EXECUTED.
-7. R3 identity must never be rerun.
-
----
-
-## Stop Rule After R4-PRE1
-
-No new implementation or paid/live execution is active.
-
-Do not auto-start R4 paid execution. After this closure sync merges, any R4 paid attempt requires a separate Owner-approved planning/authorization gate that creates a new immutable execution identity and binds it to the exact then-current main.
-
-A future R4 paid run must still require fresh no-paid preflight, new one-shot fence, bounded budget/call limits, and separate explicit Owner run authorization.
-
-No gate auto-authorizes the next one.
+A TOOL1 merge does NOT authorize R4 preflight dispatch, paid authorization, execution-fence consumption, or paid execution. Later gates remain separate and require fresh exact-main evidence/authorization.
