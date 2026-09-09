@@ -61,7 +61,17 @@ def main() -> None:
     import wp020_live_uat_r3 as base
 
     _bind_r4_contract(base)
-    base.run()
+    try:
+        base.run()
+    except Exception as exc:
+        # Imported modules do not execute the R3 __main__ exception block. Preserve
+        # the same sanitized/durable STOP semantics explicitly for R4.
+        base.state["status"] = "STOPPED"
+        base.state["error"] = base._redact(str(exc))
+        base.state["error_type"] = type(exc).__name__
+        base._capture_durable_failure_evidence()
+        base._write_evidence()
+        raise
 
 
 if __name__ == "__main__":
