@@ -9,44 +9,46 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
-TITLE = Gemini 429 Quota/Rate-Limit Evidence Corrective
-TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
-STATUS = OWNER AUTHORIZED / IMPLEMENTATION + CI REVIEW
-BRANCH = ai/p4-wp020-live-r3-c1-gemini-429-evidence
-BASE_MAIN = 82ce42116e3f866227dd598814cf79c0b9c640c4
+ACTIVE_WORK_PACKAGE = NONE
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
+LAST_CLOSED_TITLE = Gemini 429 Quota/Rate-Limit Evidence Corrective
+LAST_CLOSED_STATUS = PASS / MERGED / CLOSED
+CLOSURE_SYNC = P4-WP020-LIVE-R3-C1-CLOSE
+CLOSURE_TYPE = CONTROL-DOC ONLY
+CANONICAL_MAIN = 1c63045497eb7ee708cd81876f6bf7a011907f77
+MERGED_PR = #78
+MERGED_C1_HEAD = b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 PAID_LIVE_EXECUTION = STOP / NOT AUTHORIZED
-C1_PROVIDER_CALLS = 0
-C1_SPEND_AUTHORIZATION = USD 0.00
 R3_EXECUTION_ID = LIVE-20260909-363F-R3
 R3_EXECUTION_FENCE = CONSUMED / NEVER RERUN
 R4 = NOT AUTHORIZED
+NEXT_GATE = WAITING FOR OWNER AUTHORIZATION
 ```
 
 ---
 
-## Owner-Authorized C1 Scope
+## Closed C1 Evidence
 
-1. Parse only structured Gemini HTTP 429 error metadata already returned by a failed request.
-2. Persist only an allowlisted sanitized subset:
-   - provider/model/http status/error code/retryable/submission uncertainty;
-   - provider status;
-   - quota metric / quota id / quota value;
-   - quota dimensions limited to model/location;
-   - retry delay when structurally safe;
-   - conservative quota class.
-3. Add simulated zero-network tests for quota-zero, daily-quota, minute-rate, retry-delay, malformed/unknown detail, and durable `GenerationJob.result` persistence.
-4. Synchronize control documents to immutable R3 STOP truth.
+`P4-WP020-LIVE-R3-C1 — Gemini 429 Quota/Rate-Limit Evidence Corrective`
 
-Forbidden:
-- no OpenAI/Gemini/Vidu/ElevenLabs generation request;
-- no metadata probe required by this corrective;
-- no R3 rerun;
-- no R4 tooling or paid authorization;
+Closure truth:
+- Owner-authorized NO-PAID corrective;
+- PR #78 merged exact reviewed HEAD `b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6`;
+- merge commit / canonical main `1c63045497eb7ee708cd81876f6bf7a011907f77`;
+- backend CI run `34298997460` = SUCCESS;
+- backend tests = 511 passed / 2 skipped / 3 warnings;
+- PostgreSQL migration paths `fresh-head` and `from-revision-010` = PASS;
+- frontend CI run `34298997360` = SUCCESS;
+- independent review = PASS / READY FOR OWNER MERGE DECISION before merge;
+- C1 provider calls = 0;
+- C1 spend = USD 0.00;
 - no model/endpoint/pricing/retry-policy change;
-- no release/tag/deployment.
+- no paid workflow dispatch;
+- no release/tag/deploy.
+
+C1 added strict sanitized Gemini HTTP 429 evidence classification and nested STOP-artifact allowlisting without retaining raw provider body, message, headers, credentials, prompt, arbitrary project dimensions, or debug/help payloads.
 
 ---
 
@@ -61,16 +63,16 @@ Forbidden:
 - consumed / never rerun;
 - OpenAI STORY PASS;
 - Gemini non-success `HTTP_ERROR`;
-- 2/6 conservative calls;
+- conservative calls 2/6;
 - last known committed UAT cost USD 0.0072.
 
 ### R3
 ```text
 Execution ID: LIVE-20260909-363F-R3
 Run ID: 34297314995
-Main SHA: 82ce42116e3f866227dd598814cf79c0b9c640c4
-Preflight immediately before fence: PASS
+Execution main: 82ce42116e3f866227dd598814cf79c0b9c640c4
 Execution fence: CONSUMED
+Status: STOPPED
 STOP phase: LIVE-02-GEMINI-IMAGE
 ```
 
@@ -83,20 +85,15 @@ Observed sequence:
 6. Vidu / ElevenLabs / downstream = NOT EXECUTED.
 7. STOP marker exists; R3 identity must never be rerun.
 
-The USD 0.0065 value is Orbis known committed/actual evidence. It is not proof that the failed Gemini request incurred no external provider charge.
+USD 0.0065 is Orbis known committed/actual evidence only. It does not prove whether the failed Gemini request incurred an external provider charge.
 
 ---
 
-## C1 Stop / Review Rule
+## Stop Rule After C1 Closure
 
-C1 stops after implementation + exact-head CI + independent review and waits for Owner merge decision.
+No new implementation or paid/live execution is active.
 
-C1 merge does not authorize:
-- R4;
-- any provider call;
-- any paid/live execution;
-- a new execution fence;
-- Core V1 release.
+Do not auto-start R4. Any future R4 or other paid attempt requires a separately proposed and Owner-authorized gate. A future paid execution must use a new immutable execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot execution fence, and separate Owner run authorization.
 
-Contract:
+Contract retained for history:
 `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_C1.md`
