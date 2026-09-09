@@ -18,6 +18,7 @@ P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
 ACTIVE_WORK_PACKAGE = NONE
 LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
+C1_CLOSURE_SYNC = PR #79 / CONTROL-DOC ONLY
 R4 = NOT AUTHORIZED
 ```
 
@@ -42,6 +43,29 @@ Spend: USD 0.00
 ```
 
 C1 added strict sanitized Gemini HTTP 429 structured evidence classification and a second nested allowlist for STOP artifacts. It did not change model, endpoint, pricing, retry policy, provider routing, or paid workflow behavior.
+
+---
+
+## Confirmed External Gemini Remediation
+
+Owner-provided Google AI Studio evidence now shows:
+
+```text
+Project: Orbis-Video-Production
+Billing tier: Tier 1 / Prepay
+Credit balance observed: USD 5.00
+Nano Banana 2 (Gemini 3.1 Flash Image):
+  RPM: 100
+  TPM: 200K
+  RPD: 1K
+Prior Free-tier image quota observation: 0 / 0 / 0
+```
+
+This supports the prior R3 Gemini HTTP 429 as an account/quota condition caused by Free-tier image quota zero, rather than a proven application-code defect.
+
+Owner also reported replacing the GitHub Actions `GEMINI_API_KEY` secret with the new Orbis project key. The secret value must never be exposed or persisted. Runtime adoption of the new secret is not yet proven.
+
+No provider request or R4 execution is authorized by this evidence.
 
 ---
 
@@ -105,9 +129,11 @@ Closure facts:
 
 No active implementation package exists after C1 closure.
 
-Do not auto-start R4. Fresh-review the remaining Gemini 429 problem first. A future NO-PAID account/quota/billing-tier evidence review may be proposed, but it requires its own Owner authorization before work begins.
+After PR #79 C1-CLOSE merges, the next candidate is `P4-WP020-LIVE-R4-PRE1` — NO-PAID runtime readiness validation. It requires separate Owner authorization and must not perform image generation, paid execution, or fence consumption.
 
-Any future paid execution requires a new identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot fence, and separate Owner run authorization.
+If R4-PRE1 later passes, a new R4 paid execution plan still requires a new identity, fresh exact-main authorization, new one-shot fence, and separate Owner run authorization.
+
+No gate auto-authorizes the next one.
 
 ---
 
