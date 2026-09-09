@@ -112,6 +112,28 @@ PR #78 merged to canonical `main` as `1c63045497eb7ee708cd81876f6bf7a011907f77`.
 
 C1 is therefore **PASS / MERGED / CLOSED**.
 
+## Post-C1 Account-Side Evidence
+
+After C1 merge, Owner supplied Google AI Studio evidence identifying and correcting the account-side condition that caused the R3 image request to stop:
+
+```text
+Prior image-model tier: Free tier
+Prior Nano Banana 2 (Gemini 3.1 Flash Image) quota: 0 / 0 / 0
+Replacement project: Orbis-Video-Production
+Current billing tier: Tier 1 / Prepay
+Observed credit balance: USD 5.00
+Current Nano Banana 2 quota:
+  RPM: 100
+  TPM: 200K
+  RPD: 1K
+```
+
+This evidence supports the R3 HTTP 429 as the prior Free-tier image quota-zero condition rather than a proven Orbis code defect.
+
+Owner also reported updating the GitHub Actions `GEMINI_API_KEY` secret to the new Orbis project key. The secret value is intentionally not available in repository evidence. Runtime adoption of that replacement secret remains unproven until a separately authorized NO-PAID runtime preflight is executed.
+
+This account-side remediation does not modify C1 code and does not authorize R4.
+
 Merge/closure does not authorize:
 - R4;
 - any provider call;
