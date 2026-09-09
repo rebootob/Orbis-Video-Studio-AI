@@ -1,5 +1,26 @@
 # P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)
 
+## 0. Completion Status
+
+```text
+Status: PASS / MERGED / COMPLETE
+C1 PR: #85
+C1 exact reviewed HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
+C1 merge commit: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+C1-CLOSE PR: #86
+C1-CLOSE exact reviewed HEAD: cb3498a7e7b3affe5b49ed96c0081e1e92621f3d
+C1-CLOSE merge commit: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+Canonical main at R4-C1-CLOSE-R1 start: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+Active work package after C1 closure: NONE
+R5 identity: NONE / NOT AUTHORIZED
+C1 provider calls: 0
+C1 spend added: USD 0.00
+```
+
+This document is now a historical contract/evidence record. It does not authorize any new provider request, billing adjustment, execution identity, fence, paid/live workflow, release, tag or deployment.
+
+---
+
 ## 1. Authorization
 
 Owner authorized:
@@ -8,7 +29,7 @@ Owner authorized:
 P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)
 ```
 
-This corrective is evidence-quality and implementation hardening only. It authorizes no external provider request and no future LIVE execution identity.
+This corrective was evidence-quality and implementation hardening only. It authorized no external provider request and no future LIVE execution identity.
 
 ```text
 Repository: rebootob/Orbis-Video-Studio-AI
@@ -68,21 +89,21 @@ The previous Vidu failure boundary also lost provider-native reconciliation meta
 - terminal `state=failed` returned before preserving a returned task identity;
 - raw provider bodies are correctly excluded for security, but the durable safe result boundary did not retain typed safe fields such as provider status/error code/credits.
 
-Therefore the current billing truth is:
+Therefore the current billing truth remains:
 
 ```text
 Internal Vidu job estimate: USD 0.15 / ESTIMATED
 Last known committed/actual Orbis UAT cost at R4 STOP: USD 0.0738
-External billing for failed Vidu task: UNKNOWN
+External billing for failed Vidu task: UNKNOWN / RECONCILIATION REQUIRED
 ```
 
 No statement that the failed task was free or charged USD 0.15 is supported without provider-side evidence.
 
 ---
 
-## 4. Corrective Contract
+## 4. Historical Corrective Contract
 
-C1 is allowed to modify the existing provider-neutral evidence boundary only as needed to:
+C1 was allowed to modify the existing provider-neutral evidence boundary only as needed to:
 
 - extend `ProviderJobResult` with optional typed reconciliation metadata;
 - preserve sanitized Vidu task/provider-job identity for explicit terminal failures when supplied by Vidu;
@@ -94,7 +115,7 @@ C1 is allowed to modify the existing provider-neutral evidence boundary only as 
 - add mocked regression tests proving the security and reconciliation behavior;
 - synchronize control/delivery documentation.
 
-C1 must not:
+C1 was forbidden to:
 
 - call OpenAI, Gemini, Vidu or ElevenLabs;
 - use Vidu metadata endpoints or billing APIs;
@@ -105,11 +126,13 @@ C1 must not:
 - retrospectively change ledger/billing values without evidence;
 - release, tag or deploy.
 
+Those restrictions remain effective for any action not separately Owner-authorized after C1 closure.
+
 ---
 
 ## 5. Implementation Files
 
-Bounded C1 implementation may touch:
+Bounded C1 implementation was allowed to touch:
 
 ```text
 backend/app/providers/base.py
@@ -122,7 +145,7 @@ project-docs/40_DELIVERY/WORK_PACKAGES.md
 project-docs/40_DELIVERY/P4_WP020_LIVE_R4_C1.md
 ```
 
-The frozen R3 runner `.github/scripts/wp020_live_uat_r3.py` MUST NOT be modified. Its reviewed Git blob identity remains immutable. R4 itself is consumed; C1 improves future evidence behavior and records R4 truth, not R4 execution.
+The frozen R3 runner `.github/scripts/wp020_live_uat_r3.py` MUST NOT be modified. Its reviewed Git blob identity remains immutable. R4 itself is consumed; C1 improved future evidence behavior and recorded R4 truth, not R4 execution.
 
 ---
 
@@ -162,32 +185,49 @@ Acceptable future reconciliation evidence can include a sanitized Vidu Usage/Bil
 Until accepted:
 
 ```text
-R4_VIDU_EXTERNAL_BILLING = UNKNOWN
+R4_VIDU_EXTERNAL_BILLING = UNKNOWN / RECONCILIATION REQUIRED
 ```
 
----
-
-## 8. Acceptance Criteria
-
-C1 implementation is ready for Owner merge decision only when:
-
-- no external provider call occurred during C1;
-- Vidu terminal failure can preserve safe task identity when present;
-- safe provider state/error-code/credits survive durable evidence;
-- unsafe/raw provider content remains excluded;
-- failed Vidu job amount is explicitly labeled an estimate;
-- external billing is explicitly `UNKNOWN`, not guessed;
-- focused regression tests pass;
-- full exact-head Backend CI and migrations pass;
-- exact-head Frontend CI passes;
-- independent review confirms scope and security boundaries;
-- control docs reflect R4 consumed STOP truth;
-- C1 spend added remains USD 0.00.
+No billing adjustment is authorized by this historical C1 contract or by its closure.
 
 ---
 
-## 9. Stop Rule
+## 8. Historical Acceptance Criteria — SATISFIED
 
-After exact-head CI and independent review, STOP for explicit Owner merge decision.
+C1 reached Owner merge readiness and completion with:
 
-C1 completion/merge does not authorize provider-side billing adjustment, R5 creation, any paid marker, any execution fence or any provider request. Every later gate remains separately Owner-authorized.
+- no external provider call during C1;
+- Vidu terminal failure preserving safe task identity when present;
+- safe provider state/error-code/credits surviving durable evidence;
+- unsafe/raw provider content remaining excluded;
+- failed Vidu job amount explicitly labeled an estimate;
+- external billing explicitly `UNKNOWN`, not guessed;
+- focused regression tests passing;
+- exact-head Backend CI `34323625029` = SUCCESS;
+- backend suite = 538 passed / 2 skipped / 3 warnings;
+- fresh-head and from-revision-010 migrations = SUCCESS;
+- exact-head Frontend CI `34323625048` = SUCCESS;
+- independent review = PASS;
+- C1 merge via PR #85;
+- C1 closure/control sync via PR #86;
+- C1 provider calls = 0;
+- C1 spend added = USD 0.00.
+
+---
+
+## 9. Historical Stop Rule — SATISFIED
+
+The original C1 stop rule required exact-head CI, independent review and explicit Owner merge decision. Those gates were satisfied and C1 was merged through PR #85, followed by the Owner-authorized C1 closure sync through PR #86.
+
+Current post-closure state:
+
+```text
+ACTIVE_WORK_PACKAGE = NONE
+P4-WP020 = ACTIVE / NOT CLOSED
+R4 = STOPPED / CONSUMED / NEVER RERUN
+R4_VIDU_EXTERNAL_BILLING = UNKNOWN / RECONCILIATION REQUIRED
+R5_IDENTITY = NONE / NOT AUTHORIZED
+CORE_V1_RELEASE = NOT DECLARED
+```
+
+Any provider-side billing disposition, R5/readiness work, paid authorization marker, execution fence, provider call, paid/live workflow, release, tag or deploy requires a separate explicit Owner authorization. No completed C1/C1-CLOSE gate auto-authorizes the next one.
