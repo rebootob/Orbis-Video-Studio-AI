@@ -20,7 +20,7 @@ ROLE MODEL
 - repository truth is authoritative
 
 MANDATORY STARTUP
-1. Fresh-fetch main and any active reconciliation PR/branch.
+1. Fresh-fetch main and any active PF1 closure PR/branch.
 2. Read:
    project-docs/00_CONTROL/START_HERE.md
    project-docs/00_CONTROL/CURRENT_STATE.md
@@ -34,17 +34,18 @@ MANDATORY STARTUP
 4. Newer repository/workflow/Issue truth overrides stale docs.
 
 CURRENT KNOWN TRUTH
-- canonical main at reconciliation start: de08c98f2644ed9e56983aad265a82b32d91e462
+- canonical main at PF1-CLOSE start: 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
 - P4-WP020 ACTIVE / NOT CLOSED
 - Core V1 release NOT DECLARED
 - P4-WP020-LIVE-R4-TOOL1 = PASS / MERGED / COMPLETE via PR #82
-- reviewed TOOL1 HEAD = 7fe35f3c51d248435ab1c90355b29cd1ade66f67
+- P4-WP020-LIVE-R4-TOOL1-CLOSE-R1 = PASS / MERGED / COMPLETE via PR #83
+- P4-WP020-LIVE-R4-PF1 = PASS / COMPLETED / NO-PAID
 - R4 execution ID = LIVE-20260909-DE17-R4
 - R4 paid authorization = NOT AUTHORIZED
 - R4 execution fence = NONE
 - R4 paid execution = NOT AUTHORIZED
 
-R4 TOOL1 CONTRACT
+R4 TOOLING CONTRACT
 - tooling base de17a125dcd3b8066a546369d03aba813a7b5641
 - Issue #63
 - hard cap USD 1.00
@@ -60,22 +61,37 @@ R4 TOOL1 CONTRACT
 - OpenAI retries 0
 - future marker: FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact authorized main SHA>
 - future fence: EXECUTION_STARTED: LIVE-20260909-DE17-R4
+- neither marker nor fence exists yet
 
-PF1 GOVERNANCE RECONCILIATION
-- run 34306778867 = SUCCESS
+CANONICAL OWNER-AUTHORIZED R4-PF1 EVIDENCE
+- Owner authorized fresh exact-main PF1 on 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
+- run 34313038252 = SUCCESS
 - workflow = WP020 LIVE R4 No-Paid Preflight
-- exact SHA = de08c98f2644ed9e56983aad265a82b32d91e462
+- run number = 2
+- exact SHA = 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
 - technical status = PREFLIGHT_PASS
+- execution ID = LIVE-20260909-DE17-R4
 - required_credentials_present = true
+- fresh PostgreSQL 16 migration to Alembic head = PASS
+- ephemeral MinIO health = PASS
+- provider routing/pricing/budget reservation = PASS
 - generation_request_sent = false
 - paid_provider_calls = 0
 - execution_fence_written = false
-- estimated reservation = USD 0.2739
-- IMPORTANT: the dispatch occurred before a separately recorded Owner PF1 authorization gate
-- therefore retain as technical NO-PAID evidence only
-- NOT adopted as Owner-authorized PF1 completion
-- no retroactive authorization inferred
-- Issue #63 reconciliation comment = 5595805718
+- budget cap = USD 1.00
+- max paid calls = 6
+- estimated total reservation = USD 0.2739
+- PF1 spend added = USD 0.00
+- Issue #63 result comment = 5596078866
+- PF1 PASS does NOT authorize paid execution
+
+PRIOR PF1 GOVERNANCE EVIDENCE
+- run 34306778867 = SUCCESS on de08c98f2644ed9e56983aad265a82b32d91e462
+- technical NO-PAID PASS only
+- dispatch occurred before a separately recorded Owner PF1 authorization gate
+- not retroactively authorized
+- not the canonical Owner-authorized PF1 completion
+- canonical PF1 completion is run 34313038252
 
 R4-PRE1 CLOSED EVIDENCE
 - run 34302711166 = SUCCESS full runtime no-paid preflight
@@ -99,20 +115,21 @@ R3 IMMUTABLE
 - NEVER RERUN R3
 
 CURRENT ACTIVE GATE
-- P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
-- CONTROL-DOC + PF1 Governance Reconciliation only
+- P4-WP020-LIVE-R4-PF1-CLOSE
+- CONTROL-DOC ONLY
+- active branch ai/p4-wp020-live-r4-pf1-close
+- no source/test/workflow/provider implementation changes
 - no provider generation
 - no paid authorization marker
 - no fence consumption
 - no paid workflow dispatch
-- reconciliation spend = USD 0.00
+- closure spend = USD 0.00
+- finish exact-head CI + independent review, then STOP for Owner merge decision
 
-NEXT AFTER RECONCILIATION MERGE
+NEXT AFTER PF1-CLOSE MERGE
 - do NOT auto-start paid execution
-- Owner must explicitly choose:
-  A) adopt run 34306778867 as PF1 evidence through a fresh governance gate; or
-  B) authorize a fresh R4 PF1 NO-PAID run on the then-current exact main
-- only after Owner-authorized PF1 may a separate exact-SHA paid authorization be considered
-- then a distinct Owner RUN authorization is still required
+- a separate exact-SHA R4 paid authorization may be considered for LIVE-20260909-DE17-R4
+- paid authorization does NOT equal RUN authorization
+- a later distinct Owner RUN authorization remains required before any chargeable request/fence consumption
 - no gate auto-authorizes the next one
 ```
