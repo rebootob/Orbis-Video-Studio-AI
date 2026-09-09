@@ -39,6 +39,11 @@ class ProviderJobResult(BaseModel):
     status_code: Optional[int] = None
     retryable: bool = False
     submission_uncertain: bool = False
+    # Provider-native reconciliation metadata. These fields must contain only typed,
+    # non-content values sanitized by the provider adapter; raw bodies remain forbidden.
+    provider_status: Optional[str] = None
+    provider_error_code: Optional[str] = None
+    provider_credits: Optional[float] = None
     raw_response: Optional[Dict[str, Any]] = None
 
 
