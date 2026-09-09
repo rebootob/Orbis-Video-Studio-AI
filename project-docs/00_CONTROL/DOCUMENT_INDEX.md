@@ -91,7 +91,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE and C1-CLOSE-R1 are complete. BILL1 provider-side evidence is accepted with disposition `NOT CHARGED`; the Vidu internal `USD 0.15` remains an estimate only, while the R4 last known committed/actual Orbis UAT cost remains `USD 0.0738`.
 
-`P4-WP020-LIVE-R4-BILL1-CLOSE` is the current Owner-authorized CONTROL-DOC ONLY gate. It authorizes no provider call, no R5 identity, no paid marker/fence and no paid/live workflow dispatch. Owner-provided Vidu Credit Balance evidence shows `2,000 credits` after top-up; this is readiness evidence only and is not converted to USD.
+This BILL1-CLOSE record is designed to leave `ACTIVE_WORK_PACKAGE = NONE` when it reaches canonical main. Owner-provided Vidu Credit Balance evidence shows `2,000 credits` after top-up; this is readiness evidence only and is not converted to USD. R5 remains `NONE / NOT AUTHORIZED` and no provider request is authorized.
 
 Canonical main at BILL1-CLOSE start is `da381bbd2cc407393e7326e9824bef68ea356e6b`. Fresh repository truth newer than this text remains authoritative.
 
