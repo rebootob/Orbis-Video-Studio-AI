@@ -24,22 +24,28 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-TOOL1
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-C1
 P4-WP020: ACTIVE / NOT CLOSED
-R4 PRE1: PASS / COMPLETED / CLOSED
-R4 TOOL1: OWNER AUTHORIZED / NO-PAID IMPLEMENTATION + CI REVIEW
+R4 RUN1: STOPPED / CONSUMED / NEVER RERUN
+R4 C1: OWNER AUTHORIZED / NO-PAID CORRECTIVE
 Core V1 release: NOT DECLARED
-R4 paid/live execution: NOT AUTHORIZED
+R5 or later paid/live execution: NOT AUTHORIZED
 ```
 
-Tooling baseline:
+Current baseline:
 
 ```text
-main at R4 TOOL1 start: de17a125dcd3b8066a546369d03aba813a7b5641
-branch: ai/p4-wp020-live-r4-tool1
+main at R4-C1 start: b1538f655bf526384845c1e8c536ad6fddc66ca7
+branch: ai/p4-wp020-live-r4-c1
 R4 execution identity: LIVE-20260909-DE17-R4
-TOOL1 provider generation calls: 0
-TOOL1 spend authorization: USD 0.00
+R4 run: 34316188814
+R4 fence: CONSUMED / NEVER RERUN
+R4 STOP phase: LIVE-03-VIDU-VIDEO
+R4 conservative calls: 3 / 6
+R4 last known committed/actual Orbis UAT cost: USD 0.0738
+R4 failed Vidu external billing: UNKNOWN
+C1 provider calls: 0
+C1 spend authorization: USD 0.00
 ```
 
 ---
@@ -76,10 +82,11 @@ TOOL1 spend authorization: USD 0.00
 
 ```text
 Status: ACTIVE / NOT CLOSED
-Current sub-gate: P4-WP020-LIVE-R4-TOOL1
-Current sub-gate type: NO-PAID TOOLING PREPARATION
-Last completed sub-gate: R4-PRE1-CLOSE PASS / MERGED / COMPLETE
-Paid LIVE execution: NOT AUTHORIZED
+Current sub-gate: P4-WP020-LIVE-R4-C1
+Current sub-gate type: NO-PAID CORRECTIVE
+Last merged closure: R4-PF1-CLOSE via PR #84
+R4 paid execution: STOPPED / CONSUMED
+Future live identity: NOT AUTHORIZED
 Core V1 release declaration: NOT AUTHORIZED
 ```
 
@@ -97,7 +104,6 @@ R2:
 - fence consumed;
 - OpenAI STORY succeeded;
 - Gemini IMAGE stopped on non-success `HTTP_ERROR`;
-- exact historical Gemini HTTP status unavailable;
 - conservative calls = 2/6;
 - last known confirmed/committed UAT cost = USD 0.0072;
 - Vidu / ElevenLabs / downstream not executed;
@@ -135,55 +141,64 @@ R4-PRE1-CLOSE:
 - canonical main advanced to `de17a125dcd3b8066a546369d03aba813a7b5641`;
 - status PASS / MERGED / COMPLETE.
 
-### R4-TOOL1 — Active / NO-PAID
+R4-TOOL1 / TOOL1-CLOSE-R1:
+- TOOL1 PR #82 merged;
+- governance reconciliation PR #83 merged;
+- execution identity `LIVE-20260909-DE17-R4` prepared;
+- provider calls from tooling/closure = 0; spend = USD 0.00.
 
-Owner authorized `P4-WP020-LIVE-R4-TOOL1 — Bounded One-Shot Execution Tooling Preparation`.
+R4-PF1 / PF1-CLOSE:
+- canonical Owner-authorized no-paid run `34313038252` = SUCCESS on exact main `7de0d3344cd32a1a016f0ee1f4d6121861c57a43`;
+- generation calls = 0; paid calls = 0; fence = false; spend = USD 0.00;
+- closure PR #84 merged to main `b1538f655bf526384845c1e8c536ad6fddc66ca7`.
 
-Authorized tooling includes:
-- exact R4 identity/SHA/fence/call/budget guards;
-- manual-only R4 no-paid preflight;
-- manual-only one-shot R4 paid workflow that remains inert without later exact Owner authorization;
-- fail-closed R4 runner adapter reusing only the exact reviewed R3 implementation blob;
-- durable sanitized failure evidence before ephemeral runtime teardown;
-- regression/static tests and control-doc sync.
+R4-AUTH1 / RUN1:
+- exact Owner paid authorization marker written for main `b1538f655bf526384845c1e8c536ad6fddc66ca7`;
+- separate Owner RUN authorization recorded;
+- one-shot workflow run `34316188814` dispatched once;
+- exact R4 fence consumed;
+- OpenAI STORY = SUCCESS;
+- Gemini IMAGE = SUCCESS;
+- Vidu VIDEO = FAILED;
+- ElevenLabs TTS / Music / Ambience = NOT CALLED;
+- STOP phase = `LIVE-03-VIDU-VIDEO`;
+- conservative calls = 3/6;
+- last known committed/actual Orbis UAT cost at STOP = USD 0.0738;
+- Vidu job internal estimate = USD 0.15;
+- failed Vidu external billing = UNKNOWN until provider-side usage/billing evidence is accepted;
+- R4 is consumed and MUST NEVER BE RERUN.
 
-Locked future paid chain:
+### R4-C1 — Active / NO-PAID
 
-```text
-OpenAI STORY x1
-Gemini IMAGE x1
-Vidu VIDEO x1
-ElevenLabs AUDIO x3
-Maximum chargeable requests: 6
-Hard cap: USD 1.00
-Sequential only
-OpenAI retries: 0
-Execution ID: LIVE-20260909-DE17-R4
-Tooling base main: de17a125dcd3b8066a546369d03aba813a7b5641
-```
+Owner authorized `P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)`.
 
-The R4 adapter requires the inherited R3 runner Git blob SHA `24150cdece623004443e03ceecea10490955822b` and fails closed if it drifts. No dynamic source rewrite is permitted.
+Authorized corrective includes:
+- preserve sanitized Vidu terminal task/provider-job identity when returned;
+- preserve safe typed provider state, provider error code and provider credits;
+- keep raw provider bodies, headers, prompts and credentials excluded;
+- preserve typed reconciliation metadata through durable job evidence;
+- clarify R4 Vidu job `cost_usd` as an internal estimate, not confirmed provider billing;
+- label failed-task external billing `UNKNOWN` pending provider evidence;
+- mocked regression tests and control/delivery doc synchronization.
 
-TOOL1 itself authorizes **zero provider generation calls and USD 0.00 spend**.
+C1 itself authorizes **zero external provider calls and USD 0.00 spend**.
 
-Detailed TOOL1 contract: `P4_WP020_LIVE_R4_TOOL1.md`.
+Detailed C1 contract/evidence: `P4_WP020_LIVE_R4_C1.md`.
 
 ---
 
-## 5. Required Gates After R4 TOOL1
+## 5. Required Gates From R4-C1
 
 ```text
-R4 TOOL1 implementation
--> exact-head backend/frontend/migration CI
+R4-C1 bounded NO-PAID implementation
+-> exact-head Backend/Frontend CI
 -> independent review
 -> Owner merge approval
--> fresh R4 PF1 no-paid preflight on exact post-merge main
--> fresh exact-SHA Owner R4 paid authorization marker
--> separate explicit Owner RUN authorization
--> R4 LIVE paid workflow
+-> provider-side Vidu billing evidence disposition, if still unresolved
+-> only then consider a separately Owner-authorized future execution identity
 ```
 
-No step auto-authorizes the next one. A STOP after R4 fence consumption permanently consumes `LIVE-20260909-DE17-R4`.
+No step auto-authorizes the next one. R4 is permanently consumed; R5 does not exist until explicitly authorized.
 
 ---
 
@@ -218,10 +233,12 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-While R4 TOOL1 is active:
+While R4-C1 is active:
 
-- do not dispatch R4 workflows;
-- do not write R4 paid authorization/fence markers;
-- do not call providers;
+- do not call any external provider;
+- do not rerun R4;
+- do not create R5;
+- do not consume any new execution fence;
+- do not dispatch any paid/live workflow;
 - do not release/tag/deploy;
 - stop at the Owner merge gate after exact-head CI and independent review.

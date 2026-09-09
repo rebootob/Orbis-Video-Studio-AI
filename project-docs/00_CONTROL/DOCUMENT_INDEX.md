@@ -82,13 +82,14 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R3 PRE1 No-Paid Gate | [`../40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md`](../40_DELIVERY/P4_WP020_LIVE_R3_PRE1.md) |
 | P4-WP020 LIVE R3 Proposed Resume Contract | [`../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`](../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md) |
 | P4-WP020 LIVE R4 TOOL1 Contract | [`../40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`](../40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md) |
+| P4-WP020 LIVE R4 C1 Vidu Failure/Billing Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R4_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R4_C1.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
 | Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
 | WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
 
-P4-WP020 remains active and Owner-gated. R1/R2/R3 are consumed immutable live histories. R4-PRE1 is closed PASS/NO-PAID. R4-TOOL1 is the current NO-PAID tooling package; it creates `LIVE-20260909-DE17-R4` tooling only and does not authorize provider generation or paid execution.
+P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1` is the current NO-PAID corrective for durable Vidu failure metadata and billing-state clarity; it authorizes no provider calls and no R5 identity.
 
 ---
 
