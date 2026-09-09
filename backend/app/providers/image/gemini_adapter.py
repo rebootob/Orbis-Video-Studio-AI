@@ -26,6 +26,9 @@ _SUPPORTED_ASPECT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 _SUPPORTED_OUTPUT_MIME_TYPES = {"image/jpeg"}
 _SUPPORTED_REFERENCE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _MODEL_RE = re.compile(r"^gemini-[A-Za-z0-9.-]+-image(?:-preview)?$")
+_SAFE_EVIDENCE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,240}$")
+_RETRY_DELAY_RE = re.compile(r"^\d+(?:\.\d+)?s$")
+_ALLOWED_QUOTA_DIMENSIONS = {"model", "location"}
 
 
 class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
@@ -93,6 +96,109 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         except (TypeError, ValueError):
             return False
 
+    @staticmethod
+    def _safe_evidence_token(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if not cleaned or not _SAFE_EVIDENCE_TOKEN_RE.fullmatch(cleaned):
+            return None
+        return cleaned
+
+    @classmethod
+    def _sanitize_429_evidence(cls, payload: Any) -> Dict[str, Any]:
+        """Extract an allowlisted, non-secret subset of Google 429 error metadata."""
+        if not isinstance(payload, dict):
+            return {}
+
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return {}
+
+        evidence: Dict[str, Any] = {}
+        provider_status = cls._safe_evidence_token(error.get("status"))
+        if provider_status:
+            evidence["provider_status"] = provider_status
+
+        quota_failures = []
+        retry_delay = None
+        details = error.get("details")
+        if isinstance(details, list):
+            for detail in details[:8]:
+                if not isinstance(detail, dict):
+                    continue
+                detail_type = detail.get("@type")
+                if isinstance(detail_type, str) and detail_type.endswith("google.rpc.QuotaFailure"):
+                    violations = detail.get("violations")
+                    if not isinstance(violations, list):
+                        continue
+                    for violation in violations[:4]:
+                        if not isinstance(violation, dict):
+                            continue
+                        row: Dict[str, Any] = {}
+                        metric = cls._safe_evidence_token(
+                            violation.get("quotaMetric", violation.get("quota_metric"))
+                        )
+                        quota_id = cls._safe_evidence_token(
+                            violation.get("quotaId", violation.get("quota_id"))
+                        )
+                        quota_value = cls._safe_evidence_token(
+                            violation.get("quotaValue", violation.get("quota_value"))
+                        )
+                        if metric:
+                            row["quota_metric"] = metric
+                        if quota_id:
+                            row["quota_id"] = quota_id
+                        if quota_value:
+                            row["quota_value"] = quota_value
+
+                        dimensions = violation.get(
+                            "quotaDimensions", violation.get("quota_dimensions")
+                        )
+                        safe_dimensions: Dict[str, str] = {}
+                        if isinstance(dimensions, dict):
+                            for key in _ALLOWED_QUOTA_DIMENSIONS:
+                                value = cls._safe_evidence_token(dimensions.get(key))
+                                if value:
+                                    safe_dimensions[key] = value
+                        if safe_dimensions:
+                            row["quota_dimensions"] = safe_dimensions
+                        if row:
+                            quota_failures.append(row)
+
+                if isinstance(detail_type, str) and detail_type.endswith("google.rpc.RetryInfo"):
+                    candidate = detail.get("retryDelay", detail.get("retry_delay"))
+                    if isinstance(candidate, str):
+                        candidate = candidate.strip()
+                        if _RETRY_DELAY_RE.fullmatch(candidate):
+                            retry_delay = candidate
+
+        if quota_failures:
+            evidence["quota_failures"] = quota_failures
+        if retry_delay:
+            evidence["retry_delay"] = retry_delay
+
+        quota_class = None
+        if any(row.get("quota_value") == "0" for row in quota_failures):
+            quota_class = "QUOTA_ZERO"
+        else:
+            identifiers = " ".join(
+                " ".join(str(row.get(key, "")) for key in ("quota_metric", "quota_id"))
+                for row in quota_failures
+            ).lower()
+            if "perday" in identifiers or "per_day" in identifiers:
+                quota_class = "DAILY_QUOTA"
+            elif "perminute" in identifiers or "per_minute" in identifiers:
+                quota_class = "RATE_LIMIT"
+            elif quota_failures:
+                quota_class = "QUOTA_EXHAUSTED"
+            elif provider_status == "RESOURCE_EXHAUSTED":
+                quota_class = "RESOURCE_EXHAUSTED"
+
+        if quota_class:
+            evidence["quota_class"] = quota_class
+        return evidence
+
     def _failure(
         self,
         code: str,
@@ -101,6 +207,7 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
         retryable: bool = False,
         uncertain: bool = False,
         job_id: str = "",
+        extra_evidence: Optional[Dict[str, Any]] = None,
     ) -> ImageJobResult:
         sanitized_evidence = None
         if status_code is not None:
@@ -112,6 +219,8 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
                 "retryable": retryable,
                 "submission_uncertain": uncertain,
             }
+            if extra_evidence:
+                sanitized_evidence.update(extra_evidence)
         return ImageJobResult(
             provider_job_id=job_id,
             status="FAILED",
@@ -303,11 +412,18 @@ class GeminiImageProviderAdapter(IImageGenerationProviderAdapter):
 
         if response.status_code not in (200, 201):
             retryable = response.status_code == 429 or response.status_code in (500, 502, 503, 504)
+            extra_evidence = None
+            if response.status_code == 429:
+                try:
+                    extra_evidence = self._sanitize_429_evidence(response.json())
+                except Exception:
+                    extra_evidence = None
             return self._failure(
                 "HTTP_ERROR",
                 status_code=response.status_code,
                 retryable=retryable,
                 uncertain=response.status_code >= 500,
+                extra_evidence=extra_evidence,
             )
 
         try:
