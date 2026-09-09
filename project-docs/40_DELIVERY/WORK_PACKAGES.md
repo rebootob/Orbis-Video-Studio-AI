@@ -24,28 +24,33 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-C1
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: WAITING FOR EXPLICIT OWNER NEXT GATE
 P4-WP020: ACTIVE / NOT CLOSED
 R4 RUN1: STOPPED / CONSUMED / NEVER RERUN
-R4 C1: OWNER AUTHORIZED / NO-PAID CORRECTIVE
+R4 C1: PASS / MERGED / COMPLETE
+R4 C1-CLOSE: PASS / MERGED / COMPLETE
 Core V1 release: NOT DECLARED
-R5 or later paid/live execution: NOT AUTHORIZED
+R5 or later paid/live execution: NONE / NOT AUTHORIZED
 ```
 
 Current baseline:
 
 ```text
-main at R4-C1 start: b1538f655bf526384845c1e8c536ad6fddc66ca7
-branch: ai/p4-wp020-live-r4-c1
+canonical main at R4-C1-CLOSE-R1 start: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
 R4 execution identity: LIVE-20260909-DE17-R4
 R4 run: 34316188814
 R4 fence: CONSUMED / NEVER RERUN
 R4 STOP phase: LIVE-03-VIDU-VIDEO
 R4 conservative calls: 3 / 6
 R4 last known committed/actual Orbis UAT cost: USD 0.0738
-R4 failed Vidu external billing: UNKNOWN
+R4 Vidu internal job estimate: USD 0.15 / ESTIMATED
+R4 failed Vidu external billing: UNKNOWN / RECONCILIATION REQUIRED
+C1 PR: #85 / PASS / MERGED / COMPLETE
+C1-CLOSE PR: #86 / PASS / MERGED / COMPLETE
 C1 provider calls: 0
-C1 spend authorization: USD 0.00
+C1 spend added: USD 0.00
+R5 identity: NONE / NOT AUTHORIZED
 ```
 
 ---
@@ -82,11 +87,11 @@ C1 spend authorization: USD 0.00
 
 ```text
 Status: ACTIVE / NOT CLOSED
-Current sub-gate: P4-WP020-LIVE-R4-C1
-Current sub-gate type: NO-PAID CORRECTIVE
-Last merged closure: R4-PF1-CLOSE via PR #84
-R4 paid execution: STOPPED / CONSUMED
-Future live identity: NOT AUTHORIZED
+Current sub-gate: NONE
+Current gate: WAITING FOR EXPLICIT OWNER NEXT GATE
+Last merged closure: R4-C1-CLOSE via PR #86
+R4 paid execution: STOPPED / CONSUMED / NEVER RERUN
+Future live identity: NONE / NOT AUTHORIZED
 Core V1 release declaration: NOT AUTHORIZED
 ```
 
@@ -164,41 +169,50 @@ R4-AUTH1 / RUN1:
 - STOP phase = `LIVE-03-VIDU-VIDEO`;
 - conservative calls = 3/6;
 - last known committed/actual Orbis UAT cost at STOP = USD 0.0738;
-- Vidu job internal estimate = USD 0.15;
+- Vidu job internal estimate = USD 0.15 / ESTIMATED;
 - failed Vidu external billing = UNKNOWN until provider-side usage/billing evidence is accepted;
 - R4 is consumed and MUST NEVER BE RERUN.
 
-### R4-C1 — Active / NO-PAID
+### R4-C1 / C1-CLOSE — PASS / MERGED / COMPLETE
 
-Owner authorized `P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)`.
+`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` completed and merged through PR #85.
 
-Authorized corrective includes:
-- preserve sanitized Vidu terminal task/provider-job identity when returned;
-- preserve safe typed provider state, provider error code and provider credits;
-- keep raw provider bodies, headers, prompts and credentials excluded;
-- preserve typed reconciliation metadata through durable job evidence;
-- clarify R4 Vidu job `cost_usd` as an internal estimate, not confirmed provider billing;
-- label failed-task external billing `UNKNOWN` pending provider evidence;
-- mocked regression tests and control/delivery doc synchronization.
+Completion evidence:
+- exact reviewed C1 HEAD `c6f02fe56d4248011b0ef0cb96910d6997195e60`;
+- C1 merge commit `4ff697c9cd0698406ce248e95ec4a69df8cd2fc5`;
+- Backend CI `34323625029` = SUCCESS;
+- Frontend CI `34323625048` = SUCCESS;
+- independent review = PASS;
+- provider calls from C1 = 0;
+- spend added by C1 = USD 0.00.
 
-C1 itself authorizes **zero external provider calls and USD 0.00 spend**.
+C1-CLOSE control synchronization completed and merged through PR #86:
+- exact reviewed closure HEAD `cb3498a7e7b3affe5b49ed96c0081e1e92621f3d`;
+- closure merge commit / canonical main `37bc4584eaa14bcf1d01243364548b2a3c39bcbb`;
+- active work package cleared to NONE;
+- R5 remains NONE / NOT AUTHORIZED.
 
-Detailed C1 contract/evidence: `P4_WP020_LIVE_R4_C1.md`.
+C1 preserves sanitized Vidu terminal task/provider-job identity and safe typed reconciliation metadata, keeps unsafe/raw provider content excluded, and classifies the R4 Vidu job amount as an estimate rather than confirmed external billing.
+
+Detailed historical C1 contract/evidence: `P4_WP020_LIVE_R4_C1.md`.
 
 ---
 
-## 5. Required Gates From R4-C1
+## 5. Required Gates After R4-C1 Closure
 
 ```text
-R4-C1 bounded NO-PAID implementation
--> exact-head Backend/Frontend CI
--> independent review
--> Owner merge approval
--> provider-side Vidu billing evidence disposition, if still unresolved
--> only then consider a separately Owner-authorized future execution identity
+R4-C1 implementation = COMPLETE
+-> exact-head Backend/Frontend CI = PASS
+-> independent review = PASS
+-> Owner merge approval = COMPLETE via PR #85
+-> C1 closure/control sync = COMPLETE via PR #86
+-> ACTIVE_WORK_PACKAGE = NONE
+-> next exact gate requires separate Owner authorization
 ```
 
-No step auto-authorizes the next one. R4 is permanently consumed; R5 does not exist until explicitly authorized.
+If the Owner chooses to resolve the remaining Vidu billing question, provider-side Usage/Billing evidence disposition is a separate gate. Only after any required readiness/evidence work may a future execution identity be considered, and such identity must be separately Owner-authorized.
+
+No step auto-authorizes the next one. R4 is permanently consumed; R5 does not exist and is not authorized.
 
 ---
 
@@ -233,12 +247,15 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-While R4-C1 is active:
+After R4-C1-CLOSE:
 
+- no active work package exists until the Owner authorizes one;
 - do not call any external provider;
 - do not rerun R4;
 - do not create R5;
+- do not write a new paid authorization marker;
 - do not consume any new execution fence;
 - do not dispatch any paid/live workflow;
+- do not adjust provider billing without accepted provider-side evidence;
 - do not release/tag/deploy;
-- stop at the Owner merge gate after exact-head CI and independent review.
+- every next gate requires separate explicit Owner authorization.
