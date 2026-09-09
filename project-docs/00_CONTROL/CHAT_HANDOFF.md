@@ -16,25 +16,29 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
-ACTIVE_TYPE = CONTROL-DOC + PF1 GOVERNANCE RECONCILIATION
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-PF1-CLOSE
+ACTIVE_TYPE = CONTROL-DOC ONLY
 OWNER_AUTHORIZED = YES
 R4_PAID_EXECUTION = NOT AUTHORIZED
 ```
 
 ---
 
-## Canonical R4 Truth
+## Canonical Main / R4 Truth
 
 ```text
 Current canonical main:
-de08c98f2644ed9e56983aad265a82b32d91e462
+7de0d3344cd32a1a016f0ee1f4d6121861c57a43
 
 R4-TOOL1:
 PASS / MERGED / COMPLETE via PR #82
 Reviewed HEAD: 7fe35f3c51d248435ab1c90355b29cd1ade66f67
-Backend CI: 34305801438 = SUCCESS
-Frontend CI: 34305801517 = SUCCESS
+Merge commit: de08c98f2644ed9e56983aad265a82b32d91e462
+
+R4-TOOL1-CLOSE-R1:
+PASS / MERGED / COMPLETE via PR #83
+Reviewed HEAD: 978d85518450e1eaa0d3026ce2abc90295567f97
+Merge commit: 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
 
 R4 execution identity:
 LIVE-20260909-DE17-R4
@@ -44,51 +48,69 @@ R4 execution fence: NONE
 R4 paid execution: NOT AUTHORIZED
 ```
 
-Future R4 contract remains hard cap USD 1.00, maximum 6 sequential chargeable requests, OpenAI retries 0, with exact provider order OpenAI Story -> Gemini Image -> Vidu Video -> ElevenLabs TTS -> Music -> Ambience.
+R4 contract remains hard cap USD 1.00, maximum 6 sequential chargeable requests, OpenAI retries 0, exact provider order OpenAI Story -> Gemini Image -> Vidu Video -> ElevenLabs TTS -> Music -> Ambience.
 
-Future Owner marker:
+Future paid authorization marker, only after a separate Owner gate:
 
 ```text
 FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact authorized main SHA>
 ```
 
-Future one-shot fence:
+Future one-shot fence, only after a later separate Owner RUN authorization reaches execution:
 
 ```text
 EXECUTION_STARTED: LIVE-20260909-DE17-R4
 ```
 
-Neither exists yet.
+Neither exists now.
 
 ---
 
-## PF1 Governance Reconciliation
+## Fresh Owner-Authorized R4-PF1
 
-After TOOL1 merged, R4 no-paid preflight run `34306778867` was dispatched on exact main `de08c98f2644ed9e56983aad265a82b32d91e462` before a separate Owner PF1 authorization gate was recorded.
+Owner explicitly authorized `P4-WP020-LIVE-R4-PF1 — Fresh Exact-Main NO-PAID Preflight` on exact main `7de0d3344cd32a1a016f0ee1f4d6121861c57a43`.
 
-Technical result:
+Canonical PF1 evidence:
 
 ```text
+Run: 34313038252
 Workflow: WP020 LIVE R4 No-Paid Preflight
+Run number: 2
+Event: workflow_dispatch
+Head SHA: 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
 Conclusion: SUCCESS
 status: PREFLIGHT_PASS
 required_credentials_present: true
 generation_request_sent: false
 paid_provider_calls: 0
 execution_fence_written: false
-estimated_total_reservation: USD 0.2739
+budget cap: USD 1.00
+max paid calls: 6
+estimated total reservation: USD 0.2739
+PF1 spend added: USD 0.00
 ```
 
-Governance classification:
-- technical NO-PAID evidence only;
-- NOT Owner-authorized PF1 completion;
-- no retroactive authorization inferred;
-- no R4 paid authorization marker;
-- no R4 execution fence consumption;
-- no provider generation;
-- no paid workflow authorization.
+Verified runtime readiness:
+- manual canonical-main guard PASS;
+- exact authorized SHA PASS;
+- fresh PostgreSQL 16 migration to Alembic head PASS;
+- ephemeral MinIO health PASS;
+- required credential/config presence PASS without exposing secret values;
+- provider routing/pricing/budget reservation PASS;
+- no provider-generation request;
+- no paid call;
+- no paid authorization marker;
+- no execution-fence consumption.
 
-Issue #63 reconciliation comment: `5595805718`.
+Issue #63 PF1 result comment: `5596078866`.
+
+---
+
+## Prior PF1 Governance Reconciliation
+
+Earlier run `34306778867` on main `de08c98f2644ed9e56983aad265a82b32d91e462` remains historical technical NO-PAID evidence only. It was not Owner-authorized as PF1 at dispatch time and is not retroactively authorized.
+
+The fresh run `34313038252` is the canonical Owner-authorized PF1 completion evidence.
 
 ---
 
@@ -123,18 +145,21 @@ R3 rerun: FORBIDDEN
 
 ---
 
-## Next Gate
+## Current Gate / Next Gate
 
-Finish this reconciliation branch/PR, exact-head CI, independent review, then STOP for Owner merge decision.
-
-After merge, Owner must explicitly choose either:
+Current authorized gate:
 
 ```text
-A) adopt run 34306778867 as R4 PF1 evidence through a fresh governance gate; or
-B) authorize a fresh R4 PF1 NO-PAID run on the then-current exact main.
+P4-WP020-LIVE-R4-PF1-CLOSE — CONTROL-DOC ONLY
 ```
 
-Only after an Owner-authorized PF1 state may a separate exact-SHA R4 paid authorization be considered, followed by a separate explicit RUN authorization.
+Finish control-doc sync, exact-head CI, independent review, then STOP for Owner merge decision.
+
+After PF1-CLOSE merges:
+- do NOT auto-start paid execution;
+- a separate exact-SHA Owner R4 paid-authorization gate may be considered;
+- the paid authorization must still be separate from a later explicit Owner RUN authorization;
+- no marker, fence, or provider generation exists until those later gates are explicitly approved.
 
 No gate auto-authorizes the next one.
 
