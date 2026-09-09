@@ -56,7 +56,7 @@ Owner authorized `P4-WP020-LIVE-R5-PRE1 — NO-PAID Readiness / Preflight` in Is
 
 The dedicated readiness workflow was executed on canonical `main`:
 - Run ID: `34351326791`;
-- Workflow: `WP020 LIVE R5 Readiness & Preflight (NO-PAID)`;
+- Workflow: `WP020 LIVE R5 No-Paid Preflight`;
 - Execution Main SHA: `46cd9e85d68b58e9d276673e6834c81167218de9`;
 - Conclusion: `SUCCESS` / `PASS` / `NO-PAID`.
 
@@ -65,7 +65,7 @@ Accepted preflight evidence:
 - Ephemeral MinIO object storage write/read/delete verified;
 - Required credentials and adapter configurations present for OpenAI, Gemini, Vidu, ElevenLabs;
 - Adapter constructors and config validation verified without making any provider generation calls;
-- Local pricing estimator verified for all 6 sequential provider targets within USD 1.00 reservation ceiling;
+- Local pricing estimator verified for all 6 sequential chargeable request targets across OpenAI, Gemini, Vidu, and ElevenLabs within USD 1.00 reservation ceiling;
 - Owner-provided balance of 2,000 Vidu credits documented as readiness evidence only (not converted to USD);
 - Verification metrics:
   ```text

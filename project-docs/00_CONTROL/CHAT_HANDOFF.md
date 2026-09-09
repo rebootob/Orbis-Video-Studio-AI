@@ -94,7 +94,7 @@ Verified:
 - Ephemeral MinIO storage write/read/delete;
 - Credentials present for OpenAI, Gemini, Vidu, ElevenLabs;
 - Adapter constructors and configs valid without generation calls;
-- Local pricing estimator valid for all 6 target providers within USD 1.00 reservation ceiling;
+- Local pricing estimator valid for all 6 sequential chargeable request targets across OpenAI, Gemini, Vidu, and ElevenLabs within USD 1.00 reservation ceiling;
 - Zero provider generation calls, zero paid provider calls, zero Vidu credits consumed, zero paid fences;
 - Owner-provided balance of 2,000 Vidu credits documented as readiness evidence only (not converted to USD).
 
