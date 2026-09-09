@@ -49,11 +49,11 @@ NEXT_GATE = OWNER DECISION REQUIRED
 `P4-WP020-LIVE-R4-BILL1 — Vidu Provider-Side Billing Evidence Disposition (EVIDENCE-ONLY / NO-PAID)` is complete at the evidence-disposition level.
 
 Accepted evidence:
-- Owner-provided Vidu Usage view for `2026-09-09` in `UTC0`;
+- Owner-provided Vidu Usage view with `UTC0` date range shown as `2026-08-09 - 2026-09-09`;
 - `All Keys` selected;
-- task/model filters set to `ALL`;
-- no Usage History records shown for the date;
-- therefore no provider-recorded usage entry exists for the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`.
+- Type, Model Version, Resolution, Template and Generate Mode filters set to `ALL`;
+- the Usage History area shows `No data to export` / no usage rows for the displayed range;
+- the displayed range includes the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`, so no provider-recorded usage entry is shown for that interval.
 
 Controlled disposition:
 
