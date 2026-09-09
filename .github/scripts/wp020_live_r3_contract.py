@@ -34,6 +34,18 @@ _SAFE_RESULT_KEYS = (
     "error_code",
     "retryable",
     "submission_uncertain",
+    "provider_status",
+    "quota_class",
+    "retry_delay",
+)
+_SAFE_QUOTA_FAILURE_KEYS = (
+    "quota_metric",
+    "quota_id",
+    "quota_value",
+)
+_SAFE_QUOTA_DIMENSION_KEYS = (
+    "model",
+    "location",
 )
 _SAFE_PROVENANCE_KEYS = (
     "provider_job_id",
@@ -105,6 +117,31 @@ def _copy_allowlist(source: Mapping[str, Any] | None, keys: Sequence[str]) -> di
     return {key: source[key] for key in keys if key in source and source[key] is not None}
 
 
+def _sanitize_quota_failures(source: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Copy only the structured quota fields already sanitized by the provider adapter."""
+    if not isinstance(source, Mapping):
+        return []
+    failures = source.get("quota_failures")
+    if not isinstance(failures, Sequence) or isinstance(failures, (str, bytes, bytearray)):
+        return []
+
+    safe_failures: list[dict[str, Any]] = []
+    for row in failures[:4]:
+        if not isinstance(row, Mapping):
+            continue
+        safe_row = _copy_allowlist(row, _SAFE_QUOTA_FAILURE_KEYS)
+        dimensions = row.get("quota_dimensions")
+        safe_dimensions = _copy_allowlist(
+            dimensions if isinstance(dimensions, Mapping) else None,
+            _SAFE_QUOTA_DIMENSION_KEYS,
+        )
+        if safe_dimensions:
+            safe_row["quota_dimensions"] = safe_dimensions
+        if safe_row:
+            safe_failures.append(safe_row)
+    return safe_failures
+
+
 def sanitize_creative_audit(
     audit: Any,
     *,
@@ -141,7 +178,9 @@ def sanitize_generation_job(job: Any) -> dict[str, Any]:
     """Serialize only allowlisted GenerationJob failure metadata.
 
     Raw provider response bodies, headers, payloads, prompts, credentials, and
-    reference bytes are intentionally excluded.
+    reference bytes are intentionally excluded. Structured Gemini quota evidence is
+    copied only through a second nested allowlist so future STOP artifacts can retain
+    the 429 class/metric/limit/retry evidence without copying provider body text.
     """
     if job is None:
         return {}
@@ -154,7 +193,11 @@ def sanitize_generation_job(job: Any) -> dict[str, Any]:
         "job_type": getattr(job, "job_type", None),
         "cost_usd": getattr(job, "cost_usd", None),
     }
-    result = _copy_allowlist(getattr(job, "result", None), _SAFE_RESULT_KEYS)
+    raw_result = getattr(job, "result", None)
+    result = _copy_allowlist(raw_result, _SAFE_RESULT_KEYS)
+    quota_failures = _sanitize_quota_failures(raw_result)
+    if quota_failures:
+        result["quota_failures"] = quota_failures
     if result:
         evidence["result"] = result
     return {key: value for key, value in evidence.items() if value not in (None, "")}
