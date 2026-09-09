@@ -26,8 +26,8 @@ Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
 P4-WP020: ACTIVE / NOT CLOSED
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID (RUN 34351326791)
-P4-WP020-LIVE-R5-PRE1-CLOSE: CONTROL-DOC CLOSURE / EFFECTIVE WHEN MERGED TO CANONICAL MAIN
-ACTIVE_WORK_PACKAGE AFTER R5-PRE1-CLOSE MERGE: NONE
+P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
+ACTIVE_WORK_PACKAGE: NONE
 NEXT_GATE: OWNER DECISION REQUIRED
 Core V1 release: NOT DECLARED
 R5 or later paid/live execution: NONE / NOT AUTHORIZED
@@ -36,7 +36,7 @@ R5 or later paid/live execution: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-canonical main at R5-PRE1-CLOSE start: 46cd9e85d68b58e9d276673e6834c81167218de9
+canonical main at R5-PRE1-CLOSE-R1 start: 817539b619c4b28f22273ff01df733c612a2a386
 R5 readiness identity: WP020-LIVE-R5-PRE1
 R5 preflight run: 34351326791
 R5 preflight status: PASS / COMPLETED / NO-PAID
@@ -259,7 +259,7 @@ Accepted preflight evidence:
   paid_live_dispatch = false
   ```
 
-Closure authorization: Issue #63 comment `5601980565`.
+Closure authorization: Issue #63 comment `5601980565` (merged to main in PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`).
 
 Detailed historical readiness specification: `P4_WP020_LIVE_R5_PRE1.md`.
 
@@ -267,11 +267,11 @@ Detailed historical readiness specification: `P4_WP020_LIVE_R5_PRE1.md`.
 
 ## 5. Required Gates After R5-PRE1 Closure
 
-When this R5-PRE1-CLOSE record is merged to canonical main:
+With R5-PRE1-CLOSE merged to canonical main (PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`):
 
 ```text
 P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID (RUN 34351326791)
--> R5-PRE1-CLOSE documentation synchronization = COMPLETE
+-> R5-PRE1-CLOSE documentation synchronization = PASS / MERGED / COMPLETE
 -> ACTIVE_WORK_PACKAGE = NONE
 -> R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
 -> R5_PAID_EXECUTION = NOT AUTHORIZED
