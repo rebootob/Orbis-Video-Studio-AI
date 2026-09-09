@@ -16,54 +16,59 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-C1
-ACTIVE_TYPE = NO-PAID CORRECTIVE
-OWNER_AUTHORIZED = YES
+ACTIVE_WORK_PACKAGE = NONE
+CURRENT_GATE = WAITING FOR EXPLICIT OWNER NEXT GATE
 ```
+
+Canonical main at C1 closure-sync start:
+`4ff697c9cd0698406ce248e95ec4a69df8cd2fc5`
+
+Always fresh-fetch `main` before any status, merge, authorization or execution decision.
 
 ---
 
-## Canonical Main / R4 Truth
+## R4-C1 Closure Truth
+
+`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` is `PASS / MERGED / COMPLETE`.
 
 ```text
-Canonical main at R4-C1 start:
-b1538f655bf526384845c1e8c536ad6fddc66ca7
+PR: #85
+Exact reviewed HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
+Merge commit: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+Backend CI: 34323625029 = SUCCESS
+Backend suite: 538 passed / 2 skipped / 3 warnings
+Migrations fresh-head: SUCCESS
+Migrations from-revision-010: SUCCESS
+Frontend CI: 34323625048 = SUCCESS
+Independent review: PASS
+C1 provider calls: 0
+C1 spend added: USD 0.00
+```
 
-R4 execution identity:
-LIVE-20260909-DE17-R4
+C1 preserves sanitized Vidu terminal task/provider metadata through durable evidence and makes the R4 failed Vidu job amount explicitly estimated rather than confirmed provider billing.
 
-R4 paid run:
-34316188814
+---
 
-R4 execution main:
-b1538f655bf526384845c1e8c536ad6fddc66ca7
+## Immutable R4 Truth
 
-R4 execution fence:
-CONSUMED / NEVER RERUN
-
-R4 terminal status:
-STOPPED at LIVE-03-VIDU-VIDEO
-
-Conservative paid calls:
-3 / 6
-
-Last known committed/actual Orbis UAT cost at STOP:
-USD 0.0738
+```text
+Execution identity: LIVE-20260909-DE17-R4
+Paid run: 34316188814
+Execution main: b1538f655bf526384845c1e8c536ad6fddc66ca7
+Execution fence: CONSUMED / NEVER RERUN
+Terminal status: STOPPED / FAILURE
+STOP phase: LIVE-03-VIDU-VIDEO
+Conservative paid calls: 3 / 6
+Last known committed/actual Orbis UAT cost at STOP: USD 0.0738
 ```
 
 Issue #63 audit records:
-- R4 exact paid authorization marker comment: `5596379504`;
-- R4 RUN authorization audit comment: `5596415646`;
-- R4 execution fence comment: `5596464603`;
-- R4 STOP evidence comment: `5596467391`.
+- exact R4 paid authorization marker: `5596379504`;
+- Owner RUN authorization: `5596415646`;
+- execution fence: `5596464603`;
+- STOP evidence: `5596467391`.
 
-`LIVE-20260909-DE17-R4` is permanently consumed. Do not rerun its workflow or any failed job under this identity.
-
----
-
-## R4 Provider Sequence Truth
-
-The bounded run reached:
+Provider sequence reached:
 
 ```text
 1. OpenAI Story = SUCCESS
@@ -74,63 +79,26 @@ The bounded run reached:
 6. ElevenLabs Ambience = NOT CALLED
 ```
 
-The R4 artifact retained a Vidu GenerationJob estimate of USD 0.15. Repository code confirms this originates from dispatch-time pricing estimation; it is not proof of provider billing.
-
-Controlled billing state:
-
-```text
-Vidu internal estimate = USD 0.15 / ESTIMATED
-Vidu external billing for failed task = UNKNOWN
-Last known committed/actual Orbis UAT cost at STOP = USD 0.0738
-```
-
-Do not state that the failed Vidu call was free or charged USD 0.15 unless provider-side usage/billing evidence proves it.
+`LIVE-20260909-DE17-R4` is permanently consumed. Never rerun R4 or any paid job under that identity.
 
 ---
 
-## Active R4-C1 Scope
-
-Owner authorized:
+## Vidu Billing Truth
 
 ```text
-P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)
+Vidu internal job estimate = USD 0.15 / ESTIMATED
+Vidu external billing for failed task = UNKNOWN / RECONCILIATION REQUIRED
+Last known committed/actual Orbis UAT cost at R4 STOP = USD 0.0738
 ```
 
-Branch:
-`ai/p4-wp020-live-r4-c1`
+Do not state that the failed Vidu call was free or that Vidu charged USD 0.15 unless provider-side Usage/Billing evidence proves it.
 
-Allowed:
-- preserve sanitized Vidu task identity on terminal failure;
-- preserve safe typed provider status/error-code/credits metadata;
-- keep raw response bodies, headers, prompts and secrets excluded;
-- make durable failure evidence label job cost as estimated;
-- keep failed-task external billing at `UNKNOWN` pending provider-side evidence;
-- mocked regression tests;
-- control/delivery doc synchronization.
-
-Forbidden:
-- provider API calls;
-- R4 rerun;
-- R5 creation;
-- new fence consumption;
-- paid workflow dispatch;
-- release/tag/deploy;
-- retrospective billing adjustment without evidence.
-
-C1 provider calls = 0. C1 spend added = USD 0.00.
-
----
-
-## Billing Reconciliation Evidence Still Needed
-
-Provider-side Vidu Usage/Billing evidence should be matched to the R4 execution interval:
+Relevant execution interval:
 
 ```text
 Run start: 2026-09-09T05:45:42Z
 STOP record: 2026-09-09T05:47:19Z
 ```
-
-Until that evidence is accepted, external billing remains `UNKNOWN` and must not be guessed.
 
 ---
 
@@ -145,6 +113,7 @@ R4-PF1 = PASS / COMPLETED / NO-PAID, run 34313038252
 R4-PF1-CLOSE = PASS / MERGED / COMPLETE via PR #84
 R4-AUTH1 = PASS / AUTHORIZED
 R4-RUN1 = STOPPED / CONSUMED / NEVER RERUN
+R4-C1 = PASS / MERGED / COMPLETE via PR #85
 ```
 
 ---
@@ -164,21 +133,13 @@ R3 rerun: FORBIDDEN
 
 ---
 
-## Current Gate / Next Gate
+## Next Gate
 
-Current gate:
+No gate is active after C1 closure and no gate auto-authorizes the next one.
 
-```text
-P4-WP020-LIVE-R4-C1
-NO-PAID corrective implementation
--> exact-head Backend/Frontend CI
--> independent review
--> STOP for Owner merge decision
-```
+The Owner may separately authorize provider-side Vidu billing evidence disposition, or later authorize readiness work for a new execution identity. R5 does not exist and is not authorized.
 
-C1 merge will not authorize R5 or any external provider call. Any future execution identity and any provider-side billing disposition remain separate Owner gates.
-
-No gate auto-authorizes the next one.
+Until a new exact gate is explicitly approved: no provider calls, no new paid marker, no new fence, no paid/live workflow dispatch, no billing adjustment, no release/tag/deploy.
 
 ---
 

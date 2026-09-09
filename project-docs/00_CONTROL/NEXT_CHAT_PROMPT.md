@@ -20,7 +20,7 @@ ROLE MODEL
 - repository truth is authoritative
 
 MANDATORY STARTUP
-1. Fresh-fetch main and any active R4-C1 PR/branch.
+1. Fresh-fetch canonical main before any status/merge/authorization/execution decision.
 2. Read:
    project-docs/00_CONTROL/START_HERE.md
    project-docs/00_CONTROL/CURRENT_STATE.md
@@ -34,12 +34,20 @@ MANDATORY STARTUP
 4. Newer repository/workflow/Issue truth overrides stale docs.
 
 CURRENT KNOWN TRUTH
-- canonical main at R4-C1 start = b1538f655bf526384845c1e8c536ad6fddc66ca7
-- P4-WP020 ACTIVE / NOT CLOSED
-- Core V1 release NOT DECLARED
-- P4-WP020-LIVE-R4-PF1-CLOSE = PASS / MERGED / COMPLETE via PR #84
-- P4-WP020-LIVE-R4-C1 = OWNER AUTHORIZED / NO-PAID CORRECTIVE
-- active branch = ai/p4-wp020-live-r4-c1
+- canonical main at C1 closure-sync start = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+- P4-WP020 = ACTIVE / NOT CLOSED
+- Core V1 release = NOT DECLARED
+- P4-WP020-LIVE-R4-C1 = PASS / MERGED / COMPLETE via PR #85
+- exact reviewed C1 HEAD = c6f02fe56d4248011b0ef0cb96910d6997195e60
+- C1 merge commit = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+- Backend CI 34323625029 = SUCCESS
+- backend suite = 538 passed / 2 skipped / 3 warnings
+- both migration paths = SUCCESS
+- Frontend CI 34323625048 = SUCCESS
+- C1 provider calls = 0
+- C1 spend added = USD 0.00
+- ACTIVE_WORK_PACKAGE = NONE
+- next gate requires explicit Owner authorization
 
 R4 IMMUTABLE EXECUTION TRUTH
 - execution ID = LIVE-20260909-DE17-R4
@@ -58,42 +66,21 @@ R4 IMMUTABLE EXECUTION TRUTH
 - ElevenLabs TTS/Music/Ambience = NOT CALLED
 - NEVER RERUN R4
 
-VIDU BILLING TRUTH
-- R4 artifact contains GenerationJob cost_usd = USD 0.15
-- source truth shows this is the dispatch-time estimated cost, not proof of provider billing
-- classify internal Vidu job estimate = USD 0.15 / ESTIMATED
-- classify failed Vidu external billing = UNKNOWN / RECONCILIATION REQUIRED
+VIDU BILLING TRUTH AFTER C1
+- internal Vidu job estimate = USD 0.15 / ESTIMATED
+- failed Vidu external billing = UNKNOWN / RECONCILIATION REQUIRED
 - do not claim failed task was free
 - do not claim provider charged USD 0.15
-- provider-side Usage/Billing evidence is needed for run window around 2026-09-09T05:45:42Z through 2026-09-09T05:47:19Z
+- provider-side Usage/Billing evidence is required to resolve it
+- relevant interval: 2026-09-09T05:45:42Z through 2026-09-09T05:47:19Z
 
-R4-C1 AUTHORIZED SCOPE
-- preserve sanitized Vidu task/provider-job identity on terminal failure
-- preserve safe typed provider status / provider error code / provider credits if returned
-- never persist raw provider bodies, headers, prompts, credentials or provider error text
-- preserve safe typed metadata through durable GenerationJob.result evidence
-- make R4 failure sanitizer call the job amount estimated_cost_usd and cost_status ESTIMATED
-- mark failed Vidu external billing UNKNOWN
-- add mocked regression tests only
-- sync control/delivery docs
-- provider calls = 0
-- spend added = USD 0.00
-
-R4-C1 FORBIDDEN
-- no provider API call
-- no paid workflow dispatch
-- no R4 rerun
-- no R5 identity
-- no new execution fence
-- no billing adjustment without provider evidence
-- no release/tag/deploy
-
-CURRENT GATE
-- finish R4-C1 bounded implementation
-- exact-head Backend/Frontend CI
-- independent review
-- STOP for explicit Owner merge decision
-- C1 merge does NOT authorize R5 or provider calls
+R5 / FUTURE LIVE
+- R5 identity = NONE
+- R5 = NOT AUTHORIZED
+- no future provider call is authorized
+- no new paid authorization marker is authorized
+- no new execution fence is authorized
+- no paid/live workflow dispatch is authorized
 
 R3 IMMUTABLE
 - execution ID LIVE-20260909-363F-R3
@@ -103,6 +90,13 @@ R3 IMMUTABLE
 - conservative calls 2 / 6
 - known committed/actual Orbis UAT cost at STOP USD 0.0065
 - NEVER RERUN R3
+
+CURRENT GATE
+- NONE
+- wait for explicit Owner decision
+- valid future directions may include provider-side Vidu billing evidence disposition or separately authorized readiness work for a new execution identity
+- do not auto-start R5
+- do not release/tag/deploy
 
 NO GATE AUTO-AUTHORIZES THE NEXT ONE.
 ```
