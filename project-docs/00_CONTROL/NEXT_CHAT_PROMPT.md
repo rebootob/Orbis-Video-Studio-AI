@@ -39,13 +39,14 @@ CURRENT KNOWN TRUTH
 - Core V1 release NOT DECLARED
 - ACTIVE_WORK_PACKAGE = NONE
 - LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
+- C1 closure sync = PR #79 CONTROL-DOC ONLY
 - R4 NOT AUTHORIZED
 - PAID_LIVE_EXECUTION STOP / NOT AUTHORIZED
 
 R3
 - execution ID LIVE-20260909-363F-R3
 - run 34297314995
-- execution main 82ce42116e3f866227dd598814cf79c0b9c640c4
+- exact execution main 82ce42116e3f866227dd598814cf79c0b9c640c4
 - immediate no-paid preflight PASS
 - execution fence CONSUMED
 - OpenAI STORY SUCCESS
@@ -72,10 +73,21 @@ R3-C1
 - provider calls 0
 - spend USD 0.00
 
+EXTERNAL GEMINI REMEDIATION
+- Owner created/imported project Orbis-Video-Production
+- Billing tier now Tier 1 / Prepay
+- observed credit balance USD 5.00
+- Nano Banana 2 (Gemini 3.1 Flash Image) quota now RPM 100 / TPM 200K / RPD 1K
+- prior Free-tier image quota was 0 / 0 / 0
+- Owner reports GitHub Actions GEMINI_API_KEY secret updated to the new Orbis project key
+- secret value is never exposed or persisted
+- runtime adoption of the replacement secret is NOT YET PROVEN
+
 NEXT GATE
-- no active implementation package
+- finish/merge PR #79 C1-CLOSE first
 - do NOT auto-start R4 or any paid execution
-- fresh-review remaining Gemini 429 evidence first
-- a future NO-PAID account/quota/billing-tier evidence review may be proposed but requires separate Owner authorization
+- after C1-CLOSE, candidate gate is P4-WP020-LIVE-R4-PRE1 NO-PAID runtime readiness validation
+- R4-PRE1 requires separate Owner authorization
+- R4-PRE1 must send no image-generation request, spend USD 0.00, and consume no execution fence
 - any future paid execution requires a new identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot fence, and separate Owner run authorization
 ```
