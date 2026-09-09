@@ -27,6 +27,7 @@ WP-count completion: 95%
 P4-WP020: ACTIVE / NOT CLOSED
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID (RUN 34351326791)
 P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
 ACTIVE_WORK_PACKAGE: NONE
 NEXT_GATE: OWNER DECISION REQUIRED
 Core V1 release: NOT DECLARED
@@ -36,7 +37,7 @@ R5 or later paid/live execution: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-canonical main at R5-PRE1-CLOSE-R1 start: 817539b619c4b28f22273ff01df733c612a2a386
+canonical main at R1 start: 817539b619c4b28f22273ff01df733c612a2a386
 R5 readiness identity: WP020-LIVE-R5-PRE1
 R5 preflight run: 34351326791
 R5 preflight status: PASS / COMPLETED / NO-PAID
@@ -267,15 +268,15 @@ Detailed historical readiness specification: `P4_WP020_LIVE_R5_PRE1.md`.
 
 ## 5. Required Gates After R5-PRE1 Closure
 
-With R5-PRE1-CLOSE merged to canonical main (PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`):
+With `P4-WP020-LIVE-R5-PRE1-CLOSE` (PR #90) and `P4-WP020-LIVE-R5-PRE1-CLOSE-R1` (PR #91) merged to canonical `main`:
 
 ```text
 P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID (RUN 34351326791)
--> R5-PRE1-CLOSE documentation synchronization = PASS / MERGED / COMPLETE
+-> R5-PRE1-CLOSE / R1 documentation synchronization = PASS / MERGED / COMPLETE
 -> ACTIVE_WORK_PACKAGE = NONE
 -> R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
 -> R5_PAID_EXECUTION = NOT AUTHORIZED
--> next exact gate requires separate Owner authorization
+-> NEXT_GATE = OWNER DECISION REQUIRED
 ```
 
 A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
@@ -315,7 +316,7 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-After R5-PRE1-CLOSE reaches canonical main:
+With R5-PRE1 closure and R1 post-merge state merged to canonical main:
 
 - no active work package exists until the Owner authorizes one;
 - do not call any external provider;

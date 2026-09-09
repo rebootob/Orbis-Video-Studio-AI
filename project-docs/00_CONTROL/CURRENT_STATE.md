@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> Canonical base `main` is at `817539b619c4b28f22273ff01df733c612a2a386` following merge of R5-PRE1-CLOSE (PR #90).
+> This specification records the canonical state effective upon merge of PR #91 to canonical `main` (pre-merge baseline main at R1 start: `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
@@ -13,7 +13,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_R5_PRE1_CLOSE_R1_START: 817539b619c4b28f22273ff01df733c612a2a386
+R1_BASE_MAIN: 817539b619c4b28f22273ff01df733c612a2a386
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -32,6 +32,7 @@ P4-WP020-LIVE-R4-BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
 P4-WP020-LIVE-R4-BILL1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
 
 ACTIVE_WORK_PACKAGE: NONE
 CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
@@ -197,9 +198,9 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Post-R5-PRE1-CLOSE Rule
+## Post-R5-PRE1-CLOSE-R1 Rule
 
-Once this closure record is on canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
+With R5-PRE1-CLOSE and R5-PRE1-CLOSE-R1 merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
 
 A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
 
