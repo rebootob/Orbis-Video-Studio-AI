@@ -24,12 +24,14 @@ graph TD
 ```text
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING FOR EXPLICIT OWNER NEXT GATE
 P4-WP020: ACTIVE / NOT CLOSED
 R4 RUN1: STOPPED / CONSUMED / NEVER RERUN
 R4 C1: PASS / MERGED / COMPLETE
 R4 C1-CLOSE: PASS / MERGED / COMPLETE
+R4 C1-CLOSE-R1: PASS / MERGED / COMPLETE
+R4 BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
+R4 BILL1-CLOSE: CONTROL-DOC CLOSURE / EFFECTIVE WHEN MERGED TO CANONICAL MAIN
+ACTIVE_WORK_PACKAGE AFTER BILL1-CLOSE MERGE: NONE
 Core V1 release: NOT DECLARED
 R5 or later paid/live execution: NONE / NOT AUTHORIZED
 ```
@@ -37,7 +39,7 @@ R5 or later paid/live execution: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-canonical main at R4-C1-CLOSE-R1 start: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+canonical main at BILL1-CLOSE start: da381bbd2cc407393e7326e9824bef68ea356e6b
 R4 execution identity: LIVE-20260909-DE17-R4
 R4 run: 34316188814
 R4 fence: CONSUMED / NEVER RERUN
@@ -45,11 +47,12 @@ R4 STOP phase: LIVE-03-VIDU-VIDEO
 R4 conservative calls: 3 / 6
 R4 last known committed/actual Orbis UAT cost: USD 0.0738
 R4 Vidu internal job estimate: USD 0.15 / ESTIMATED
-R4 failed Vidu external billing: UNKNOWN / RECONCILIATION REQUIRED
-C1 PR: #85 / PASS / MERGED / COMPLETE
-C1-CLOSE PR: #86 / PASS / MERGED / COMPLETE
-C1 provider calls: 0
-C1 spend added: USD 0.00
+R4 failed Vidu external billing: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
+BILL1 authorization comment: 5598882289
+BILL1 disposition comment: 5598962073
+BILL1 provider calls: 0
+BILL1 spend added: USD 0.00
+Vidu balance readiness evidence: 2,000 credits / Owner-provided screenshot / not USD billing evidence
 R5 identity: NONE / NOT AUTHORIZED
 ```
 
@@ -87,10 +90,9 @@ R5 identity: NONE / NOT AUTHORIZED
 
 ```text
 Status: ACTIVE / NOT CLOSED
-Current sub-gate: NONE
-Current gate: WAITING FOR EXPLICIT OWNER NEXT GATE
-Last merged closure: R4-C1-CLOSE via PR #86
+Current implementation/live sub-gate: NONE
 R4 paid execution: STOPPED / CONSUMED / NEVER RERUN
+R4 BILL1 disposition: PASS / EVIDENCE ACCEPTED / NOT CHARGED
 Future live identity: NONE / NOT AUTHORIZED
 Core V1 release declaration: NOT AUTHORIZED
 ```
@@ -170,10 +172,10 @@ R4-AUTH1 / RUN1:
 - conservative calls = 3/6;
 - last known committed/actual Orbis UAT cost at STOP = USD 0.0738;
 - Vidu job internal estimate = USD 0.15 / ESTIMATED;
-- failed Vidu external billing = UNKNOWN until provider-side usage/billing evidence is accepted;
+- provider-side BILL1 evidence later resolved failed-task external billing to `NOT CHARGED`;
 - R4 is consumed and MUST NEVER BE RERUN.
 
-### R4-C1 / C1-CLOSE — PASS / MERGED / COMPLETE
+### R4-C1 / C1-CLOSE / C1-CLOSE-R1 — PASS / MERGED / COMPLETE
 
 `P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` completed and merged through PR #85.
 
@@ -188,29 +190,57 @@ Completion evidence:
 
 C1-CLOSE control synchronization completed and merged through PR #86:
 - exact reviewed closure HEAD `cb3498a7e7b3affe5b49ed96c0081e1e92621f3d`;
-- closure merge commit / canonical main `37bc4584eaa14bcf1d01243364548b2a3c39bcbb`;
-- active work package cleared to NONE;
-- R5 remains NONE / NOT AUTHORIZED.
+- closure merge commit `37bc4584eaa14bcf1d01243364548b2a3c39bcbb`.
+
+C1-CLOSE-R1 documentation consistency corrective completed and merged through PR #87:
+- exact reviewed R1 HEAD `2337f9d8a6c1af8273ce8a475f8eedfaeef5a1d8`;
+- merge commit / canonical main before BILL1 `da381bbd2cc407393e7326e9824bef68ea356e6b`.
 
 C1 preserves sanitized Vidu terminal task/provider-job identity and safe typed reconciliation metadata, keeps unsafe/raw provider content excluded, and classifies the R4 Vidu job amount as an estimate rather than confirmed external billing.
 
 Detailed historical C1 contract/evidence: `P4_WP020_LIVE_R4_C1.md`.
 
----
+### R4-BILL1 — PASS / EVIDENCE ACCEPTED / NOT CHARGED
 
-## 5. Required Gates After R4-C1 Closure
+Owner authorized BILL1 as EVIDENCE-ONLY / NO-PAID on canonical main `da381bbd2cc407393e7326e9824bef68ea356e6b`.
+
+Issue #63 audit trail:
+- authorization comment `5598882289`;
+- accepted disposition comment `5598962073`.
+
+Accepted provider-side evidence:
+- Owner-provided Vidu Usage view for `2026-09-09` in `UTC0`;
+- `All Keys` selected;
+- relevant filters set to `ALL`;
+- no Usage History records for the full date, including the R4 execution interval around `05:45:42Z` through `05:47:19Z`.
+
+Disposition:
 
 ```text
-R4-C1 implementation = COMPLETE
--> exact-head Backend/Frontend CI = PASS
--> independent review = PASS
--> Owner merge approval = COMPLETE via PR #85
--> C1 closure/control sync = COMPLETE via PR #86
+R4 failed Vidu external billing = NOT CHARGED
+Vidu internal job estimate = USD 0.15 / ESTIMATED ONLY
+R4 last known committed/actual Orbis UAT cost = USD 0.0738
+BILL1 provider calls = 0
+BILL1 spend added = USD 0.00
+```
+
+The Owner later provided Vidu Credit Balance evidence showing `2,000 credits` after top-up. This is readiness evidence only, is not converted to USD, and does not authorize any future provider request.
+
+---
+
+## 5. Required Gates After BILL1 Closure
+
+When this BILL1-CLOSE record is merged to canonical main:
+
+```text
+R4-BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
+-> BILL1-CLOSE documentation synchronization = COMPLETE
 -> ACTIVE_WORK_PACKAGE = NONE
+-> R5 identity = NONE / NOT AUTHORIZED
 -> next exact gate requires separate Owner authorization
 ```
 
-If the Owner chooses to resolve the remaining Vidu billing question, provider-side Usage/Billing evidence disposition is a separate gate. Only after any required readiness/evidence work may a future execution identity be considered, and such identity must be separately Owner-authorized.
+A possible next direction is an R5 NO-PAID readiness/preflight gate to verify credentials, routing, pricing, runtime dependencies and credit sufficiency without generation. That readiness gate does not exist and is not authorized until the Owner explicitly approves it.
 
 No step auto-authorizes the next one. R4 is permanently consumed; R5 does not exist and is not authorized.
 
@@ -247,7 +277,7 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-After R4-C1-CLOSE:
+After BILL1-CLOSE reaches canonical main:
 
 - no active work package exists until the Owner authorizes one;
 - do not call any external provider;
@@ -256,6 +286,7 @@ After R4-C1-CLOSE:
 - do not write a new paid authorization marker;
 - do not consume any new execution fence;
 - do not dispatch any paid/live workflow;
-- do not adjust provider billing without accepted provider-side evidence;
+- do not modify the accepted R4 Vidu billing disposition without newer provider-side evidence;
+- do not convert provider credits to USD without an accepted provider pricing/billing basis;
 - do not release/tag/deploy;
 - every next gate requires separate explicit Owner authorization.
