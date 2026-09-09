@@ -9,6 +9,31 @@ Canonical branch: `main`
 
 ---
 
+## Immediate Handoff Checkpoint — PR #88
+
+```text
+ACTIVE PR = #88
+TITLE = docs(wp020-live): close BILL1 provider billing disposition
+BRANCH = ai/p4-wp020-live-r4-bill1-close
+BASE MAIN = da381bbd2cc407393e7326e9824bef68ea356e6b
+PRE-HANDOFF-SUMMARY REVIEWED HEAD = 56fe78f6ec8bfc450db87b9dba62063b5ae781e6
+OWNER MERGE AUTHORIZATION = NOT YET GRANTED
+```
+
+At the pre-handoff-summary checkpoint `56fe78f6ec8bfc450db87b9dba62063b5ae781e6`:
+- Backend Tests `34332792991` = SUCCESS;
+- backend suite = 538 passed / 2 skipped / 3 warnings;
+- migrations `fresh-head` = SUCCESS;
+- migrations `from-revision-010` = SUCCESS;
+- Frontend Tests `34332792980` = SUCCESS;
+- independent review = `PASS / READY FOR OWNER MERGE DECISION`.
+
+This handoff-summary documentation update itself advances PR #88 HEAD. Therefore `56fe78...` is a historical checkpoint only and MUST NOT be used as a future merge target. A new chat MUST fresh-fetch canonical `main` and PR #88 exact current HEAD, require exact-head Backend/Frontend CI success, confirm the changed-file scope remains control-doc only, and perform/confirm independent review on that same exact current HEAD before presenting the Owner merge gate.
+
+Immediate next action is only: fresh-fetch PR #88 -> verify exact-head CI/scope -> independent review -> STOP for explicit Owner merge approval. Do not merge automatically. Do not start R5 readiness while PR #88 remains unmerged.
+
+---
+
 ## Delivery Baseline
 
 ```text
