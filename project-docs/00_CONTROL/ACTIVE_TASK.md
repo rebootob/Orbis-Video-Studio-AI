@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records the canonical state effective upon merge of PR #91 to canonical `main` (pre-merge baseline main at R1 start: `817539b619c4b28f22273ff01df733c612a2a386`).
+> This specification records the canonical state effective upon merge of PR #92 to canonical `main` (pre-merge baseline main at VIDU1-PREP start: `5107e3e9ef7702c8403fe74146062ab68e8e50b9`).
 
 ---
 
@@ -13,17 +13,29 @@
 ```text
 ACTIVE_WORK_PACKAGE = NONE
 ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
-R1_BASE_MAIN = 817539b619c4b28f22273ff01df733c612a2a386
+VIDU1_PREP_BASE_MAIN = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-R1_AUTH_COMMENT = 5602341968
-R1_MERGE_PR = #91
-PARENT_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE
-PARENT_AUTH_COMMENT = 5601980565
-PARENT_MERGE_PR = #90
-PARENT_MERGE_COMMIT = 817539b619c4b28f22273ff01df733c612a2a386
+VIDU1_PREP_AUTH_COMMENT = 5602834080
+VIDU1_PREP_MERGE_PR = #92
+
+VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
+VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
+VIDU1_PAID_EXECUTION = NOT AUTHORIZED
+
+VIDU1_PREP_PROVIDER_GENERATION_CALLS = 0
+VIDU1_PREP_PAID_PROVIDER_CALLS = 0
+VIDU1_PREP_VIDU_GENERATION_POSTS = 0
+VIDU1_PREP_VIDU_CREDITS_CONSUMED = 0
+VIDU1_PREP_PAID_FENCE_WRITTEN = FALSE
+VIDU1_PREP_PAID_LIVE_DISPATCH = FALSE
+
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1
+PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE
+PREV_AUTH_COMMENT = 5602341968
+PREV_MERGE_PR = #91
 
 PRE1_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1
 PRE1_STATUS = PASS / COMPLETED / NO-PAID
@@ -50,6 +62,30 @@ P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
 ```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU1-PREP Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-PREP — NO-PAID Dedicated Vidu 1-Call Probe Tooling` in Issue #63 (comment `5602834080`) on canonical main `5107e3e9ef7702c8403fe74146062ab68e8e50b9`.
+
+Tooling Delivered:
+- `.github/scripts/wp020_live_r5_vidu1.py`: dedicated probe runner with independent runner-side live permit guard (`validate_live_execution_permit`), hard 1-POST cap, exact `720P` resolution lock, safe credit semantics (`provider_credits_reported` preserved, `vidu_credits_consumed = null / UNKNOWN`), fail-closed handling of ambiguous transport outcomes, GET-only polling, and sanitized evidence export;
+- `.github/workflows/wp020-live-r5-vidu1.yml`: dedicated manual `workflow_dispatch` workflow exporting confirmed live permit to runner upon fence consumption;
+- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: contract test suite validating safety guards, behavioral tests A through E, single POST cap, and evidence sanitization;
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md`: delivery specification.
+
+PREP Safety Invariants:
+```text
+provider_generation_calls = 0
+paid_provider_calls = 0
+vidu_generation_posts = 0
+vidu_credits_consumed = 0
+paid_fence_written = false
+paid_live_dispatch = false
+```
+
+Post-merge status leaves `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. A future paid probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization.
 
 ---
 
@@ -135,12 +171,12 @@ Provider sequence reached:
 
 ---
 
-## Post-R5-PRE1-CLOSE-R1 Rule
+## Post-R5-VIDU1-PREP Rule
 
-With R5-PRE1-CLOSE and R5-PRE1-CLOSE-R1 merged to canonical `main`:
+With P4-WP020-LIVE-R5-VIDU1-PREP merged to canonical `main`:
 - `ACTIVE_WORK_PACKAGE = NONE`;
 - `NEXT_GATE = OWNER DECISION REQUIRED`.
 
-A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
+A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) is NOT authorized by PREP tooling and must receive separate explicit Owner authorization.
 
 Do not create an R5 paid execution identity, call any external provider, write a paid authorization marker, create or consume an execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag, or deploy without separate explicit Owner authorization.

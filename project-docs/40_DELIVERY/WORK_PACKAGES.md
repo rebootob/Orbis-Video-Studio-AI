@@ -28,6 +28,7 @@ P4-WP020: ACTIVE / NOT CLOSED
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID (RUN 34351326791)
 P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-PREP: PASS / MERGED / COMPLETE
 ACTIVE_WORK_PACKAGE: NONE
 NEXT_GATE: OWNER DECISION REQUIRED
 Core V1 release: NOT DECLARED
@@ -37,7 +38,16 @@ R5 or later paid/live execution: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-canonical main at R1 start: 817539b619c4b28f22273ff01df733c612a2a386
+canonical base main: 5107e3e9ef7702c8403fe74146062ab68e8e50b9
+VIDU1 readiness identity: WP020-LIVE-R5-VIDU1-PREP
+VIDU1 paid identity: NONE / NOT AUTHORIZED
+VIDU1 paid execution: NOT AUTHORIZED
+VIDU1 provider generation calls: 0
+VIDU1 paid provider calls: 0
+VIDU1 generation posts: 0
+VIDU1 credits consumed: 0
+VIDU1 paid fence written: false
+VIDU1 paid live dispatch: false
 R5 readiness identity: WP020-LIVE-R5-PRE1
 R5 preflight run: 34351326791
 R5 preflight status: PASS / COMPLETED / NO-PAID

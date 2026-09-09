@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records the canonical state effective upon merge of PR #91 to canonical `main` (pre-merge baseline main at R1 start: `817539b619c4b28f22273ff01df733c612a2a386`).
+> This specification records the canonical state effective upon merge of PR #92 to canonical `main` (pre-merge baseline main at VIDU1-PREP start: `5107e3e9ef7702c8403fe74146062ab68e8e50b9`).
 
 ---
 
@@ -13,7 +13,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-R1_BASE_MAIN: 817539b619c4b28f22273ff01df733c612a2a386
+VIDU1_PREP_BASE_MAIN: 5107e3e9ef7702c8403fe74146062ab68e8e50b9
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -33,6 +33,7 @@ P4-WP020-LIVE-R4-BILL1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-PREP: PASS / MERGED / COMPLETE
 
 ACTIVE_WORK_PACKAGE: NONE
 CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
@@ -41,6 +42,17 @@ NEXT_GATE: OWNER DECISION REQUIRED
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
 CORE_V1_RELEASE_DECLARED: false
+
+VIDU1_READINESS_IDENTITY: WP020-LIVE-R5-VIDU1-PREP
+VIDU1_PAID_IDENTITY: NONE / NOT AUTHORIZED
+VIDU1_PAID_EXECUTION: NOT AUTHORIZED
+
+VIDU1_PREP_PROVIDER_GENERATION_CALLS: 0
+VIDU1_PREP_PAID_PROVIDER_CALLS: 0
+VIDU1_PREP_VIDU_GENERATION_POSTS: 0
+VIDU1_PREP_VIDU_CREDITS_CONSUMED: 0
+VIDU1_PREP_PAID_FENCE_WRITTEN: false
+VIDU1_PREP_PAID_LIVE_DISPATCH: false
 
 R5_READINESS_IDENTITY: WP020-LIVE-R5-PRE1
 R5_PRE1_RUN: 34351326791
@@ -73,6 +85,30 @@ R4_VIDU_EXTERNAL_BILLING: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
 
 VIDU_BALANCE_READINESS_EVIDENCE: 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT USD BILLING EVIDENCE
 ```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU1-PREP Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-PREP — NO-PAID Dedicated Vidu 1-Call Probe Tooling` in Issue #63 (comment `5602834080`) on canonical main `5107e3e9ef7702c8403fe74146062ab68e8e50b9`.
+
+Delivered tooling:
+- `.github/scripts/wp020_live_r5_vidu1.py`: dedicated probe runner with independent runner-side live permit guard (`validate_live_execution_permit`), hard 1-POST cap, exact `720P` resolution lock, safe credit semantics (`provider_credits_reported` preserved, `vidu_credits_consumed = null / UNKNOWN`), fail-closed handling of ambiguous transport outcomes, GET-only polling, and sanitized evidence export;
+- `.github/workflows/wp020-live-r5-vidu1.yml`: dedicated manual `workflow_dispatch` workflow exporting confirmed live permit to runner upon fence consumption;
+- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: contract test suite validating safety guards, behavioral tests A through E, single POST cap, and evidence sanitization;
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md`: delivery specification.
+
+PREP Safety Invariants:
+```text
+provider_generation_calls = 0
+paid_provider_calls = 0
+vidu_generation_posts = 0
+vidu_credits_consumed = 0
+paid_fence_written = false
+paid_live_dispatch = false
+```
+
+Post-merge status leaves `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. A future paid probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization.
 
 ---
 
@@ -198,10 +234,10 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Post-R5-PRE1-CLOSE-R1 Rule
+## Post-R5-VIDU1-PREP Rule
 
-With R5-PRE1-CLOSE and R5-PRE1-CLOSE-R1 merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
+With P4-WP020-LIVE-R5-VIDU1-PREP merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
 
-A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
+A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) is NOT authorized by PREP tooling and must receive separate explicit Owner authorization.
 
 Do not create an R5 paid execution identity, call any external provider, write a paid authorization marker, create or consume an execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag, or deploy without separate explicit Owner authorization.
