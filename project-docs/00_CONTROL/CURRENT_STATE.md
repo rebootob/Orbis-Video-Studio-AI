@@ -11,14 +11,16 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_R3: 82ce42116e3f866227dd598814cf79c0b9c640c4
+CANONICAL_MAIN: 1c63045497eb7ee708cd81876f6bf7a011907f77
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
 P4-WP020_LIVE_STATE: R3 STOPPED / CONSUMED / GEMINI HTTP 429
+P4-WP020-LIVE-R3-C1: PASS / MERGED / CLOSED
+P4-WP020-LIVE-R3-C1-CLOSE: CONTROL-DOC ONLY / OWNER AUTHORIZED
 
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R3-C1
-CURRENT_GATE: NO-PAID 429 EVIDENCE CORRECTIVE -> CI -> INDEPENDENT REVIEW -> OWNER MERGE DECISION
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: WAITING FOR OWNER AUTHORIZATION
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -30,6 +32,24 @@ CLAUDE_CODE: STOP
 PAID_LIVE_EXECUTION: STOP / NOT AUTHORIZED
 R4: NOT AUTHORIZED
 ```
+
+---
+
+## C1 Closure Evidence
+
+- PR #78 merged exact reviewed HEAD `b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6`.
+- Merge commit / canonical main = `1c63045497eb7ee708cd81876f6bf7a011907f77`.
+- Backend CI run `34298997460` = SUCCESS.
+- Backend tests = 511 passed / 2 skipped / 3 warnings.
+- PostgreSQL migration paths `fresh-head` and `from-revision-010` = PASS.
+- Frontend CI run `34298997360` = SUCCESS.
+- Independent review = PASS before Owner merge.
+- C1 provider calls = 0.
+- C1 spend = USD 0.00.
+- No model/endpoint/pricing/retry-policy change.
+- No provider generation request, paid workflow dispatch, release, tag, or deploy.
+
+C1 now provides strict sanitized Gemini HTTP 429 structured evidence and a second nested allowlist for STOP artifacts. Raw provider message/body/headers, credentials, prompts, arbitrary project dimensions, and unknown debug/help data remain excluded.
 
 ---
 
@@ -49,7 +69,6 @@ Execution fence: CONSUMED
 ```
 - OpenAI STORY = SUCCESS;
 - Gemini IMAGE = non-success surfaced as `HTTP_ERROR`;
-- exact historical Gemini HTTP status unavailable;
 - conservative chargeable requests = 2/6;
 - last known confirmed/committed UAT cost = USD 0.0072;
 - Vidu / ElevenLabs / downstream = NOT EXECUTED;
@@ -68,7 +87,7 @@ Execution fence: CONSUMED
 
 ### R3 TOOL1 / PF1
 - TOOL1 merged via PR #77;
-- canonical paid tooling main = `82ce42116e3f866227dd598814cf79c0b9c640c4`;
+- paid tooling main at R3 execution = `82ce42116e3f866227dd598814cf79c0b9c640c4`;
 - PF1 run `34296382370` = `PREFLIGHT_PASS`;
 - estimated reservation USD 0.2739 < USD 1.00;
 - PF1 generation calls 0 / fence false.
@@ -77,7 +96,7 @@ Execution fence: CONSUMED
 ```text
 Execution ID: LIVE-20260909-363F-R3
 Run ID: 34297314995
-Main SHA: 82ce42116e3f866227dd598814cf79c0b9c640c4
+Execution Main SHA: 82ce42116e3f866227dd598814cf79c0b9c640c4
 Execution fence comment: 5594141834
 STOP evidence comment: 5594143482
 Execution fence: CONSUMED
@@ -91,7 +110,7 @@ Observed:
 - OpenAI usage = 546 prompt / 513 completion tokens;
 - last known committed/actual Orbis UAT cost at STOP = USD 0.0065;
 - Gemini IMAGE = HTTP 429;
-- Gemini classification = retryable true / submission_uncertain false;
+- retryable true / submission_uncertain false;
 - conservative calls = 2/6;
 - Vidu / ElevenLabs / downstream = NOT EXECUTED;
 - R3 MUST NEVER BE RERUN.
@@ -100,24 +119,12 @@ USD 0.0065 is known Orbis UAT cost evidence only; failed Gemini external billing
 
 ---
 
-## Active Gate — R3-C1
+## Next Gate
 
-`P4-WP020-LIVE-R3-C1 — Gemini 429 Quota/Rate-Limit Evidence Corrective`
+There is no active implementation package after C1 closure.
 
-Owner-authorized NO-PAID corrective only. It may improve sanitized structured 429 evidence and simulated tests. It must not change provider routing/model/endpoint/pricing/retry policy and must not send provider requests.
+The next useful step may be a NO-PAID Gemini account/quota/billing-tier evidence review or another narrowly-scoped corrective, but nothing is authorized yet. Do not auto-start R4.
 
-Goal: if a future separately authorized execution receives HTTP 429, durable evidence can distinguish safe observable classes such as quota-zero, daily quota, minute rate limit, other quota exhaustion, or generic `RESOURCE_EXHAUSTED` without storing provider message/body/headers/secrets.
-
-R4 remains NOT AUTHORIZED.
-
----
-
-## Required Next Gate
-
-1. C1 exact-head backend/frontend/migration CI PASS.
-2. Independent review PASS.
-3. Owner merge decision.
-4. Only after C1 merge and fresh review may an R4 corrective/execution plan be proposed.
-5. Any future paid execution requires a new identity, fresh exact-main authorization, fresh no-paid preflight, new one-shot fence, and separate Owner run authorization.
+Any future paid execution requires a new execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot fence, and separate Owner run authorization.
 
 No gate auto-authorizes the next one.
