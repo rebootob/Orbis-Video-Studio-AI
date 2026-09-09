@@ -105,6 +105,38 @@ def _copy_allowlist(source: Mapping[str, Any] | None, keys: Sequence[str]) -> di
     return {key: source[key] for key in keys if key in source and source[key] is not None}
 
 
+def sanitize_creative_audit(
+    audit: Any,
+    *,
+    fallback_provider: str = "openai",
+    fallback_model: str = "gpt-4o",
+) -> dict[str, Any]:
+    """Serialize only non-content creative generation audit metadata.
+
+    Creative audit error text is intentionally not copied here. The runner already
+    records a redacted top-level exception string, while this durable evidence keeps
+    only identity/status/timing fields needed to prove the failed provider stage.
+    """
+    if audit is None:
+        return {}
+    provider = getattr(audit, "provider", None)
+    model = getattr(audit, "model", None)
+    if provider in (None, "", "unknown"):
+        provider = fallback_provider
+    if model in (None, "", "unknown"):
+        model = fallback_model
+    evidence: dict[str, Any] = {
+        "kind": "creative_audit",
+        "audit_id": str(getattr(audit, "id", "")),
+        "provider": provider,
+        "model": model,
+        "request_type": getattr(audit, "request_type", None),
+        "status": getattr(audit, "status", None),
+        "duration_ms": getattr(audit, "duration_ms", None),
+    }
+    return {key: value for key, value in evidence.items() if value not in (None, "")}
+
+
 def sanitize_generation_job(job: Any) -> dict[str, Any]:
     """Serialize only allowlisted GenerationJob failure metadata.
 
