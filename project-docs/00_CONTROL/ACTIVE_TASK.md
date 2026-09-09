@@ -9,16 +9,15 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1
-ACTIVE_TITLE = Bounded One-Shot Execution Tooling Preparation
-ACTIVE_TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
+ACTIVE_TITLE = R4 TOOL1 Closure + PF1 Governance Reconciliation
+ACTIVE_TYPE = CONTROL-DOC + GOVERNANCE RECONCILIATION
 OWNER_AUTHORIZED = YES
-TOOLING_BASE_MAIN = de17a125dcd3b8066a546369d03aba813a7b5641
-ACTIVE_BRANCH = ai/p4-wp020-live-r4-tool1
+CANONICAL_MAIN = de08c98f2644ed9e56983aad265a82b32d91e462
+ACTIVE_BRANCH = ai/p4-wp020-live-r4-tool1-close-r1
 
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1-CLOSE
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1
 LAST_CLOSED_STATUS = PASS / MERGED / COMPLETE
-CANONICAL_MAIN_AT_TOOL1_START = de17a125dcd3b8066a546369d03aba813a7b5641
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 
@@ -29,96 +28,81 @@ R4_PAID_AUTHORIZATION = NOT AUTHORIZED
 R4_EXECUTION_FENCE = NONE
 R4_PAID_EXECUTION = NOT AUTHORIZED
 
-TOOL1_PROVIDER_GENERATION_CALLS = 0
-TOOL1_SPEND_AUTHORIZATION = USD 0.00
+RECONCILIATION_PROVIDER_GENERATION_CALLS = 0
+RECONCILIATION_SPEND_ADDED = USD 0.00
 NEXT_GATE = EXACT-HEAD CI + INDEPENDENT REVIEW -> OWNER MERGE DECISION
 ```
 
 ---
 
-## R4-TOOL1 Authorized Scope
+## Closed R4-TOOL1 Evidence
 
-Owner authorized `P4-WP020-LIVE-R4-TOOL1 — NO-PAID Bounded One-Shot Tooling Preparation` after R4-PRE1 closure merged.
+`P4-WP020-LIVE-R4-TOOL1 — NO-PAID Bounded One-Shot Tooling Preparation`
 
-Authorized work:
-- create immutable R4 execution contract for `LIVE-20260909-DE17-R4`;
-- create R4-specific one-shot authorization/fence helper;
-- create R4 no-paid preflight workflow/script;
-- create R4 paid one-shot workflow that remains inert without later Owner gates;
-- create R4 bounded runner adapter bound to the exact reviewed R3 implementation blob;
-- preserve sanitized durable STOP evidence;
-- add R4 tooling tests;
-- synchronize control/delivery documents.
+```text
+PR: #82
+Reviewed HEAD: 7fe35f3c51d248435ab1c90355b29cd1ade66f67
+Merge commit: de08c98f2644ed9e56983aad265a82b32d91e462
+Backend CI: 34305801438 = SUCCESS
+Backend tests: 533 passed / 2 skipped / 3 warnings
+Frontend CI: 34305801517 = SUCCESS
+Independent review: PASS / READY FOR OWNER MERGE DECISION
+Provider generation during TOOL1: 0
+TOOL1 spend: USD 0.00
+```
 
-Explicitly NOT authorized during TOOL1:
-- provider generation;
-- R4 Owner paid-authorization marker;
-- R4 fence consumption;
-- paid workflow dispatch;
-- release/tag/deploy.
+R4 tooling contract remains:
+- execution ID `LIVE-20260909-DE17-R4`;
+- tooling base `de17a125dcd3b8066a546369d03aba813a7b5641`;
+- hard cap USD 1.00;
+- max 6 chargeable provider requests;
+- sequential only;
+- OpenAI retries 0;
+- exact provider sequence OpenAI Story -> Gemini Image -> Vidu Video -> ElevenLabs TTS -> Music -> Ambience;
+- exact future Owner marker `FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact main sha>`;
+- one-shot fence `EXECUTION_STARTED: LIVE-20260909-DE17-R4`.
 
-Detailed contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`.
+No R4 paid authorization or fence exists yet.
 
 ---
 
-## Immutable R4 Tooling Contract
+## PF1 Governance Reconciliation
+
+Post-merge run `34306778867` executed the prepared R4 no-paid preflight on exact main `de08c98f2644ed9e56983aad265a82b32d91e462`.
+
+Observed technical evidence:
 
 ```text
-Execution ID: LIVE-20260909-DE17-R4
-Tooling base: de17a125dcd3b8066a546369d03aba813a7b5641
-Issue: #63
-Hard cap: USD 1.00
-Maximum chargeable provider requests: 6
-Sequential only
-OpenAI retries: 0
+Conclusion: SUCCESS
+status: PREFLIGHT_PASS
+required_credentials_present: true
+generation_request_sent: false
+paid_provider_calls: 0
+execution_fence_written: false
+estimated_total_reservation: USD 0.2739
 ```
 
-Exact future paid-call order:
+Governance status:
+- the run occurred without a separately recorded Owner PF1 authorization gate;
+- retain it as technical NO-PAID evidence only;
+- do NOT classify it as Owner-authorized PF1 completion;
+- do NOT infer retroactive authorization;
+- it does not authorize or consume the R4 paid fence;
+- it does not authorize provider generation or the paid workflow.
 
-1. `OPENAI_CREATIVE_STORY:gpt-4o`
-2. `GEMINI_IMAGE:gemini-3.1-flash-image:1K`
-3. `VIDU_VIDEO:viduq2:text2video:4s:720p`
-4. `ELEVENLABS_TTS:Thai:<=150chars`
-5. `ELEVENLABS_MUSIC:<=10s`
-6. `ELEVENLABS_AMBIENCE:<=3s`
-
-Future paid authorization marker:
-
-```text
-FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact post-merge main SHA>
-```
-
-Future fence:
-
-```text
-EXECUTION_STARTED: LIVE-20260909-DE17-R4
-```
-
-Neither marker is authorized to be written during TOOL1.
-
----
-
-## R4 Runner Reuse Guard
-
-R4 reuses the already independently-reviewed R3 execution implementation only through a fail-closed adapter. The adapter requires the exact inherited R3 runner Git blob SHA:
-
-```text
-24150cdece623004443e03ceecea10490955822b
-```
-
-No dynamic source rewrite is permitted. If that inherited implementation drifts, R4 must STOP and return to review before any paid execution.
+Issue #63 reconciliation comment: `5595805718`.
 
 ---
 
 ## Closed R4-PRE1 Evidence
 
 ```text
-Full runtime preflight run: 34302711166 = SUCCESS
-Gemini metadata-only probe: 34302730786 = SUCCESS / HTTP 200 / ACCESS_PROBE_PASS
-Exact main: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-Generation requests: 0
-Paid generation/provider calls: 0
-Fence written: false
+Run 34302711166 = SUCCESS full runtime no-paid preflight
+Run 34302730786 = SUCCESS Gemini metadata-only probe / HTTP 200 / ACCESS_PROBE_PASS
+Exact SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Generation calls: 0
+Paid calls: 0
+Fence: false
 Spend added: USD 0.00
 ```
 
@@ -128,6 +112,10 @@ Owner-provided account evidence confirmed `Orbis-Video-Production` Tier 1 / Prep
 
 ## Stop Rule
 
-TOOL1 must stop at the Owner merge decision after exact-head CI and independent review.
+This work package is documentation/governance reconciliation only.
 
-A TOOL1 merge does NOT authorize R4 preflight dispatch, paid authorization, execution-fence consumption, or paid execution. Later gates remain separate and require fresh exact-main evidence/authorization.
+Do not dispatch any R4 paid workflow, do not create `FRESH_OWNER_AUTHORIZED_R4`, and do not consume `EXECUTION_STARTED`.
+
+After this closure merges, the next gate requires a fresh Owner decision to either adopt run `34306778867` as PF1 evidence or authorize a new R4 PF1 NO-PAID run on the then-current exact main. Paid authorization and RUN authorization remain later, separate gates.
+
+No gate auto-authorizes the next one.
