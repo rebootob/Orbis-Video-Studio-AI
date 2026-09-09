@@ -34,20 +34,36 @@ MANDATORY STARTUP
 4. Newer repository/workflow/Issue truth overrides stale docs.
 
 CURRENT KNOWN TRUTH
-- canonical main at C1 closure-sync start = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+- canonical main at BILL1-CLOSE start = da381bbd2cc407393e7326e9824bef68ea356e6b
 - P4-WP020 = ACTIVE / NOT CLOSED
 - Core V1 release = NOT DECLARED
+- R4 = STOPPED / CONSUMED / NEVER RERUN
 - P4-WP020-LIVE-R4-C1 = PASS / MERGED / COMPLETE via PR #85
-- exact reviewed C1 HEAD = c6f02fe56d4248011b0ef0cb96910d6997195e60
-- C1 merge commit = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
-- Backend CI 34323625029 = SUCCESS
-- backend suite = 538 passed / 2 skipped / 3 warnings
-- both migration paths = SUCCESS
-- Frontend CI 34323625048 = SUCCESS
-- C1 provider calls = 0
-- C1 spend added = USD 0.00
-- ACTIVE_WORK_PACKAGE = NONE
-- next gate requires explicit Owner authorization
+- C1-CLOSE = PASS / MERGED / COMPLETE via PR #86
+- C1-CLOSE-R1 = PASS / MERGED / COMPLETE via PR #87
+- R5 identity = NONE / NOT AUTHORIZED
+
+BILL1 PROVIDER-SIDE EVIDENCE
+- gate = P4-WP020-LIVE-R4-BILL1
+- status = PASS / EVIDENCE ACCEPTED
+- disposition = NOT CHARGED
+- authorization Issue #63 comment = 5598882289
+- disposition Issue #63 comment = 5598962073
+- accepted evidence = Owner-provided Vidu Usage view for 2026-09-09 UTC0, All Keys, all relevant filters ALL, no Usage History records
+- relevant R4 interval = 2026-09-09T05:45:42Z through approximately 2026-09-09T05:47:19Z
+- internal Vidu job estimate = USD 0.15 / ESTIMATED ONLY
+- failed R4 Vidu external billing = NOT CHARGED
+- last known committed/actual Orbis UAT cost at R4 STOP = USD 0.0738
+- BILL1 provider calls = 0
+- BILL1 spend added = USD 0.00
+- no credits-to-USD conversion was inferred
+
+VIDU READINESS EVIDENCE
+- Owner-provided Vidu Credit Balance screenshot after top-up = 2,000 credits
+- this balance is readiness evidence only
+- do not treat it as historical R4 billing evidence
+- do not convert it to USD in control truth
+- it does not authorize a provider request
 
 R4 IMMUTABLE EXECUTION TRUTH
 - execution ID = LIVE-20260909-DE17-R4
@@ -66,21 +82,26 @@ R4 IMMUTABLE EXECUTION TRUTH
 - ElevenLabs TTS/Music/Ambience = NOT CALLED
 - NEVER RERUN R4
 
-VIDU BILLING TRUTH AFTER C1
-- internal Vidu job estimate = USD 0.15 / ESTIMATED
-- failed Vidu external billing = UNKNOWN / RECONCILIATION REQUIRED
-- do not claim failed task was free
-- do not claim provider charged USD 0.15
-- provider-side Usage/Billing evidence is required to resolve it
-- relevant interval: 2026-09-09T05:45:42Z through 2026-09-09T05:47:19Z
+BILL1-CLOSE
+- P4-WP020-LIVE-R4-BILL1-CLOSE is CONTROL-DOC ONLY
+- no source/test/workflow/provider implementation change
+- no Vidu API call
+- no provider generation
+- no R4 rerun
+- no R5 identity
+- no paid authorization marker
+- no execution fence
+- no paid/live workflow dispatch
+- no billing adjustment
+- no release/tag/deploy
+- after exact-head CI + independent review, STOP for explicit Owner merge decision
 
 R5 / FUTURE LIVE
 - R5 identity = NONE
 - R5 = NOT AUTHORIZED
 - no future provider call is authorized
-- no new paid authorization marker is authorized
-- no new execution fence is authorized
-- no paid/live workflow dispatch is authorized
+- a future R5 readiness/preflight requires separate explicit Owner authorization
+- completion of BILL1-CLOSE does not auto-authorize readiness or paid execution
 
 R3 IMMUTABLE
 - execution ID LIVE-20260909-363F-R3
@@ -90,13 +111,6 @@ R3 IMMUTABLE
 - conservative calls 2 / 6
 - known committed/actual Orbis UAT cost at STOP USD 0.0065
 - NEVER RERUN R3
-
-CURRENT GATE
-- NONE
-- wait for explicit Owner decision
-- valid future directions may include provider-side Vidu billing evidence disposition or separately authorized readiness work for a new execution identity
-- do not auto-start R5
-- do not release/tag/deploy
 
 NO GATE AUTO-AUTHORIZES THE NEXT ONE.
 ```
