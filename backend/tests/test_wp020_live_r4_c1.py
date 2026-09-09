@@ -105,7 +105,7 @@ async def test_vidu_unsafe_provider_metadata_is_dropped():
         "task_id": "task-safe",
         "state": "failed",
         "err_code": "authorization=LEAK",
-        "credits": float("inf"),
+        "credits": -1,
     }
     with patch.object(
         httpx.AsyncClient,
