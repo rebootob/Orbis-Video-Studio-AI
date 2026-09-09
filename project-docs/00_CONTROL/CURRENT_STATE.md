@@ -17,10 +17,10 @@ P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
 P4-WP020_LIVE_STATE: R3 STOPPED / CONSUMED / GEMINI HTTP 429
 P4-WP020-LIVE-R3-C1: PASS / MERGED / CLOSED
-P4-WP020-LIVE-R3-C1-CLOSE: CONTROL-DOC ONLY / OWNER AUTHORIZED
+P4-WP020-LIVE-R3-C1-CLOSE: CONTROL-DOC ONLY / OWNER AUTHORIZED / PR #79
 
 ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING FOR OWNER AUTHORIZATION
+CURRENT_GATE: C1-CLOSE DOC SYNC -> EXACT-HEAD REVIEW -> OWNER MERGE DECISION
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -50,6 +50,29 @@ R4: NOT AUTHORIZED
 - No provider generation request, paid workflow dispatch, release, tag, or deploy.
 
 C1 now provides strict sanitized Gemini HTTP 429 structured evidence and a second nested allowlist for STOP artifacts. Raw provider message/body/headers, credentials, prompts, arbitrary project dimensions, and unknown debug/help data remain excluded.
+
+---
+
+## External Gemini Billing / Quota Remediation Evidence
+
+Owner-supplied Google AI Studio evidence after C1 merge confirms the account-side corrective:
+
+```text
+Gemini project: Orbis-Video-Production
+Billing tier: Tier 1 / Prepay
+Credit balance observed: USD 5.00
+Nano Banana 2 (Gemini 3.1 Flash Image):
+  RPM: 100
+  TPM: 200K
+  RPD: 1K
+Prior Free-tier observation for the image model: 0 / 0 / 0
+```
+
+The prior R3 Gemini HTTP 429 is therefore consistent with the old Free-tier image quota-zero condition, not a proven Orbis code defect.
+
+Owner also reported updating the repository GitHub Actions `GEMINI_API_KEY` secret to the new Orbis project key. The secret value is intentionally not readable or recorded in repository evidence. Runtime adoption of the new secret has **not yet been validated**; that requires a separately authorized NO-PAID preflight.
+
+This external remediation evidence does not authorize R4 or any provider request.
 
 ---
 
@@ -123,7 +146,9 @@ USD 0.0065 is known Orbis UAT cost evidence only; failed Gemini external billing
 
 There is no active implementation package after C1 closure.
 
-The next useful step may be a NO-PAID Gemini account/quota/billing-tier evidence review or another narrowly-scoped corrective, but nothing is authorized yet. Do not auto-start R4.
+After C1-CLOSE merges, the next candidate is a separately Owner-authorized `P4-WP020-LIVE-R4-PRE1` NO-PAID runtime readiness check to prove credential/config presence and runtime adoption without image generation, spend, or execution fence.
+
+R4 paid/live execution remains NOT AUTHORIZED.
 
 Any future paid execution requires a new execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot fence, and separate Owner run authorization.
 
