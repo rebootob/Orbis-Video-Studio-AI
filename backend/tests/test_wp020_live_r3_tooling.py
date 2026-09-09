@@ -137,7 +137,7 @@ def test_r3_preflight_is_manual_main_only_and_has_no_generation_invocation():
     workflow = (WORKFLOWS / "wp020-live-r3-preflight.yml").read_text(encoding="utf-8")
     script = (SCRIPTS / "wp020_live_r3_preflight.py").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
-    assert 'GITHUB_REF_NAME" != "main"' in workflow
+    assert 'test "$GITHUB_REF_NAME" = "main"' in workflow
     assert "generation_request_sent=false" in workflow
     assert "paid_provider_calls=0" in workflow
     for forbidden in (
@@ -165,12 +165,16 @@ def test_r3_runner_is_not_dynamic_r1_snapshot_patch_and_persists_sanitized_failu
 
 def test_paid_workflow_requires_owner_marker_fence_and_preflight_before_runner():
     workflow = (WORKFLOWS / "wp020-live-execution-r3.yml").read_text(encoding="utf-8")
+    helper = (SCRIPTS / "wp020_live_r3_fence.sh").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
-    assert 'GITHUB_REF_NAME" != "main"' in workflow
-    assert "FRESH_OWNER_AUTHORIZED_R3:" in workflow
-    assert "EXECUTION_STARTED:" in workflow
+    assert 'test "$GITHUB_REF_NAME" = "main"' in workflow
     assert "LIVE-20260909-363F-R3" in workflow
+    assert "FRESH_OWNER_AUTHORIZED_R3:" in helper
+    assert "EXECUTION_STARTED:" in helper
+    assert "LIVE_EXECUTION_PASS:" in helper
+    assert "LIVE_EXECUTION_STOPPED:" in helper
     assert "wp020_live_r3_preflight.py" in workflow
+    assert "wp020_live_r3_fence.sh consume" in workflow
     assert "wp020_live_uat_r3.py" in workflow
-    assert workflow.index("wp020_live_r3_preflight.py") < workflow.index("EXECUTION_STARTED:")
-    assert workflow.index("EXECUTION_STARTED:") < workflow.index("wp020_live_uat_r3.py")
+    assert workflow.index("wp020_live_r3_preflight.py") < workflow.index("wp020_live_r3_fence.sh consume")
+    assert workflow.index("wp020_live_r3_fence.sh consume") < workflow.index("wp020_live_uat_r3.py")
