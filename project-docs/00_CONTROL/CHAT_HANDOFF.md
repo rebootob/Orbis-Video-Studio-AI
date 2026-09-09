@@ -9,34 +9,55 @@ Canonical branch: `main`
 
 ---
 
-## Immediate Handoff Checkpoint — P4-WP020-LIVE-R5-PRE1
+## Immediate Handoff Checkpoint — P4-WP020-LIVE-R5-PRE1-CLOSE
 
 ```text
-ACTIVE WORK PACKAGE = P4-WP020-LIVE-R5-PRE1
-TYPE = NO-PAID / READINESS-PREFLIGHT / TOOLING-ONLY
-BRANCH = ai/p4-wp020-live-r5-pre1
-BASE MAIN = 8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822
-READINESS IDENTITY = WP020-LIVE-R5-PRE1
-OWNER AUTHORIZATION = Issue #63 comment 5600206595
-EXECUTION CONTRACT = Issue #63 comment 5600227540
+ACTIVE GATE = P4-WP020-LIVE-R5-PRE1-CLOSE
+TYPE = CONTROL-DOC ONLY
+BRANCH = ai/p4-wp020-live-r5-pre1-close
+BASE MAIN = 46cd9e85d68b58e9d276673e6834c81167218de9
+OWNER AUTHORIZATION = Issue #63 comment 5601980565
 NEXT GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_APPROVAL
+
+PRE1_EVIDENCE = PASS / COMPLETED / NO-PAID
+PRE1_RUN = 34351326791
+PRE1_EXECUTION_MAIN = 46cd9e85d68b58e9d276673e6834c81167218de9
+READINESS IDENTITY = WP020-LIVE-R5-PRE1
+
 PROVIDER GENERATION CALLS = 0
 PAID PROVIDER CALLS = 0
 VIDU CREDITS CONSUMED = 0
 PAID FENCE WRITTEN = false
 PAID LIVE DISPATCH = false
+
+R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
+R5_PAID_EXECUTION = NOT AUTHORIZED
+
+ACTIVE_WORK_PACKAGE AFTER MERGE = NONE
+NEXT_GATE AFTER MERGE = OWNER DECISION REQUIRED
 ```
 
-Current PR #89 Checkpoint & Review Routing:
-- PR: #89
-- Branch: `ai/p4-wp020-live-r5-pre1`
-- Canonical Base: `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822` (`origin/main`)
-- Purpose: Deliver dedicated NO-PAID readiness/preflight tooling for R5.
-- Immediate next action: Fresh-fetch canonical `main` and PR #89 exact current HEAD, verify exact-head CI success, confirm CONTROL-DOC only scope on corrective, and present for ChatGPT independent review and Owner merge authorization.
-- Hard guards: DO NOT merge without Owner approval. DO NOT dispatch `wp020-live-r5-pre1.yml`. Zero provider generation calls, zero paid calls, zero Vidu credit consumption, zero paid authorization markers, zero execution fences.
+Review & Next Action Routing:
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-pre1-close`.
+- Verify exact-head CI success.
+- Confirm CONTROL-DOC only scope (modifying only `CURRENT_STATE.md`, `ACTIVE_TASK.md`, `CHAT_HANDOFF.md`, `WORK_PACKAGES.md`).
+- Present for ChatGPT independent review.
+- STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
+- After closure merge to canonical `main`, `ACTIVE_WORK_PACKAGE` returns to `NONE` and `NEXT_GATE` requires explicit Owner decision.
+- A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and requires a separate explicit Owner authorization.
 
-Historical BILL1-CLOSE PR #88:
-- PR #88 was merged to canonical `main` at commit `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822`. It is preserved as historical evidence only.
+---
+
+## Historical Work Packages
+
+### Historical R5-PRE1 Tooling Delivery (PR #89)
+- Tooling PR #89 merged to canonical `main` at commit `46cd9e85d68b58e9d276673e6834c81167218de9`.
+- Dedicated readiness workflow run `34351326791` executed on canonical `main` with conclusion `SUCCESS` / `NO-PAID`.
+- Preserved as historical evidence.
+
+### Historical BILL1-CLOSE Gate (PR #88)
+- PR #88 merged to canonical `main` at commit `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822`.
+- Preserved as historical evidence.
 
 ---
 
@@ -47,17 +68,37 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-R4 = STOPPED / CONSUMED / NEVER RERUN
-R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
+P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID
+R5_PRE1_RUN = 34351326791
 R5_READINESS_IDENTITY = WP020-LIVE-R5-PRE1
 R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
 R5_PAID_EXECUTION = NOT AUTHORIZED
+R4 = STOPPED / CONSUMED / NEVER RERUN
+R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
 ```
 
-Canonical main at BILL1-CLOSE start:
-`da381bbd2cc407393e7326e9824bef68ea356e6b`
+Canonical main at R5-PRE1-CLOSE start:
+`46cd9e85d68b58e9d276673e6834c81167218de9`
 
 Always fresh-fetch `main` before any status, merge, authorization or execution decision.
+
+---
+
+## Accepted R5-PRE1 Preflight Truth
+
+Owner authorized `P4-WP020-LIVE-R5-PRE1` under Issue #63 comments `5600206595` and `5600227540`.
+Workflow run `34351326791` executed on canonical `main` `46cd9e85d68b58e9d276673e6834c81167218de9`.
+
+Verified:
+- PostgreSQL 16 migrations + clean starting DB state (0 usage ledger rows, 0 generation jobs);
+- Ephemeral MinIO storage write/read/delete;
+- Credentials present for OpenAI, Gemini, Vidu, ElevenLabs;
+- Adapter constructors and configs valid without generation calls;
+- Local pricing estimator valid for all 6 target providers within USD 1.00 reservation ceiling;
+- Zero provider generation calls, zero paid provider calls, zero Vidu credits consumed, zero paid fences;
+- Owner-provided balance of 2,000 Vidu credits documented as readiness evidence only (not converted to USD).
+
+Closure authorized: Issue #63 comment `5601980565`.
 
 ---
 
@@ -102,8 +143,6 @@ C1 provider calls = 0
 C1 spend added = USD 0.00
 ```
 
-C1 preserves sanitized Vidu terminal task/provider metadata through durable evidence and makes the R4 failed Vidu job amount explicitly estimated rather than confirmed provider billing.
-
 ---
 
 ## Immutable R4 Truth
@@ -137,27 +176,6 @@ Provider sequence reached:
 ```
 
 `LIVE-20260909-DE17-R4` is permanently consumed. Never rerun R4 or any paid job under that identity.
-
----
-
-## BILL1-CLOSE Gate
-
-`P4-WP020-LIVE-R4-BILL1-CLOSE` is CONTROL-DOC ONLY. It exists only to synchronize accepted BILL1 evidence into repository control truth.
-
-Hard exclusions:
-- no source/test/workflow/provider implementation change;
-- no Vidu API call;
-- no provider generation call;
-- no R4 rerun;
-- no R5 identity;
-- no paid authorization marker;
-- no execution fence;
-- no paid/live workflow dispatch;
-- no billing adjustment;
-- no credits-to-USD conversion;
-- no release/tag/deploy.
-
-After BILL1-CLOSE is merged, the project returns to `ACTIVE_WORK_PACKAGE = NONE` and waits for a separate explicit Owner next gate. A possible R5 readiness/preflight is not auto-authorized.
 
 ---
 

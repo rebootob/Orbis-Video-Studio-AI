@@ -25,13 +25,10 @@ graph TD
 Completed Core V1 WPs: 19 / 20
 WP-count completion: 95%
 P4-WP020: ACTIVE / NOT CLOSED
-R4 RUN1: STOPPED / CONSUMED / NEVER RERUN
-R4 C1: PASS / MERGED / COMPLETE
-R4 C1-CLOSE: PASS / MERGED / COMPLETE
-R4 C1-CLOSE-R1: PASS / MERGED / COMPLETE
-R4 BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
-R4 BILL1-CLOSE: CONTROL-DOC CLOSURE / EFFECTIVE WHEN MERGED TO CANONICAL MAIN
-ACTIVE_WORK_PACKAGE AFTER BILL1-CLOSE MERGE: NONE
+P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID (RUN 34351326791)
+P4-WP020-LIVE-R5-PRE1-CLOSE: CONTROL-DOC CLOSURE / EFFECTIVE WHEN MERGED TO CANONICAL MAIN
+ACTIVE_WORK_PACKAGE AFTER R5-PRE1-CLOSE MERGE: NONE
+NEXT_GATE: OWNER DECISION REQUIRED
 Core V1 release: NOT DECLARED
 R5 or later paid/live execution: NONE / NOT AUTHORIZED
 ```
@@ -39,7 +36,17 @@ R5 or later paid/live execution: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-canonical main at BILL1-CLOSE start: da381bbd2cc407393e7326e9824bef68ea356e6b
+canonical main at R5-PRE1-CLOSE start: 46cd9e85d68b58e9d276673e6834c81167218de9
+R5 readiness identity: WP020-LIVE-R5-PRE1
+R5 preflight run: 34351326791
+R5 preflight status: PASS / COMPLETED / NO-PAID
+R5 paid identity: NONE / NOT AUTHORIZED
+R5 paid execution: NOT AUTHORIZED
+R5 provider generation calls: 0
+R5 paid provider calls: 0
+R5 Vidu credits consumed: 0
+R5 paid fence written: false
+R5 paid live dispatch: false
 R4 execution identity: LIVE-20260909-DE17-R4
 R4 run: 34316188814
 R4 fence: CONSUMED / NEVER RERUN
@@ -50,10 +57,7 @@ R4 Vidu internal job estimate: USD 0.15 / ESTIMATED
 R4 failed Vidu external billing: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
 BILL1 authorization comment: 5598882289
 BILL1 disposition comment: 5598962073
-BILL1 provider calls: 0
-BILL1 spend added: USD 0.00
 Vidu balance readiness evidence: 2,000 credits / Owner-provided screenshot / not USD billing evidence
-R5 identity: NONE / NOT AUTHORIZED
 ```
 
 ---
@@ -229,21 +233,54 @@ The Owner later provided Vidu Credit Balance evidence showing `2,000 credits` af
 
 ---
 
-## 5. Required Gates After BILL1 Closure
+### P4-WP020-LIVE-R5-PRE1 — PASS / COMPLETED / NO-PAID
 
-When this BILL1-CLOSE record is merged to canonical main:
+Owner authorized `P4-WP020-LIVE-R5-PRE1 — NO-PAID Readiness / Preflight` in Issue #63 (comment `5600206595`) under execution contract comment `5600227540`. Tooling PR #89 merged to canonical `main` at `46cd9e85d68b58e9d276673e6834c81167218de9`.
+
+The dedicated readiness workflow was executed on canonical `main`:
+- Run ID: `34351326791`;
+- Workflow: `WP020 LIVE R5 Readiness & Preflight (NO-PAID)`;
+- Execution Main SHA: `46cd9e85d68b58e9d276673e6834c81167218de9`;
+- Conclusion: `SUCCESS` / `PASS` / `NO-PAID`.
+
+Accepted preflight evidence:
+- PostgreSQL 16 migrations + clean starting database state (0 usage ledger rows, 0 generation jobs) verified;
+- Ephemeral MinIO object storage write/read/delete verified;
+- Required credentials and adapter configurations present for OpenAI, Gemini, Vidu, ElevenLabs;
+- Adapter constructors and config validation verified without making any provider generation calls;
+- Local pricing estimator verified for all 6 sequential provider targets within USD 1.00 reservation ceiling;
+- Owner-provided balance of 2,000 Vidu credits documented as readiness evidence only (not converted to USD);
+- Verification metrics:
+  ```text
+  provider_generation_calls = 0
+  paid_provider_calls = 0
+  vidu_credits_consumed = 0
+  paid_fence_written = false
+  paid_live_dispatch = false
+  ```
+
+Closure authorization: Issue #63 comment `5601980565`.
+
+Detailed historical readiness specification: `P4_WP020_LIVE_R5_PRE1.md`.
+
+---
+
+## 5. Required Gates After R5-PRE1 Closure
+
+When this R5-PRE1-CLOSE record is merged to canonical main:
 
 ```text
-R4-BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
--> BILL1-CLOSE documentation synchronization = COMPLETE
+P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID (RUN 34351326791)
+-> R5-PRE1-CLOSE documentation synchronization = COMPLETE
 -> ACTIVE_WORK_PACKAGE = NONE
--> R5 identity = NONE / NOT AUTHORIZED
+-> R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
+-> R5_PAID_EXECUTION = NOT AUTHORIZED
 -> next exact gate requires separate Owner authorization
 ```
 
-A possible next direction is an R5 NO-PAID readiness/preflight gate to verify credentials, routing, pricing, runtime dependencies and credit sufficiency without generation. That readiness gate does not exist and is not authorized until the Owner explicitly approves it.
+A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
 
-No step auto-authorizes the next one. R4 is permanently consumed; R5 does not exist and is not authorized.
+No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execution does not exist and is not authorized.
 
 ---
 
@@ -278,16 +315,16 @@ Future architecture-only modes: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
 
 ## 8. Execution Rule
 
-After BILL1-CLOSE reaches canonical main:
+After R5-PRE1-CLOSE reaches canonical main:
 
 - no active work package exists until the Owner authorizes one;
 - do not call any external provider;
 - do not rerun R4;
-- do not create R5;
+- do not create an R5 paid execution identity;
 - do not write a new paid authorization marker;
 - do not consume any new execution fence;
 - do not dispatch any paid/live workflow;
-- do not modify the accepted R4 Vidu billing disposition without newer provider-side evidence;
+- do not start any Vidu credit probe without explicit Owner authorization;
 - do not convert provider credits to USD without an accepted provider pricing/billing basis;
 - do not release/tag/deploy;
 - every next gate requires separate explicit Owner authorization.

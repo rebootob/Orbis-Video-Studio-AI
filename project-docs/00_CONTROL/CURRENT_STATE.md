@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> Canonical base `main` is at `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822` following merge of BILL1-CLOSE (PR #88).
+> Canonical base `main` is at `46cd9e85d68b58e9d276673e6834c81167218de9` following merge of R5-PRE1 tooling (PR #89) and successful run `34351326791`.
 
 ---
 
@@ -13,7 +13,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_BILL1_CLOSE_START: da381bbd2cc407393e7326e9824bef68ea356e6b
+CANONICAL_MAIN_AT_R5_PRE1_CLOSE_START: 46cd9e85d68b58e9d276673e6834c81167218de9
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -30,20 +30,36 @@ P4-WP020-LIVE-R4-C1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-C1-CLOSE-R1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
 P4-WP020-LIVE-R4-BILL1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID
+P4-WP020-LIVE-R5-PRE1-CLOSE: CLOSURE RECORD / EFFECTIVE ON MERGE TO MAIN
 
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R5-PRE1
-CURRENT_GATE: TOOLING_PREPARATION_AND_PR_REVIEW
-P4-WP020-LIVE-R5-PRE1: IN_PROGRESS / TOOLING_ONLY / NO-PAID
-R5_READINESS_IDENTITY: WP020-LIVE-R5-PRE1
-R5_PAID_IDENTITY: NONE / NOT AUTHORIZED
-R5_PAID_EXECUTION: NOT AUTHORIZED
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R5-PRE1-CLOSE
+CURRENT_GATE: CHATGPT_REVIEW_AND_OWNER_MERGE_APPROVAL
+ACTIVE_WORK_PACKAGE_AFTER_MERGE: NONE
+NEXT_GATE_AFTER_MERGE: OWNER DECISION REQUIRED
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
 CORE_V1_RELEASE_DECLARED: false
 
-R3_EXECUTION_ID: LIVE-20260909-363F-R3
-R3_EXECUTION_FENCE: CONSUMED / NEVER RERUN
+R5_READINESS_IDENTITY: WP020-LIVE-R5-PRE1
+R5_PRE1_RUN: 34351326791
+R5_PRE1_EXECUTION_MAIN: 46cd9e85d68b58e9d276673e6834c81167218de9
+R5_PAID_IDENTITY: NONE / NOT AUTHORIZED
+R5_PAID_EXECUTION: NOT AUTHORIZED
+
+R5_PRE1_PROVIDER_GENERATION_CALLS: 0
+R5_PRE1_PAID_PROVIDER_CALLS: 0
+R5_PRE1_VIDU_CREDITS_CONSUMED: 0
+R5_PRE1_PAID_FENCE_WRITTEN: false
+R5_PRE1_PAID_LIVE_DISPATCH: false
+
+R5_PRE1_POSTGRES_BOOTSTRAP: PASS
+R5_PRE1_OBJECT_STORAGE: PASS
+R5_PRE1_CREDENTIALS_PRESENT: true
+R5_PRE1_PROVIDER_ROUTING: PASS
+R5_PRE1_PRICING_READINESS: PASS
+
 R4_EXECUTION_ID: LIVE-20260909-DE17-R4
 R4_EXECUTION_RUN: 34316188814
 R4_EXECUTION_MAIN: b1538f655bf526384845c1e8c536ad6fddc66ca7
@@ -55,13 +71,38 @@ R4_LAST_KNOWN_COMMITTED_ACTUAL_UAT_COST: USD 0.0738
 R4_VIDU_JOB_ESTIMATE: USD 0.15 / ESTIMATED
 R4_VIDU_EXTERNAL_BILLING: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
 
-BILL1_AUTH_COMMENT: 5598882289
-BILL1_DISPOSITION_COMMENT: 5598962073
-BILL1_PROVIDER_CALLS: 0
-BILL1_SPEND_ADDED: USD 0.00
 VIDU_BALANCE_READINESS_EVIDENCE: 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT USD BILLING EVIDENCE
-
 ```
+
+---
+
+## P4-WP020-LIVE-R5-PRE1 Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-PRE1 — NO-PAID Readiness / Preflight` in Issue #63 (comment `5600206595`) under execution contract comment `5600227540`. Tooling PR #89 merged to canonical `main` at `46cd9e85d68b58e9d276673e6834c81167218de9`.
+
+The dedicated readiness workflow run was executed on canonical `main`:
+- Run ID: `34351326791`
+- Workflow: `WP020 LIVE R5 Readiness & Preflight (NO-PAID)`
+- Execution Main SHA: `46cd9e85d68b58e9d276673e6834c81167218de9`
+- Conclusion: `SUCCESS` / `PASS`
+
+Accepted preflight evidence:
+- Required credentials and adapter configurations present for OpenAI, Gemini, Vidu, ElevenLabs;
+- Adapter constructors and config validation succeeded without making any provider generation calls;
+- Local pricing estimator verified for all 6 target providers within USD 1.00 reservation ceiling;
+- Ephemeral MinIO object storage write/read/delete verified;
+- Ephemeral PostgreSQL 16 migrations + clean starting DB state (0 jobs, 0 ledger rows) verified;
+- Vidu credit balance of 2,000 credits recorded as readiness evidence only (not converted to USD);
+- Verification metrics:
+  ```text
+  provider_generation_calls = 0
+  paid_provider_calls = 0
+  vidu_credits_consumed = 0
+  paid_fence_written = false
+  paid_live_dispatch = false
+  ```
+
+Closure authorization: Issue #63 comment `5601980565`.
 
 ---
 
@@ -157,8 +198,10 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Post-BILL1-CLOSE Rule
+## Post-R5-PRE1-CLOSE Rule
 
-Once this closure record is on canonical `main`, no active work package exists. A possible R5 NO-PAID readiness/preflight gate requires a separate explicit Owner authorization.
+Once this closure record is on canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
 
-Do not create R5, call any provider, write a paid authorization marker, create/consume a new execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag or deploy without a separate explicit Owner authorization.
+A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE and must receive separate explicit Owner authorization.
+
+Do not create an R5 paid execution identity, call any external provider, write a paid authorization marker, create or consume an execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag, or deploy without separate explicit Owner authorization.
