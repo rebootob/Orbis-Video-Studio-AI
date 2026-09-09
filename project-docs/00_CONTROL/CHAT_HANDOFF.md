@@ -16,14 +16,14 @@ ACTIVE_WORK_PACKAGE = NONE
 CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-R1_BASE_MAIN = 817539b619c4b28f22273ff01df733c612a2a386
-PARENT_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE (PR #90)
+VIDU1_PREP_BASE_MAIN = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
+PARENT_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1 (PR #91)
 
-R5_READINESS_IDENTITY = WP020-LIVE-R5-PRE1
-R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
-R5_PAID_EXECUTION = NOT AUTHORIZED
+VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
+VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
+VIDU1_PAID_EXECUTION = NOT AUTHORIZED
 
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
@@ -31,6 +31,7 @@ R4 = STOPPED / CONSUMED / NEVER RERUN
 
 PROVIDER_GENERATION_CALLS = 0
 PAID_PROVIDER_CALLS = 0
+VIDU_GENERATION_POSTS = 0
 VIDU_CREDITS_CONSUMED = 0
 PAID_FENCE_WRITTEN = false
 PAID_LIVE_DISPATCH = false
@@ -38,34 +39,38 @@ PAID_LIVE_DISPATCH = false
 
 Next Gate Direction:
 - Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`.
-- A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE / R1 and requires a separate explicit Owner authorization.
+- A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization.
 
 ---
 
-## Pre-Merge PR #91 Review Routing (Historical / In-Flight Execution Note)
+## Pre-Merge PR #92 Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the PR #91 review/merge gate only. Once PR #91 is merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the PR #92 review/merge gate only. Once PR #92 is merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #91
-TITLE = docs(wp020-live): actualize post-merge control state for R5-PRE1 closure
-BRANCH = ai/p4-wp020-live-r5-pre1-close-r1
-BASE MAIN AT R1 START = 817539b619c4b28f22273ff01df733c612a2a386
-GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1
-STATUS = AWAITING CHATGPT RE-REVIEW & OWNER MERGE APPROVAL
+PR = #92
+TITLE = ci(wp020-live): add R5-VIDU1 1-call dedicated probe tooling and contract
+BRANCH = ai/p4-wp020-live-r5-vidu1-prep
+BASE MAIN AT PREP START = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
+GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+STATUS = AWAITING CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-pre1-close-r1`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-prep`.
 - Verify exact-head CI success.
-- Confirm CONTROL-DOC only scope (updating post-merge control state to be self-closing).
+- Confirm TOOLING & CONTRACT only scope (zero provider calls, zero credits consumed).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
 
 ---
 
 ## Historical Work Packages
+
+### Historical R5-PRE1-CLOSE-R1 Gate (PR #91)
+- PR #91 merged to canonical `main` at commit `5107e3e9ef7702c8403fe74146062ab68e8e50b9`.
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical R5-PRE1-CLOSE Gate (PR #90)
 - PR #90 merged to canonical `main` at commit `817539b619c4b28f22273ff01df733c612a2a386`.
@@ -92,8 +97,12 @@ Core V1 release = NOT DECLARED
 P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R5-PRE1-CLOSE = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1 = PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-PREP = PASS / MERGED / COMPLETE
 ACTIVE_WORK_PACKAGE = NONE
 NEXT_GATE = OWNER DECISION REQUIRED
+VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
+VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
+VIDU1_PAID_EXECUTION = NOT AUTHORIZED
 R5_PRE1_RUN = 34351326791
 R5_READINESS_IDENTITY = WP020-LIVE-R5-PRE1
 R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
@@ -102,8 +111,8 @@ R4 = STOPPED / CONSUMED / NEVER RERUN
 R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
 ```
 
-Canonical main at R1 start:
-`817539b619c4b28f22273ff01df733c612a2a386`
+Canonical base main at VIDU1-PREP start:
+`5107e3e9ef7702c8403fe74146062ab68e8e50b9`
 
 Always fresh-fetch `main` before any status, merge, authorization or execution decision.
 
