@@ -15,6 +15,7 @@ LAST_CLOSED_TITLE = Gemini 429 Quota/Rate-Limit Evidence Corrective
 LAST_CLOSED_STATUS = PASS / MERGED / CLOSED
 CLOSURE_SYNC = P4-WP020-LIVE-R3-C1-CLOSE
 CLOSURE_TYPE = CONTROL-DOC ONLY
+CLOSURE_PR = #79
 CANONICAL_MAIN = 1c63045497eb7ee708cd81876f6bf7a011907f77
 MERGED_PR = #78
 MERGED_C1_HEAD = b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6
@@ -24,7 +25,7 @@ PAID_LIVE_EXECUTION = STOP / NOT AUTHORIZED
 R3_EXECUTION_ID = LIVE-20260909-363F-R3
 R3_EXECUTION_FENCE = CONSUMED / NEVER RERUN
 R4 = NOT AUTHORIZED
-NEXT_GATE = WAITING FOR OWNER AUTHORIZATION
+NEXT_CANDIDATE_GATE = P4-WP020-LIVE-R4-PRE1 / NO-PAID / REQUIRES SEPARATE OWNER AUTHORIZATION
 ```
 
 ---
@@ -49,6 +50,29 @@ Closure truth:
 - no release/tag/deploy.
 
 C1 added strict sanitized Gemini HTTP 429 evidence classification and nested STOP-artifact allowlisting without retaining raw provider body, message, headers, credentials, prompt, arbitrary project dimensions, or debug/help payloads.
+
+---
+
+## External Account-Side Corrective Evidence
+
+Owner supplied current Google AI Studio evidence after C1 merge:
+
+```text
+Project: Orbis-Video-Production
+Billing: Tier 1 / Prepay
+Observed credit: USD 5.00
+Nano Banana 2 (Gemini 3.1 Flash Image):
+  RPM 100
+  TPM 200K
+  RPD 1K
+Prior Free-tier image quota: 0 / 0 / 0
+```
+
+Owner also reported updating GitHub Actions `GEMINI_API_KEY` to the new Orbis project key. The secret value is not readable or recorded.
+
+Interpretation: the R3 HTTP 429 is consistent with the prior Free-tier image quota-zero condition. Runtime adoption of the replacement secret is still unproven and must be validated only through a separately authorized NO-PAID preflight.
+
+This does not authorize a provider generation request or R4 paid execution.
 
 ---
 
@@ -93,7 +117,9 @@ USD 0.0065 is Orbis known committed/actual evidence only. It does not prove whet
 
 No new implementation or paid/live execution is active.
 
-Do not auto-start R4. Any future R4 or other paid attempt requires a separately proposed and Owner-authorized gate. A future paid execution must use a new immutable execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot execution fence, and separate Owner run authorization.
+Do not auto-start R4. The next candidate gate is `P4-WP020-LIVE-R4-PRE1`, a NO-PAID runtime readiness check requiring separate Owner authorization. It may validate credential/config presence and runtime adoption only; it must not generate an image or consume a paid execution fence.
+
+Any future R4 paid attempt requires a new immutable execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot execution fence, and separate Owner run authorization.
 
 Contract retained for history:
 `project-docs/40_DELIVERY/P4_WP020_LIVE_R3_C1.md`
