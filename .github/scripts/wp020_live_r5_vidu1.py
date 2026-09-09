@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional
 # Root and configuration constants
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VIDU1_EXECUTION_ID = "LIVE-20260909-VIDU1-R5"
+EXPECTED_VIDU1_EXECUTION_ID = "LIVE-20260909-VIDU1-R5"
 ISSUE_NUMBER = 63
 MAX_GENERATION_POSTS = 1
 
@@ -55,7 +56,7 @@ _SAFE_ERROR_CODE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
 def validate_execution_identity(execution_id: str) -> None:
-    """Ensure execution identity is valid and not reusing consumed live runs."""
+    """Ensure execution identity matches the dedicated VIDU1 identity exactly."""
     if not execution_id or not isinstance(execution_id, str):
         raise ValueError("VIDU1 STOP: Execution identity must be a non-empty string")
     if execution_id in FORBIDDEN_REUSED_EXECUTION_IDS:
@@ -66,6 +67,10 @@ def validate_execution_identity(execution_id: str) -> None:
     if "R4" in execution_id or "R3" in execution_id or "R2" in execution_id or "R1" in execution_id:
         raise ValueError(
             f"VIDU1 STOP: Execution identity {execution_id!r} cannot reference R1-R4 historical runs"
+        )
+    if execution_id != EXPECTED_VIDU1_EXECUTION_ID:
+        raise ValueError(
+            f"VIDU1 STOP: Execution identity {execution_id!r} does not match expected dedicated identity {EXPECTED_VIDU1_EXECUTION_ID!r}"
         )
 
 

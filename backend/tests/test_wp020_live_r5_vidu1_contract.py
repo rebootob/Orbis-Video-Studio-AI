@@ -85,6 +85,17 @@ def test_execution_identity_validation():
     with pytest.raises(ValueError, match="cannot reference R1-R4"):
         mod.validate_execution_identity("LIVE-20260909-R4-PROBE")
 
+    # Non-historical wrong identities must fail closed
+    for non_historical in (
+        "LIVE-20260909-VIDU2-R5",
+        "LIVE-20260909-VIDU1-R6",
+        "LIVE-20260909-OTHER-R5",
+        "LIVE-20260910-VIDU1-R5",
+        "arbitrary-identity",
+    ):
+        with pytest.raises(ValueError, match="does not match expected dedicated identity"):
+            mod.validate_execution_identity(non_historical)
+
 
 def test_authorization_and_markers():
     mod = _load_script_module()
@@ -183,6 +194,43 @@ def test_live_guard_d_wrong_execution_id(tmp_path):
     # Reused historical R4 identity rejected at runner instantiation
     with pytest.raises(ValueError, match="reuses a consumed run identity"):
         mod.Vidu1ProbeRunner(execution_id="LIVE-20260909-DE17-R4", evidence_dir=tmp_path)
+
+    # Non-historical wrong identity rejected at runner instantiation
+    with pytest.raises(ValueError, match="does not match expected dedicated identity"):
+        mod.Vidu1ProbeRunner(execution_id="LIVE-20260909-VIDU2-R5", evidence_dir=tmp_path)
+
+
+def test_live_guard_non_historical_wrong_identity_with_valid_permit_stopped(tmp_path):
+    """Behavioral test: NON-HISTORICAL wrong identity (LIVE-20260909-VIDU2-R5)
+    with otherwise valid auth/fence/SHA/main MUST STOP before adapter call with:
+    - execution rejected
+    - generation_post_count == 0
+    - submit_generation_job.await_count == 0
+    """
+    mod = _load_script_module()
+    mock_adapter = MagicMock()
+    mock_adapter.submit_generation_job = AsyncMock()
+
+    runner = mod.Vidu1ProbeRunner(evidence_dir=tmp_path)
+    # Mutate execution ID on runner to simulate non-historical wrong identity
+    runner.execution_id = "LIVE-20260909-VIDU2-R5"
+
+    async def _run():
+        await runner.execute_probe(
+            adapter=mock_adapter,
+            authorized_main_sha=VALID_SHA,
+            current_sha=VALID_SHA,
+            auth_confirmed=True,
+            fence_confirmed=True,
+            ref_name="main",
+        )
+
+    with pytest.raises(ValueError, match="does not match expected dedicated identity"):
+        asyncio.run(_run())
+
+    assert mock_adapter.submit_generation_job.await_count == 0
+    assert runner.generation_post_count == 0
+    assert runner.state["status"] == "STOPPED"
 
 
 def test_live_guard_branch_mismatch(tmp_path):
