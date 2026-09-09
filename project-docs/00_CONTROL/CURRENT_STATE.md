@@ -11,7 +11,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_C1_CLOSE_SYNC_START: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+CANONICAL_MAIN_AT_BILL1_CLOSE_START: da381bbd2cc407393e7326e9824bef68ea356e6b
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -24,9 +24,13 @@ P4-WP020-LIVE-R4-PF1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-AUTH1: PASS / AUTHORIZED
 P4-WP020-LIVE-R4-RUN1: STOPPED / CONSUMED / NEVER RERUN
 P4-WP020-LIVE-R4-C1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R4-C1-CLOSE: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R4-C1-CLOSE-R1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R4-BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
+P4-WP020-LIVE-R4-BILL1-CLOSE: OWNER AUTHORIZED / CONTROL-DOC ONLY
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-BILL1-CLOSE
+CURRENT_GATE: CONTROL-DOC ONLY / OWNER MERGE GATED
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -43,39 +47,43 @@ R4_STOP_PHASE: LIVE-03-VIDU-VIDEO
 R4_CONSERVATIVE_PAID_CALLS: 3 / 6
 R4_LAST_KNOWN_COMMITTED_ACTUAL_UAT_COST: USD 0.0738
 R4_VIDU_JOB_ESTIMATE: USD 0.15 / ESTIMATED
-R4_VIDU_EXTERNAL_BILLING: UNKNOWN / RECONCILIATION REQUIRED
+R4_VIDU_EXTERNAL_BILLING: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
 
-C1_PR: 85
-C1_REVIEWED_HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
-C1_MERGE_COMMIT: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
-C1_PROVIDER_CALLS: 0
-C1_SPEND_ADDED: USD 0.00
+BILL1_AUTH_COMMENT: 5598882289
+BILL1_DISPOSITION_COMMENT: 5598962073
+BILL1_PROVIDER_CALLS: 0
+BILL1_SPEND_ADDED: USD 0.00
+VIDU_BALANCE_READINESS_EVIDENCE: 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT USD BILLING EVIDENCE
+
 R5_IDENTITY: NONE / NOT AUTHORIZED
 ```
 
 ---
 
-## C1 Closure Truth
+## BILL1 Provider-Side Billing Disposition
 
-`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` completed its bounded corrective and was merged through PR #85.
+Owner authorized `P4-WP020-LIVE-R4-BILL1 — Vidu Provider-Side Billing Evidence Disposition (EVIDENCE-ONLY / NO-PAID)` on canonical main `da381bbd2cc407393e7326e9824bef68ea356e6b`.
 
-Exact reviewed C1 HEAD:
-`c6f02fe56d4248011b0ef0cb96910d6997195e60`
+Issue #63 audit trail:
+- BILL1 authorization comment: `5598882289`;
+- BILL1 accepted disposition comment: `5598962073`.
 
-Merge commit / canonical main at closure-sync start:
-`4ff697c9cd0698406ce248e95ec4a69df8cd2fc5`
+Accepted provider-side evidence was the Owner-provided Vidu Usage view for `2026-09-09` in `UTC0`, with `All Keys` and all task/model filters set to `ALL`, showing no Usage History records for the full date and therefore none for the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`.
 
-Exact-head evidence before merge:
-- Backend CI `34323625029` = SUCCESS;
-- backend suite = 538 passed / 2 skipped / 3 warnings;
-- fresh PostgreSQL migrations `fresh-head` = SUCCESS;
-- fresh PostgreSQL migrations `from-revision-010` = SUCCESS;
-- Frontend CI `34323625048` = SUCCESS;
-- independent review = PASS / READY FOR OWNER MERGE DECISION;
-- C1 provider calls = 0;
-- C1 spend added = USD 0.00.
+Controlled disposition:
 
-C1 preserves sanitized Vidu terminal task/provider metadata for future evidence, keeps unsafe/raw provider content excluded, and distinguishes internal estimated job cost from provider-side billing truth.
+```text
+BILL1 = PASS / EVIDENCE ACCEPTED
+R4 failed Vidu external billing = NOT CHARGED
+Vidu internal job estimate = USD 0.15 / ESTIMATED ONLY
+R4 last known committed/actual Orbis UAT cost at STOP = USD 0.0738
+BILL1 provider calls = 0
+BILL1 spend added = USD 0.00
+```
+
+No credits-to-USD conversion was inferred. The accepted disposition closes only the failed R4 Vidu task billing question; it does not retroactively change immutable R4 execution history.
+
+The Owner later provided Vidu Credit Balance evidence showing `2,000 credits` after top-up. This is readiness evidence only. It is not proof of historical R4 billing and is not converted to USD in control records.
 
 ---
 
@@ -107,27 +115,24 @@ R4 STOP is final for this identity. `LIVE-20260909-DE17-R4` MUST NEVER BE RERUN.
 
 ---
 
-## Vidu Failure / Billing Truth
+## C1 Closure Truth
 
-Controlled interpretation after C1:
-
-```text
-Vidu internal job estimate: USD 0.15 / ESTIMATED
-Failed Vidu external billing: UNKNOWN
-R4 last known committed/actual Orbis UAT cost at STOP: USD 0.0738
-Provider-side charge/free conclusion: NOT YET PROVEN
-```
-
-The USD 0.15 value originates from dispatch-time pricing estimation and is not direct provider billing evidence. No retrospective provider billing adjustment is authorized without provider-side evidence.
-
-Provider-side Vidu Usage/Billing evidence should be matched to the R4 interval around:
+`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` completed its bounded corrective and was merged through PR #85.
 
 ```text
-Run start: 2026-09-09T05:45:42Z
-STOP record: 2026-09-09T05:47:19Z
+C1 exact reviewed HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
+C1 merge commit: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+C1-CLOSE PR: #86
+C1-CLOSE merge commit: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+C1-CLOSE-R1 PR: #87
+C1-CLOSE-R1 merge commit: da381bbd2cc407393e7326e9824bef68ea356e6b
+Backend CI at C1 exact head: 34323625029 = SUCCESS
+Frontend CI at C1 exact head: 34323625048 = SUCCESS
+C1 provider calls: 0
+C1 spend added: USD 0.00
 ```
 
-Until accepted evidence exists, preserve `R4_VIDU_EXTERNAL_BILLING = UNKNOWN`.
+C1 preserves sanitized Vidu terminal task/provider metadata for future evidence, keeps unsafe/raw provider content excluded, and distinguishes internal estimated job cost from provider-side billing truth.
 
 ---
 
@@ -150,10 +155,10 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Next Gate
+## BILL1-CLOSE Stop Rule
 
-No work package is auto-started after C1 closure.
+This gate is documentation-only. It authorizes no provider call, no provider generation, no R4 rerun, no R5 identity, no paid authorization marker, no execution fence, no paid/live workflow dispatch, no billing adjustment, no release, tag or deploy.
 
-The Owner must separately choose and authorize the next gate. Valid controlled directions include provider-side Vidu billing evidence disposition and, only after any required readiness work, consideration of a new R5 execution identity.
+After exact-head CI and independent review, STOP for explicit Owner merge decision.
 
-Do not create R5, write a new paid authorization marker, consume a new fence, dispatch a paid/live workflow, call a provider, release, tag or deploy without a separate explicit Owner authorization.
+If BILL1-CLOSE is later merged, set `ACTIVE_WORK_PACKAGE = NONE` and wait for a separately authorized next gate. A future R5 readiness/preflight gate may be considered only after separate explicit Owner authorization; BILL1-CLOSE does not authorize it.
