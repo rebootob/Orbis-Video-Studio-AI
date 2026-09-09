@@ -70,7 +70,7 @@ Issue #63 audit trail:
 - BILL1 authorization comment: `5598882289`;
 - BILL1 accepted disposition comment: `5598962073`.
 
-Accepted provider-side evidence was the Owner-provided Vidu Usage view for `2026-09-09` in `UTC0`, with `All Keys` and all task/model filters set to `ALL`, showing no Usage History records for the full date and therefore none for the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`.
+Accepted provider-side evidence was the Owner-provided Vidu Usage view with `UTC0` date range shown as `2026-08-09 - 2026-09-09`, `All Keys` selected, and Type / Model Version / Resolution / Template / Generate Mode filters set to `ALL`. The Usage History area shows `No data to export` / no usage rows for the displayed range. That displayed range includes the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`, so no provider-recorded usage entry is shown for the R4 interval.
 
 Controlled disposition:
 
