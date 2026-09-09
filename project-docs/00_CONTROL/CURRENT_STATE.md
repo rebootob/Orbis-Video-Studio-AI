@@ -11,47 +11,44 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-CANONICAL_MAIN_AT_TOOL1_START: de17a125dcd3b8066a546369d03aba813a7b5641
+CANONICAL_MAIN: de08c98f2644ed9e56983aad265a82b32d91e462
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
-P4-WP020_LIVE_STATE: R3 STOPPED / CONSUMED / NEVER RERUN
-P4-WP020-LIVE-R3-C1: PASS / MERGED / CLOSED
-P4-WP020-LIVE-R3-C1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-PRE1: PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R4-PRE1-CLOSE: PASS / MERGED / COMPLETE
-P4-WP020-LIVE-R4-TOOL1: OWNER AUTHORIZED / NO-PAID IMPLEMENTATION
+P4-WP020-LIVE-R4-TOOL1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R4-TOOL1-CLOSE-R1: OWNER AUTHORIZED / CONTROL-DOC + PF1 GOVERNANCE RECONCILIATION
 
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-TOOL1
-ACTIVE_BRANCH: ai/p4-wp020-live-r4-tool1
-CURRENT_GATE: TOOL1 IMPLEMENTATION -> EXACT-HEAD CI -> INDEPENDENT REVIEW -> OWNER MERGE DECISION
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
+ACTIVE_BRANCH: ai/p4-wp020-live-r4-tool1-close-r1
+CURRENT_GATE: CONTROL-DOC SYNC + PF1 GOVERNANCE RECONCILIATION -> EXACT-HEAD CI -> INDEPENDENT REVIEW -> OWNER MERGE DECISION
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
 CORE_V1_RELEASE_DECLARED: false
 
-ANTIGRAVITY: NOT REQUIRED FOR THIS CONTROL-PLANE TOOLING RUN
-CODEX: STOP
-CLAUDE_CODE: STOP
-
+R3_EXECUTION_ID: LIVE-20260909-363F-R3
+R3_EXECUTION_FENCE: CONSUMED / NEVER RERUN
 R4_EXECUTION_ID: LIVE-20260909-DE17-R4
 R4_TOOLING_BASE_SHA: de17a125dcd3b8066a546369d03aba813a7b5641
 R4_PAID_AUTHORIZATION: NOT AUTHORIZED
 R4_EXECUTION_FENCE: NONE
 R4_PAID_EXECUTION: NOT AUTHORIZED
-TOOL1_PROVIDER_GENERATION_CALLS: 0
-TOOL1_SPEND_AUTHORIZATION: USD 0.00
+
+RECONCILIATION_PROVIDER_GENERATION_CALLS: 0
+RECONCILIATION_SPEND_ADDED: USD 0.00
 ```
 
 ---
 
-## R4-TOOL1 Contract
+## R4-TOOL1 Closure Truth
 
-Owner authorized `P4-WP020-LIVE-R4-TOOL1 — NO-PAID Bounded One-Shot Tooling Preparation` on canonical main `de17a125dcd3b8066a546369d03aba813a7b5641`.
-
-Immutable R4 identity and paid-chain ceiling:
+R4 tooling was merged by PR #82.
 
 ```text
+Reviewed PR HEAD: 7fe35f3c51d248435ab1c90355b29cd1ade66f67
+Merge commit / current main: de08c98f2644ed9e56983aad265a82b32d91e462
 Execution ID: LIVE-20260909-DE17-R4
 Issue record: #63
 Hard cap: USD 1.00
@@ -60,7 +57,7 @@ Sequential only
 OpenAI retries: 0
 ```
 
-Exact future paid-call sequence:
+Exact future paid-call sequence remains:
 
 1. OpenAI Story — `gpt-4o`
 2. Gemini Image — `gemini-3.1-flash-image` / `1K`
@@ -72,7 +69,7 @@ Exact future paid-call sequence:
 Future authorization marker:
 
 ```text
-FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact post-merge main SHA>
+FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact authorized main SHA>
 ```
 
 Future fence:
@@ -81,74 +78,59 @@ Future fence:
 EXECUTION_STARTED: LIVE-20260909-DE17-R4
 ```
 
-Neither marker may be written during TOOL1.
-
-Detailed contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`.
+Neither exists for R4 at this gate.
 
 ---
 
-## Tooling Safety Model
+## PF1 Governance Reconciliation
 
-R4 TOOL1 adds dedicated R4 contract, fence, preflight, runner adapter, STOP exporter, workflows and tests.
+A post-TOOL1 R4 no-paid preflight was dispatched before a separate Owner PF1 authorization gate was recorded.
 
-The R4 runner adapter reuses the exact reviewed R3 runner implementation only if its Git blob SHA remains:
-
-```text
-24150cdece623004443e03ceecea10490955822b
-```
-
-There is no dynamic source rewrite. Blob drift fails closed before provider execution. The R4 adapter rebinds only immutable contract globals and explicitly preserves sanitized STOP evidence handling.
-
-The R4 preflight is manual/canonical-main only and MUST NOT invoke Creative/Image/Video/Audio generation. It must finish with:
+Observed run:
 
 ```text
-generation_request_sent=false
-paid_provider_calls=0
-execution_fence_written=false
+Run: 34306778867
+Workflow: WP020 LIVE R4 No-Paid Preflight
+Head SHA: de08c98f2644ed9e56983aad265a82b32d91e462
+Conclusion: SUCCESS
+Technical status: PREFLIGHT_PASS
+required_credentials_present: true
+generation_request_sent: false
+paid_provider_calls: 0
+execution_fence_written: false
+estimated_total_reservation: USD 0.2739
 ```
 
-The R4 paid workflow is prepared but inert until later exact Owner authorization and separate run authorization.
+Governance classification:
+- technically valid NO-PAID evidence;
+- dispatched outside a separately recorded Owner PF1 gate;
+- NOT adopted as Owner-authorized R4 PF1 completion;
+- no retroactive authorization is inferred;
+- no paid authorization marker was created;
+- no R4 execution fence was consumed;
+- no provider generation was authorized or executed by this run.
+
+Issue #63 reconciliation record: comment `5595805718`.
 
 ---
 
-## R4-PRE1 Closed Evidence
+## Closed R4-PRE1 Evidence
 
 ```text
-Full runtime preflight:
-  run: 34302711166
-  conclusion: SUCCESS
-  head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-  generation_request_sent: false
-  paid_provider_calls: 0
-  execution_fence_written: false
-
-Gemini metadata-only access probe:
-  run: 34302730786
-  conclusion: SUCCESS
-  head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-  model: gemini-3.1-flash-image
-  HTTP status: 200
-  status: ACCESS_PROBE_PASS
-  generation_request_sent: false
-  paid_generation_calls: 0
+Full runtime preflight run: 34302711166 = SUCCESS
+Gemini metadata-only probe: 34302730786 = SUCCESS / HTTP 200 / ACCESS_PROBE_PASS
+Exact main: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Generation calls: 0
+Paid provider/generation calls: 0
+Fence written: false
+Spend added: USD 0.00
 ```
 
-R4-PRE1 spend added = USD 0.00.
-
-Owner-supplied Google AI Studio evidence confirmed:
-- project `Orbis-Video-Production`;
-- Tier 1 / Prepay;
-- observed credit USD 5.00;
-- Nano Banana 2 quota RPM 100 / TPM 200K / RPD 1K;
-- prior Free-tier image quota was 0 / 0 / 0.
+Owner-supplied Google AI Studio evidence confirmed `Orbis-Video-Production` Tier 1 / Prepay and Nano Banana 2 quota RPM 100 / TPM 200K / RPD 1K.
 
 ---
 
-## Immutable LIVE History
-
-R1 and R2 remain consumed and must never be rerun.
-
-R3:
+## Immutable R3 Truth
 
 ```text
 Execution ID: LIVE-20260909-363F-R3
@@ -169,18 +151,15 @@ R3 MUST NEVER BE RERUN.
 
 ## Next Gate
 
-Complete R4-TOOL1 implementation, exact-head backend/frontend/migration CI, and independent review. Then STOP for explicit Owner merge decision.
+Finish this reconciliation PR, exact-head CI, and independent review, then STOP for explicit Owner merge decision.
 
-A TOOL1 merge does NOT authorize R4 preflight dispatch, paid authorization, fence consumption, or paid execution.
-
-Required later sequence remains:
+After merge, do not auto-start paid/live execution. The next Owner decision must explicitly choose one of:
 
 ```text
-R4-TOOL1 merge
--> fresh R4 PF1 NO-PAID on exact post-merge main
--> fresh exact-SHA Owner R4 paid authorization
--> separate explicit Owner RUN authorization
--> only then R4 paid workflow may execute
+A) adopt run 34306778867 as PF1 evidence through a fresh governance gate; or
+B) authorize a fresh R4 PF1 NO-PAID run on the then-current exact main.
 ```
+
+Only after an Owner-authorized PF1 state may the project proceed to a separate exact-SHA R4 paid authorization, followed by a distinct Owner RUN authorization.
 
 No gate auto-authorizes the next one.

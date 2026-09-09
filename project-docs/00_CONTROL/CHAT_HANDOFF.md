@@ -16,97 +16,94 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1
-ACTIVE_TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
+ACTIVE_TYPE = CONTROL-DOC + PF1 GOVERNANCE RECONCILIATION
 OWNER_AUTHORIZED = YES
 R4_PAID_EXECUTION = NOT AUTHORIZED
 ```
 
 ---
 
-## Current Canonical / Tooling Truth
+## Canonical R4 Truth
 
 ```text
-Canonical main at R4 TOOL1 start:
-de17a125dcd3b8066a546369d03aba813a7b5641
+Current canonical main:
+de08c98f2644ed9e56983aad265a82b32d91e462
 
-R4 TOOL1 branch:
-ai/p4-wp020-live-r4-tool1
+R4-TOOL1:
+PASS / MERGED / COMPLETE via PR #82
+Reviewed HEAD: 7fe35f3c51d248435ab1c90355b29cd1ade66f67
+Backend CI: 34305801438 = SUCCESS
+Frontend CI: 34305801517 = SUCCESS
 
 R4 execution identity:
 LIVE-20260909-DE17-R4
 
 R4 paid authorization: NOT AUTHORIZED
 R4 execution fence: NONE
-TOOL1 provider generation calls: 0
-TOOL1 spend authorization: USD 0.00
+R4 paid execution: NOT AUTHORIZED
 ```
 
-R4-TOOL1 is tooling preparation only. It may add R4-specific contract/fence/preflight/runner/workflow/tests/control docs but may not dispatch provider generation, write the R4 paid authorization marker, consume the R4 fence, or dispatch the paid workflow.
+Future R4 contract remains hard cap USD 1.00, maximum 6 sequential chargeable requests, OpenAI retries 0, with exact provider order OpenAI Story -> Gemini Image -> Vidu Video -> ElevenLabs TTS -> Music -> Ambience.
 
-Detailed contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`.
-
----
-
-## R4 Tooling Design
-
-Immutable future paid chain:
+Future Owner marker:
 
 ```text
-1. OPENAI_CREATIVE_STORY:gpt-4o
-2. GEMINI_IMAGE:gemini-3.1-flash-image:1K
-3. VIDU_VIDEO:viduq2:text2video:4s:720p
-4. ELEVENLABS_TTS:Thai:<=150chars
-5. ELEVENLABS_MUSIC:<=10s
-6. ELEVENLABS_AMBIENCE:<=3s
-Hard cap: USD 1.00
-Max chargeable requests: 6
-Sequential only
-OpenAI retries: 0
+FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact authorized main SHA>
 ```
 
-Future R4 Owner marker:
-
-```text
-FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact post-merge main SHA>
-```
-
-Future R4 one-shot fence:
+Future one-shot fence:
 
 ```text
 EXECUTION_STARTED: LIVE-20260909-DE17-R4
 ```
 
-The R4 runner adapter reuses only the exact independently reviewed R3 runner Git blob `24150cdece623004443e03ceecea10490955822b`. It does not dynamically rewrite source and must fail closed on blob drift.
+Neither exists yet.
+
+---
+
+## PF1 Governance Reconciliation
+
+After TOOL1 merged, R4 no-paid preflight run `34306778867` was dispatched on exact main `de08c98f2644ed9e56983aad265a82b32d91e462` before a separate Owner PF1 authorization gate was recorded.
+
+Technical result:
+
+```text
+Workflow: WP020 LIVE R4 No-Paid Preflight
+Conclusion: SUCCESS
+status: PREFLIGHT_PASS
+required_credentials_present: true
+generation_request_sent: false
+paid_provider_calls: 0
+execution_fence_written: false
+estimated_total_reservation: USD 0.2739
+```
+
+Governance classification:
+- technical NO-PAID evidence only;
+- NOT Owner-authorized PF1 completion;
+- no retroactive authorization inferred;
+- no R4 paid authorization marker;
+- no R4 execution fence consumption;
+- no provider generation;
+- no paid workflow authorization.
+
+Issue #63 reconciliation comment: `5595805718`.
 
 ---
 
 ## Closed R4-PRE1 Evidence
 
 ```text
-Full runtime preflight run: 34302711166 = SUCCESS
-Gemini metadata-only access probe: 34302730786 = SUCCESS / HTTP 200 / ACCESS_PROBE_PASS
-Exact main: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Run 34302711166 = SUCCESS full runtime no-paid preflight
+Run 34302730786 = SUCCESS Gemini metadata GET / HTTP 200 / ACCESS_PROBE_PASS
+Exact SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
 Generation calls: 0
-Paid provider/generation calls: 0
-Execution fence: false
 Spend added: USD 0.00
+Fence: false
 ```
 
-Owner-provided Google AI Studio evidence:
-
-```text
-Project: Orbis-Video-Production
-Billing tier: Tier 1 / Prepay
-Observed credit: USD 5.00
-Nano Banana 2 / Gemini 3.1 Flash Image:
-  RPM 100
-  TPM 200K
-  RPD 1K
-Prior Free-tier quota: 0 / 0 / 0
-```
-
-R4-PRE1-CLOSE merged as PR #81 and advanced canonical main to `de17a125dcd3b8066a546369d03aba813a7b5641`.
+Owner-provided Google AI Studio evidence confirmed `Orbis-Video-Production` Tier 1 / Prepay and Nano Banana 2 quota RPM 100 / TPM 200K / RPD 1K.
 
 ---
 
@@ -117,17 +114,10 @@ Execution ID: LIVE-20260909-363F-R3
 Run: 34297314995
 Execution main: 82ce42116e3f866227dd598814cf79c0b9c640c4
 Status: STOPPED / CONSUMED
-STOP phase: LIVE-02-GEMINI-IMAGE
 OpenAI STORY: SUCCESS
-OpenAI usage: 546 prompt / 513 completion
-Known committed/actual Orbis UAT cost at STOP: USD 0.0065
 Gemini IMAGE: HTTP 429
-Gemini retryable: true
-Gemini submission_uncertain: false
 Conservative calls: 2/6
-Vidu: NOT CALLED
-ElevenLabs: NOT CALLED
-Downstream: NOT STARTED
+Known committed/actual Orbis UAT cost at STOP: USD 0.0065
 R3 rerun: FORBIDDEN
 ```
 
@@ -135,19 +125,16 @@ R3 rerun: FORBIDDEN
 
 ## Next Gate
 
-Finish R4 TOOL1 implementation first.
+Finish this reconciliation branch/PR, exact-head CI, independent review, then STOP for Owner merge decision.
 
-Required sequence:
+After merge, Owner must explicitly choose either:
 
 ```text
-R4 TOOL1 exact-head CI
--> independent review
--> Owner merge decision
--> fresh R4 PF1 NO-PAID on exact post-merge main
--> fresh exact-SHA Owner R4 paid authorization
--> separate explicit Owner RUN authorization
--> only then R4 paid workflow
+A) adopt run 34306778867 as R4 PF1 evidence through a fresh governance gate; or
+B) authorize a fresh R4 PF1 NO-PAID run on the then-current exact main.
 ```
+
+Only after an Owner-authorized PF1 state may a separate exact-SHA R4 paid authorization be considered, followed by a separate explicit RUN authorization.
 
 No gate auto-authorizes the next one.
 
@@ -155,28 +142,7 @@ No gate auto-authorizes the next one.
 
 ## Owner-Locked Product Direction
 
-Orbis remains an AI Video Production Orchestrator / Production Control Plane with separate provider boundaries:
-
-```text
-CreativeProvider
-ImageProvider
-VideoProvider
-AudioProvider
-```
+Orbis remains an AI Video Production Orchestrator / Production Control Plane with separate provider boundaries: `CreativeProvider`, `ImageProvider`, `VideoProvider`, `AudioProvider`.
 
 Core V1 modes: `STORY / SHORT / LOOP / SCENE`.
-Later architecture only: `PRODUCT / EXPLAINER / PRESENTER / MONTAGE`.
-
-```text
-MULTI_PROJECT = REQUIRED
-FULL_HISTORY_RETENTION = REQUIRED
-AUDITABLE_CHANGES = REQUIRED
-NO_SILENT_HISTORY_LOSS = REQUIRED
-AUTOMATION_FIRST = REQUIRED
-APPROVAL_GATED_AUTOMATION = REQUIRED
-GUIDED_FLEXIBILITY = REQUIRED
-AUDIO_PRODUCTION_CORE_V1 = REQUIRED
-LOCAL_AI = DISALLOWED
-CLOUD_AI = REQUIRED
-VENDOR_LOCK_IN = DISALLOWED
-```
+Cloud AI required; local AI disallowed; vendor lock-in disallowed; approval-gated automation required.
