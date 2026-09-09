@@ -9,115 +9,104 @@
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-PF1-CLOSE
-ACTIVE_TITLE = R4 PF1 Closure / Control-Document Sync
-ACTIVE_TYPE = CONTROL-DOC ONLY
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-C1
+ACTIVE_TITLE = Vidu Failure Evidence & Billing Reconciliation
+ACTIVE_TYPE = NO-PAID CORRECTIVE
 OWNER_AUTHORIZED = YES
-CANONICAL_MAIN = 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
-ACTIVE_BRANCH = ai/p4-wp020-live-r4-pf1-close
+CANONICAL_MAIN_AT_START = b1538f655bf526384845c1e8c536ad6fddc66ca7
+ACTIVE_BRANCH = ai/p4-wp020-live-r4-c1
 
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1-CLOSE-R1
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PF1-CLOSE
 LAST_CLOSED_STATUS = PASS / MERGED / COMPLETE
-P4-WP020-LIVE-R4-PF1 = PASS / COMPLETED / NO-PAID
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 
 R3_EXECUTION_ID = LIVE-20260909-363F-R3
 R3_EXECUTION_FENCE = CONSUMED / NEVER RERUN
 R4_EXECUTION_ID = LIVE-20260909-DE17-R4
-R4_PF1_AUTHORIZED_MAIN = 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
-R4_PF1_RUN = 34313038252
-R4_PF1_STATUS = PASS / COMPLETED / NO-PAID
-R4_PAID_AUTHORIZATION = NOT AUTHORIZED
-R4_EXECUTION_FENCE = NONE
-R4_PAID_EXECUTION = NOT AUTHORIZED
+R4_EXECUTION_RUN = 34316188814
+R4_EXECUTION_MAIN = b1538f655bf526384845c1e8c536ad6fddc66ca7
+R4_EXECUTION_FENCE = CONSUMED / NEVER RERUN
+R4_PAID_EXECUTION = STOPPED
+R4_STOP_PHASE = LIVE-03-VIDU-VIDEO
+R4_CONSERVATIVE_PAID_CALLS = 3 / 6
+R4_LAST_KNOWN_COMMITTED_ACTUAL_UAT_COST = USD 0.0738
+R4_VIDU_JOB_ESTIMATE = USD 0.15
+R4_VIDU_EXTERNAL_BILLING = UNKNOWN / RECONCILIATION REQUIRED
 
-PF1_PROVIDER_GENERATION_CALLS = 0
-PF1_PAID_PROVIDER_CALLS = 0
-PF1_SPEND_ADDED = USD 0.00
+C1_PROVIDER_CALLS = 0
+C1_SPEND_ADDED = USD 0.00
 NEXT_GATE = EXACT-HEAD CI + INDEPENDENT REVIEW -> OWNER MERGE DECISION
 ```
 
 ---
 
-## Canonical R4-PF1 Evidence
+## Immutable R4 Execution Truth
 
-`P4-WP020-LIVE-R4-PF1 — Fresh Exact-Main NO-PAID Preflight`
+Owner separately authorized R4 paid execution and manually dispatched run `34316188814` on exact main `b1538f655bf526384845c1e8c536ad6fddc66ca7`.
 
 ```text
-Owner-authorized exact main: 7de0d3344cd32a1a016f0ee1f4d6121861c57a43
-Run: 34313038252
-Workflow: WP020 LIVE R4 No-Paid Preflight
-Event: workflow_dispatch
-Conclusion: SUCCESS
-status: PREFLIGHT_PASS
 Execution ID: LIVE-20260909-DE17-R4
-required_credentials_present: true
-generation_request_sent: false
-paid_provider_calls: 0
-execution_fence_written: false
-budget_cap_usd: 1.0
-max_paid_calls: 6
-estimated_total_reservation: USD 0.2739
-spend_added: USD 0.00
-Issue #63 result comment: 5596078866
+Workflow: WP020 LIVE R4 Paid One-Shot Execution
+Run: 34316188814
+Conclusion: FAILURE / STOP
+Fence comment: 5596464603
+STOP comment: 5596467391
+STOP phase: LIVE-03-VIDU-VIDEO
+Conservative paid calls: 3 / 6
+Last known committed/actual Orbis UAT cost: USD 0.0738
 ```
 
-Verified:
-- manual canonical-main guard PASS;
-- exact authorized SHA PASS;
-- fresh PostgreSQL 16 migrations PASS through Alembic head;
-- ephemeral MinIO health PASS;
-- required credentials/config presence PASS without exposing secret values;
-- provider routing/pricing/budget reservation PASS;
-- no provider generation;
-- no paid call;
-- no paid authorization marker;
-- no execution fence consumption.
+Provider sequence reached:
+- OpenAI STORY: SUCCESS;
+- Gemini IMAGE: SUCCESS and durable keyframe evidence created;
+- Vidu VIDEO: terminal provider state `FAILED`;
+- ElevenLabs TTS / Music / Ambience: NOT CALLED.
+
+`LIVE-20260909-DE17-R4` is consumed and MUST NEVER be rerun.
 
 ---
 
-## Historical PF1 Governance-Reconciliation Evidence
+## C1 Evidence Problem
 
-Run `34306778867` on `de08c98f2644ed9e56983aad265a82b32d91e462` remains historical technical NO-PAID evidence only. It was dispatched before a separately recorded Owner PF1 authorization gate and is not retroactively authorized.
+The R4 failure artifact retained a Vidu `GenerationJob.cost_usd` value of USD 0.15. Repository code shows that field is the dispatch-time estimated cost, not proof of an external Vidu charge.
 
-Fresh run `34313038252` is now the canonical Owner-authorized R4-PF1 completion evidence.
+Therefore:
+
+```text
+USD 0.15 = INTERNAL ESTIMATED JOB COST
+USD 0.0738 = LAST KNOWN COMMITTED/ACTUAL ORBIS UAT COST AT STOP
+FAILED VIDU TASK EXTERNAL BILLING = UNKNOWN
+```
+
+Do not reinterpret the USD 0.15 estimate as confirmed external billing and do not reinterpret the Vidu failure as free.
+
+Provider-side usage/billing evidence remains required to close the external billing question. The target reconciliation window is the R4 run around `2026-09-09T05:45:42Z` through the STOP record at `2026-09-09T05:47:19Z`.
 
 ---
 
-## R4 Tooling Contract
+## Authorized C1 Corrective Scope
 
-R4 tooling remains:
-- execution ID `LIVE-20260909-DE17-R4`;
-- tooling base `de17a125dcd3b8066a546369d03aba813a7b5641`;
-- hard cap USD 1.00;
-- max 6 chargeable provider requests;
-- sequential only;
-- OpenAI retries 0;
-- exact provider sequence OpenAI Story -> Gemini Image -> Vidu Video -> ElevenLabs TTS -> Music -> Ambience.
+C1 may only:
+- preserve sanitized Vidu terminal task identity and typed provider metadata such as provider state, safe provider error code and provider credits when returned;
+- keep raw provider bodies, headers, prompts and secrets excluded from durable evidence;
+- label Vidu job cost as estimated rather than confirmed billing;
+- label failed Vidu external billing as `UNKNOWN` until provider-side reconciliation evidence exists;
+- add mocked regression tests for failed Vidu responses and durable evidence boundaries;
+- synchronize control/delivery documentation with immutable R4 STOP truth.
 
-A future exact-SHA paid authorization marker, if separately Owner-authorized, is:
-
-```text
-FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact main sha>
-```
-
-A future one-shot execution fence, if later separately authorized to RUN, is:
-
-```text
-EXECUTION_STARTED: LIVE-20260909-DE17-R4
-```
-
-Neither exists during PF1-CLOSE.
+C1 must not:
+- call OpenAI, Gemini, Vidu or ElevenLabs;
+- dispatch any LIVE workflow;
+- create an R5 execution identity;
+- create or consume a new execution fence;
+- adjust provider billing without evidence;
+- release, tag or deploy.
 
 ---
 
 ## Stop Rule
 
-This work package is documentation-only.
+Finish C1 implementation and tests on the bounded branch, obtain exact-head Backend/Frontend CI and independent review, then STOP for explicit Owner merge decision.
 
-Do not dispatch any R4 paid workflow, do not create `FRESH_OWNER_AUTHORIZED_R4`, do not consume `EXECUTION_STARTED`, and do not send any provider-generation request.
-
-After this closure merges, a separate exact-SHA Owner paid-authorization gate may be considered. A later explicit Owner RUN authorization remains a distinct gate.
-
-No gate auto-authorizes the next one.
+C1 merge does not authorize R5 or any provider call. A future execution identity requires a separate Owner gate after C1 closure and billing evidence disposition.
