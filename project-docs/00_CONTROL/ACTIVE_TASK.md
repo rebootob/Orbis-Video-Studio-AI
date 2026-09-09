@@ -3,14 +3,16 @@
 > Canonical location: `project-docs/00_CONTROL/ACTIVE_TASK.md`
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
+>
+> This file describes the post-BILL1-CLOSE canonical state once the closure record is merged to `main`. While the PR is open, live PR truth governs the merge gate.
 
 ---
 
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-BILL1-CLOSE
-ACTIVE_STATUS = OWNER AUTHORIZED / CONTROL-DOC ONLY
+ACTIVE_WORK_PACKAGE = NONE
+ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
 CANONICAL_MAIN_AT_BILL1_CLOSE_START = da381bbd2cc407393e7326e9824bef68ea356e6b
 
 LAST_COMPLETED_EVIDENCE_GATE = P4-WP020-LIVE-R4-BILL1
@@ -37,7 +39,7 @@ BILL1_SPEND_ADDED = USD 0.00
 VIDU_BALANCE_READINESS_EVIDENCE = 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT USD BILLING EVIDENCE
 
 R5_IDENTITY = NONE / NOT AUTHORIZED
-NEXT_GATE_AFTER_CLOSE = OWNER DECISION REQUIRED
+NEXT_GATE = OWNER DECISION REQUIRED
 ```
 
 ---
@@ -94,23 +96,10 @@ Provider sequence reached:
 
 ---
 
-## BILL1-CLOSE Contract
+## Post-BILL1-CLOSE Rule
 
-This gate may synchronize control/delivery documentation only to the accepted BILL1 evidence.
+Once this closure record is on canonical `main`, there is no active implementation or LIVE execution gate.
 
-Hard exclusions:
-- no source/test/workflow/provider implementation changes;
-- no Vidu API call;
-- no provider generation call;
-- no R4 rerun;
-- no R5 identity;
-- no paid authorization marker;
-- no execution fence;
-- no paid/live workflow dispatch;
-- no billing adjustment;
-- no credits-to-USD conversion;
-- no release/tag/deploy.
+Do not create R5, call any provider, write a paid authorization marker, create/consume a new execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag or deploy unless the Owner explicitly authorizes that exact next gate.
 
-After exact-head CI and independent review, STOP for explicit Owner merge decision.
-
-If merged, `ACTIVE_WORK_PACKAGE` returns to `NONE`. Any R5 readiness/preflight work requires a new explicit Owner authorization and remains NO-PAID unless separately authorized otherwise.
+A possible R5 NO-PAID readiness/preflight may be proposed next, but it is not authorized by BILL1-CLOSE.
