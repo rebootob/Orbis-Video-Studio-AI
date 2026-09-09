@@ -148,7 +148,8 @@ def test_r3_preflight_is_manual_main_only_and_has_no_generation_invocation():
     workflow = (WORKFLOWS / "wp020-live-r3-preflight.yml").read_text(encoding="utf-8")
     script = (SCRIPTS / "wp020_live_r3_preflight.py").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
-    assert 'test "$GITHUB_REF_NAME" = "main"' in workflow
+    assert 'if [ "$GITHUB_REF_NAME" != "main" ]; then' in workflow
+    assert "R3 preflight must be dispatched on canonical main" in workflow
     assert "generation_request_sent=false" in workflow
     assert "paid_provider_calls=0" in workflow
     for forbidden in (
