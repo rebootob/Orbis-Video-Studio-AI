@@ -16,79 +16,97 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = NONE
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1
-R4_PRE1_CLOSURE_SYNC = CONTROL-DOC ONLY / OWNER AUTHORIZED
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R4-TOOL1
+ACTIVE_TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
+OWNER_AUTHORIZED = YES
 R4_PAID_EXECUTION = NOT AUTHORIZED
 ```
 
 ---
 
-## Current Canonical Truth
+## Current Canonical / Tooling Truth
 
 ```text
-Canonical main:
-170e82d19315e80cc7393922d7daa1b1c7f2093b
+Canonical main at R4 TOOL1 start:
+de17a125dcd3b8066a546369d03aba813a7b5641
 
-R3-C1-CLOSE:
-PR #79 merged
-Status: PASS / MERGED / COMPLETE
+R4 TOOL1 branch:
+ai/p4-wp020-live-r4-tool1
 
-R4-PRE1:
-Status: PASS / COMPLETED / NO-PAID
-Full runtime preflight run: 34302711166 SUCCESS
-Gemini metadata-only probe run: 34302730786 SUCCESS
-Exact main for both runs: 170e82d19315e80cc7393922d7daa1b1c7f2093b
-Provider generation calls: 0
-Spend added: USD 0.00
-Execution fence written: false
+R4 execution identity:
+LIVE-20260909-DE17-R4
+
+R4 paid authorization: NOT AUTHORIZED
+R4 execution fence: NONE
+TOOL1 provider generation calls: 0
+TOOL1 spend authorization: USD 0.00
 ```
 
----
+R4-TOOL1 is tooling preparation only. It may add R4-specific contract/fence/preflight/runner/workflow/tests/control docs but may not dispatch provider generation, write the R4 paid authorization marker, consume the R4 fence, or dispatch the paid workflow.
 
-## R4-PRE1 Evidence
-
-Full runtime preflight `34302711166`:
-- required credentials present;
-- PostgreSQL migrations PASS;
-- ephemeral MinIO/object storage PASS;
-- provider routing/pricing/budget checks PASS;
-- estimated reservation USD 0.2739 under USD 1.00;
-- `generation_request_sent=false`;
-- `paid_provider_calls=0`;
-- `execution_fence_written=false`.
-
-Gemini metadata-only probe `34302730786`:
-- static no-generation guard PASS;
-- current GitHub Actions Gemini credential authenticated;
-- target model `gemini-3.1-flash-image` visible;
-- HTTP 200;
-- `ACCESS_PROBE_PASS`;
-- `generation_request_sent=false`;
-- `paid_generation_calls=0`.
-
-The secret value is never exposed or persisted. The two NO-PAID runs briefly overlapped in time, but both used the same exact main SHA and neither touched paid mutable execution state or a fence, so the evidence remains valid.
+Detailed contract: `project-docs/40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`.
 
 ---
 
-## Confirmed External Gemini Remediation
+## R4 Tooling Design
+
+Immutable future paid chain:
+
+```text
+1. OPENAI_CREATIVE_STORY:gpt-4o
+2. GEMINI_IMAGE:gemini-3.1-flash-image:1K
+3. VIDU_VIDEO:viduq2:text2video:4s:720p
+4. ELEVENLABS_TTS:Thai:<=150chars
+5. ELEVENLABS_MUSIC:<=10s
+6. ELEVENLABS_AMBIENCE:<=3s
+Hard cap: USD 1.00
+Max chargeable requests: 6
+Sequential only
+OpenAI retries: 0
+```
+
+Future R4 Owner marker:
+
+```text
+FRESH_OWNER_AUTHORIZED_R4: LIVE-20260909-DE17-R4 @ <exact post-merge main SHA>
+```
+
+Future R4 one-shot fence:
+
+```text
+EXECUTION_STARTED: LIVE-20260909-DE17-R4
+```
+
+The R4 runner adapter reuses only the exact independently reviewed R3 runner Git blob `24150cdece623004443e03ceecea10490955822b`. It does not dynamically rewrite source and must fail closed on blob drift.
+
+---
+
+## Closed R4-PRE1 Evidence
+
+```text
+Full runtime preflight run: 34302711166 = SUCCESS
+Gemini metadata-only access probe: 34302730786 = SUCCESS / HTTP 200 / ACCESS_PROBE_PASS
+Exact main: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+Generation calls: 0
+Paid provider/generation calls: 0
+Execution fence: false
+Spend added: USD 0.00
+```
 
 Owner-provided Google AI Studio evidence:
 
 ```text
 Project: Orbis-Video-Production
 Billing tier: Tier 1 / Prepay
-Credit balance observed: USD 5.00
-Nano Banana 2 (Gemini 3.1 Flash Image):
-  RPM: 100
-  TPM: 200K
-  RPD: 1K
-Prior Free-tier image quota observation: 0 / 0 / 0
+Observed credit: USD 5.00
+Nano Banana 2 / Gemini 3.1 Flash Image:
+  RPM 100
+  TPM 200K
+  RPD 1K
+Prior Free-tier quota: 0 / 0 / 0
 ```
 
-This supports the prior R3 Gemini HTTP 429 as an account/quota condition caused by Free-tier image quota zero rather than a proven application-code defect. R4-PRE1 then proved that the currently configured GitHub Actions Gemini credential can authenticate and read metadata for the target image model.
-
-No provider generation or R4 paid execution is authorized by this evidence.
+R4-PRE1-CLOSE merged as PR #81 and advanced canonical main to `de17a125dcd3b8066a546369d03aba813a7b5641`.
 
 ---
 
@@ -115,33 +133,21 @@ R3 rerun: FORBIDDEN
 
 ---
 
-## Immutable Earlier History
-
-- R1 consumed / HTTP 429 / never rerun.
-- R2 consumed / OpenAI PASS / Gemini generic HTTP_ERROR / 2/6 / USD 0.0072 known cost / never rerun.
-- R2-C1 merged PR #74, adding durable sanitized HTTP status evidence.
-- R3-PRE1 metadata probe run `34291500281` PASS / HTTP 200 / zero generation calls.
-- R3 TOOL1 merged PR #77.
-- R3 PF1 run `34296382370` PASS / zero provider calls / reservation USD 0.2739.
-- R3-C1 merged PR #78.
-- R3-C1-CLOSE merged PR #79.
-
----
-
 ## Next Gate
 
-No active implementation or paid/live execution exists.
+Finish R4 TOOL1 implementation first.
 
-After `P4-WP020-LIVE-R4-PRE1-CLOSE` merges, the next candidate is a separately Owner-authorized R4 paid execution planning/authorization gate.
+Required sequence:
 
-A future R4 paid attempt must:
-1. create a new immutable R4 execution identity;
-2. bind authorization to exact then-current main;
-3. preserve hard cap USD 1.00 / max 6 chargeable requests unless separately changed by Owner;
-4. rerun fresh no-paid preflight immediately before fence consumption;
-5. create a new one-shot execution fence;
-6. require separate explicit Owner run authorization;
-7. STOP on uncertainty, unknown cost, contract drift, or new S0/S1.
+```text
+R4 TOOL1 exact-head CI
+-> independent review
+-> Owner merge decision
+-> fresh R4 PF1 NO-PAID on exact post-merge main
+-> fresh exact-SHA Owner R4 paid authorization
+-> separate explicit Owner RUN authorization
+-> only then R4 paid workflow
+```
 
 No gate auto-authorizes the next one.
 
