@@ -9,6 +9,31 @@ Canonical branch: `main`
 
 ---
 
+## Immediate Handoff Checkpoint — PR #88
+
+```text
+ACTIVE PR = #88
+TITLE = docs(wp020-live): close BILL1 provider billing disposition
+BRANCH = ai/p4-wp020-live-r4-bill1-close
+BASE MAIN = da381bbd2cc407393e7326e9824bef68ea356e6b
+PRE-HANDOFF-SUMMARY REVIEWED HEAD = 56fe78f6ec8bfc450db87b9dba62063b5ae781e6
+OWNER MERGE AUTHORIZATION = NOT YET GRANTED
+```
+
+At the pre-handoff-summary checkpoint `56fe78f6ec8bfc450db87b9dba62063b5ae781e6`:
+- Backend Tests `34332792991` = SUCCESS;
+- backend suite = 538 passed / 2 skipped / 3 warnings;
+- migrations `fresh-head` = SUCCESS;
+- migrations `from-revision-010` = SUCCESS;
+- Frontend Tests `34332792980` = SUCCESS;
+- independent review = `PASS / READY FOR OWNER MERGE DECISION`.
+
+This handoff-summary documentation update itself advances PR #88 HEAD. Therefore `56fe78...` is a historical checkpoint only and MUST NOT be used as a future merge target. A new chat MUST fresh-fetch canonical `main` and PR #88 exact current HEAD, require exact-head Backend/Frontend CI success, confirm the changed-file scope remains control-doc only, and perform/confirm independent review on that same exact current HEAD before presenting the Owner merge gate.
+
+Immediate next action is only: fresh-fetch PR #88 -> verify exact-head CI/scope -> independent review -> STOP for explicit Owner merge approval. Do not merge automatically. Do not start R5 readiness while PR #88 remains unmerged.
+
+---
+
 ## Delivery Baseline
 
 ```text
@@ -16,33 +41,57 @@ P0-WP001 through P4-WP019 = PASS / CLOSED / MERGED
 Completed planned Core V1 work packages = 19 / 20
 P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
-ACTIVE_WORK_PACKAGE = NONE
-CURRENT_GATE = WAITING FOR EXPLICIT OWNER NEXT GATE
+R4 = STOPPED / CONSUMED / NEVER RERUN
+R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
+R5 identity = NONE / NOT AUTHORIZED
 ```
 
-Canonical main at C1 closure-sync start:
-`4ff697c9cd0698406ce248e95ec4a69df8cd2fc5`
+Canonical main at BILL1-CLOSE start:
+`da381bbd2cc407393e7326e9824bef68ea356e6b`
 
 Always fresh-fetch `main` before any status, merge, authorization or execution decision.
 
 ---
 
-## R4-C1 Closure Truth
+## BILL1 Provider-Side Billing Truth
 
-`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` is `PASS / MERGED / COMPLETE`.
+Owner authorized `P4-WP020-LIVE-R4-BILL1 — Vidu Provider-Side Billing Evidence Disposition (EVIDENCE-ONLY / NO-PAID)`.
+
+Issue #63 audit records:
+- BILL1 authorization: `5598882289`;
+- BILL1 disposition: `5598962073`.
+
+Accepted evidence was the Owner-provided Vidu Usage view with `UTC0` date range shown as `2026-08-09 - 2026-09-09`, with `All Keys` selected and Type / Model Version / Resolution / Template / Generate Mode filters at `ALL`. The Usage History area showed `No data to export` / no usage rows for the displayed range. That displayed range includes the R4 interval around `2026-09-09T05:45:42Z` through `2026-09-09T05:47:19Z`, so no provider-recorded usage entry was shown for that interval.
+
+Controlled result:
 
 ```text
-PR: #85
-Exact reviewed HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
-Merge commit: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
-Backend CI: 34323625029 = SUCCESS
-Backend suite: 538 passed / 2 skipped / 3 warnings
-Migrations fresh-head: SUCCESS
-Migrations from-revision-010: SUCCESS
-Frontend CI: 34323625048 = SUCCESS
-Independent review: PASS
-C1 provider calls: 0
-C1 spend added: USD 0.00
+BILL1 = PASS / EVIDENCE ACCEPTED
+R4 failed Vidu external billing = NOT CHARGED
+Vidu internal job estimate = USD 0.15 / ESTIMATED ONLY
+Last known committed/actual Orbis UAT cost at R4 STOP = USD 0.0738
+BILL1 provider calls = 0
+BILL1 spend added = USD 0.00
+```
+
+No credits-to-USD conversion was inferred.
+
+Owner later provided Vidu Credit Balance evidence showing `2,000 credits` after top-up. This is readiness evidence only; it is not historical R4 billing evidence and does not authorize any provider request.
+
+---
+
+## R4-C1 / Closure History
+
+```text
+R4-C1 PR #85 = PASS / MERGED / COMPLETE
+R4-C1 exact reviewed HEAD = c6f02fe56d4248011b0ef0cb96910d6997195e60
+R4-C1 merge commit = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+R4-C1-CLOSE PR #86 = PASS / MERGED / COMPLETE
+R4-C1-CLOSE merge commit = 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+R4-C1-CLOSE-R1 PR #87 = PASS / MERGED / COMPLETE
+R4-C1-CLOSE-R1 merge commit = da381bbd2cc407393e7326e9824bef68ea356e6b
+C1 provider calls = 0
+C1 spend added = USD 0.00
 ```
 
 C1 preserves sanitized Vidu terminal task/provider metadata through durable evidence and makes the R4 failed Vidu job amount explicitly estimated rather than confirmed provider billing.
@@ -83,38 +132,24 @@ Provider sequence reached:
 
 ---
 
-## Vidu Billing Truth
+## BILL1-CLOSE Gate
 
-```text
-Vidu internal job estimate = USD 0.15 / ESTIMATED
-Vidu external billing for failed task = UNKNOWN / RECONCILIATION REQUIRED
-Last known committed/actual Orbis UAT cost at R4 STOP = USD 0.0738
-```
+`P4-WP020-LIVE-R4-BILL1-CLOSE` is CONTROL-DOC ONLY. It exists only to synchronize accepted BILL1 evidence into repository control truth.
 
-Do not state that the failed Vidu call was free or that Vidu charged USD 0.15 unless provider-side Usage/Billing evidence proves it.
+Hard exclusions:
+- no source/test/workflow/provider implementation change;
+- no Vidu API call;
+- no provider generation call;
+- no R4 rerun;
+- no R5 identity;
+- no paid authorization marker;
+- no execution fence;
+- no paid/live workflow dispatch;
+- no billing adjustment;
+- no credits-to-USD conversion;
+- no release/tag/deploy.
 
-Relevant execution interval:
-
-```text
-Run start: 2026-09-09T05:45:42Z
-STOP record: 2026-09-09T05:47:19Z
-```
-
----
-
-## Prior R4 Gates
-
-```text
-R4-PRE1 = PASS / COMPLETED / NO-PAID
-R4-PRE1-CLOSE = PASS / MERGED / COMPLETE
-R4-TOOL1 = PASS / MERGED / COMPLETE via PR #82
-R4-TOOL1-CLOSE-R1 = PASS / MERGED / COMPLETE via PR #83
-R4-PF1 = PASS / COMPLETED / NO-PAID, run 34313038252
-R4-PF1-CLOSE = PASS / MERGED / COMPLETE via PR #84
-R4-AUTH1 = PASS / AUTHORIZED
-R4-RUN1 = STOPPED / CONSUMED / NEVER RERUN
-R4-C1 = PASS / MERGED / COMPLETE via PR #85
-```
+After BILL1-CLOSE is merged, the project returns to `ACTIVE_WORK_PACKAGE = NONE` and waits for a separate explicit Owner next gate. A possible R5 readiness/preflight is not auto-authorized.
 
 ---
 
@@ -130,16 +165,6 @@ Conservative calls: 2 / 6
 Known committed/actual Orbis UAT cost at STOP: USD 0.0065
 R3 rerun: FORBIDDEN
 ```
-
----
-
-## Next Gate
-
-No gate is active after C1 closure and no gate auto-authorizes the next one.
-
-The Owner may separately authorize provider-side Vidu billing evidence disposition, or later authorize readiness work for a new execution identity. R5 does not exist and is not authorized.
-
-Until a new exact gate is explicitly approved: no provider calls, no new paid marker, no new fence, no paid/live workflow dispatch, no billing adjustment, no release/tag/deploy.
 
 ---
 

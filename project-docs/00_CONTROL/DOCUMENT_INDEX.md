@@ -89,9 +89,11 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
 | WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
 
-P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1` and its closure are `PASS / MERGED / COMPLETE`; there is currently no active work package. R4 remains `STOPPED / CONSUMED / NEVER RERUN`, failed-task Vidu external billing remains `UNKNOWN / RECONCILIATION REQUIRED`, and R5 is `NONE / NOT AUTHORIZED`.
+P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE and C1-CLOSE-R1 are complete. BILL1 provider-side evidence is accepted with disposition `NOT CHARGED`; the Vidu internal `USD 0.15` remains an estimate only, while the R4 last known committed/actual Orbis UAT cost remains `USD 0.0738`.
 
-Canonical main at this documentation consistency corrective start is `37bc4584eaa14bcf1d01243364548b2a3c39bcbb`. Fresh repository truth newer than this text remains authoritative.
+This BILL1-CLOSE record is designed to leave `ACTIVE_WORK_PACKAGE = NONE` when it reaches canonical main. Owner-provided Vidu Credit Balance evidence shows `2,000 credits` after top-up; this is readiness evidence only and is not converted to USD. R5 remains `NONE / NOT AUTHORIZED` and no provider request is authorized.
+
+Canonical main at BILL1-CLOSE start is `da381bbd2cc407393e7326e9824bef68ea356e6b`. Fresh repository truth newer than this text remains authoritative.
 
 ---
 
