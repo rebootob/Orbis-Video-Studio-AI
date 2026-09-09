@@ -44,10 +44,44 @@ class ViduProviderAdapter(IVideoGenerationProviderAdapter):
     def _get_headers(self):
         return {"Authorization": f"Token {self._api_key}", "Content-Type": "application/json"}
 
-    def _failure(self, code, *, status_code=None, retryable=False, uncertain=False, job_id=""):
-        return ProviderJobResult(provider_job_id=job_id, status="FAILED", error_code=code,
-                                 error_message=code, status_code=status_code,
-                                 retryable=retryable, submission_uncertain=uncertain)
+    def _safe_provider_code(self, value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
+            value = str(value)
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value) or contains_secret(value):
+            return None
+        return value
+
+    def _safe_provider_credits(self, value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        value = float(value)
+        if not math.isfinite(value) or value < 0:
+            return None
+        return value
+
+    def _failure(self, code, *, status_code=None, retryable=False, uncertain=False, job_id="",
+                 provider_status=None, provider_error_code=None, provider_credits=None):
+        return ProviderJobResult(
+            provider_job_id=job_id,
+            status="FAILED",
+            error_code=code,
+            error_message=code,
+            status_code=status_code,
+            retryable=retryable,
+            submission_uncertain=uncertain,
+            provider_status=provider_status,
+            provider_error_code=provider_error_code,
+            provider_credits=provider_credits,
+        )
 
     def _output_url(self, value):
         if isinstance(value, str) and self._api_key and self._api_key in value:
@@ -57,27 +91,48 @@ class ViduProviderAdapter(IVideoGenerationProviderAdapter):
     def _result(self, data, job_id="", submitting=False):
         if not isinstance(data, dict):
             return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+
         state = str(data.get("state") or data.get("status") or "").lower()
-        if state == "failed":
-            return self._failure("PROVIDER_REJECTED", job_id=job_id)
         identity = data.get("task_id") or data.get("id") or job_id
-        if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", identity):
+        if identity:
+            if not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", identity):
+                return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+            if self._api_key and self._api_key in identity:
+                return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
+        elif state != "failed":
             return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
-        if self._api_key and self._api_key in identity:
-            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=job_id)
-        state = str(data.get("state") or data.get("status") or "").lower()
+
+        provider_error_code = self._safe_provider_code(data.get("err_code"))
+        provider_credits = self._safe_provider_credits(data.get("credits"))
+
+        if state == "failed":
+            return self._failure(
+                "PROVIDER_REJECTED",
+                job_id=identity or "",
+                provider_status="failed",
+                provider_error_code=provider_error_code,
+                provider_credits=provider_credits,
+            )
+
         states = {"created": "QUEUED", "queueing": "QUEUED", "queued": "QUEUED", "pending": "QUEUED",
                   "processing": "PROCESSING", "running": "PROCESSING", "success": "COMPLETED",
                   "completed": "COMPLETED", "failed": "FAILED", "cancelled": "CANCELLED", "canceled": "CANCELLED"}
         if state not in states:
-            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=identity)
+            return self._failure("INVALID_RESPONSE", uncertain=submitting, job_id=identity or job_id)
         creations = data.get("creations")
         creation = creations[0] if isinstance(creations, list) and creations and isinstance(creations[0], dict) else {}
         # Never copy error text, nested data, or raw bodies into results/logs.
-        return ProviderJobResult(provider_job_id=identity, status=states[state],
-            video_url=self._output_url(creation.get("url")), thumbnail_url=self._output_url(creation.get("cover_url")),
+        return ProviderJobResult(
+            provider_job_id=identity,
+            status=states[state],
+            video_url=self._output_url(creation.get("url")),
+            thumbnail_url=self._output_url(creation.get("cover_url")),
             error_code="PROVIDER_REJECTED" if state == "failed" else None,
-            error_message="PROVIDER_REJECTED" if state == "failed" else None)
+            error_message="PROVIDER_REJECTED" if state == "failed" else None,
+            provider_status=state,
+            provider_error_code=provider_error_code,
+            provider_credits=provider_credits,
+        )
 
     async def _request(self, method, path, *, payload=None, job_id="", submitting=False):
         if not self.validate_config({}):
