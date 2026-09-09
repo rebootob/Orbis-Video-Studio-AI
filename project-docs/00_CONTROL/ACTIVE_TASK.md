@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records the canonical state effective upon merge of PR #92 to canonical `main` (pre-merge baseline main at VIDU1-PREP start: `5107e3e9ef7702c8403fe74146062ab68e8e50b9`).
+> This specification records the canonical state effective upon merge of PR #93 to canonical `main` (pre-merge baseline main at VIDU1-COR1 start: `42d789efdb49725b1dd45b312ce39cb71ac02d1e`).
 
 ---
 
@@ -13,11 +13,16 @@
 ```text
 ACTIVE_WORK_PACKAGE = NONE
 ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
-VIDU1_PREP_BASE_MAIN = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
+VIDU1_COR1_BASE_MAIN = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
+VIDU1_COR1_AUTH_COMMENT = 5604486823
+VIDU1_COR1_MERGE_PR = #93
+
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE
 VIDU1_PREP_AUTH_COMMENT = 5602834080
 VIDU1_PREP_MERGE_PR = #92
 
@@ -62,6 +67,28 @@ P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
 ```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU1-COR1 Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-COR1 — NO-PAID Workflow Guard Compatibility Corrective` in Issue #63 (comment `5604486823`) on canonical main `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+
+Failed Live Run Evidence:
+- Run ID: `34368643536` on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`)
+- Failed closed at workflow step `Check Owner authorization & fence if live` with error: `specify only one of --comments or --json`
+- Failed closed before fence consumption (`EXECUTION_STARTED: LIVE-20260909-VIDU1-R5` was not posted)
+- Provider generation calls: 0, paid provider calls: 0, Vidu generation POSTs: 0, Vidu credits consumed: 0
+
+Delivered Corrective Changes:
+- `.github/workflows/wp020-live-r5-vidu1.yml`: replaced incompatible `gh issue view` invocation with `gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --jq '.[].body'` and fail-closed check on empty comments;
+- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: added automated tests A through H;
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`: delivery specification.
+
+Fresh Authorization Requirement:
+- The previous authorization marker from Issue #63 comment `5604486823` was bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+- Merging PR #93 will advance canonical main HEAD SHA. The old marker will no longer match and CANNOT be reused.
+- Any future paid probe requires a fresh explicit Owner authorization marker bound to the new post-merge canonical main SHA.
 
 ---
 

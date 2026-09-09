@@ -276,14 +276,54 @@ Detailed historical readiness specification: `P4_WP020_LIVE_R5_PRE1.md`.
 
 ---
 
-## 5. Required Gates After R5-PRE1 Closure
+### P4-WP020-LIVE-R5-VIDU1-PREP — PASS / MERGED / COMPLETE
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-PREP — NO-PAID Dedicated Vidu 1-Call Probe Tooling` in Issue #63 (comment `5602834080`) on canonical main `5107e3e9ef7702c8403fe74146062ab68e8e50b9`. Merged through PR #92 to canonical main `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+
+Tooling delivered:
+- Dedicated 1-call probe runner `.github/scripts/wp020_live_r5_vidu1.py`;
+- Manual `workflow_dispatch` workflow `.github/workflows/wp020-live-r5-vidu1.yml`;
+- Contract test suite `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
+- Zero provider calls, zero credits consumed, zero live dispatch during PREP.
+
+Detailed specification: `P4_WP020_LIVE_R5_VIDU1_PREP.md`.
+
+---
+
+### P4-WP020-LIVE-R5-VIDU1-COR1 — NO-PAID Workflow Guard Compatibility Corrective
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-COR1` in Issue #63 (comment `5604486823`) on canonical main `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+
+Failed live run evidence:
+- Run ID: `34368643536` on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`);
+- Failed closed at workflow step `Check Owner authorization & fence if live` with error: `specify only one of --comments or --json`;
+- Failed closed before fence consumption (`EXECUTION_STARTED: LIVE-20260909-VIDU1-R5` was not posted);
+- Provider generation calls = 0; paid provider calls = 0; Vidu generation POSTs = 0; credits consumed = 0.
+
+Delivered corrective:
+- Replaced incompatible `gh issue view` command with paginated REST API: `gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --jq '.[].body'`;
+- Added fail-closed empty comment validation (`[ -z "${COMMENTS}" ]`);
+- Updated `CANONICAL_BASE_SHA` to `42d789efdb49725b1dd45b312ce39cb71ac02d1e`;
+- Added contract tests A through H in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
+- Fresh authorization rule: The previous marker bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e` cannot be reused post-merge. Any future paid probe requires a fresh explicit Owner authorization marker bound to the new canonical main SHA.
+
+Detailed specification: `P4_WP020_LIVE_R5_VIDU1_COR1.md`.
+
+---
+
+## 5. Required Gates After R5-PRE1 / VIDU1-COR1 Closure
 
 With `P4-WP020-LIVE-R5-PRE1-CLOSE` (PR #90) and `P4-WP020-LIVE-R5-PRE1-CLOSE-R1` (PR #91) merged to canonical `main`:
 
 ```text
 P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID (RUN 34351326791)
 -> R5-PRE1-CLOSE / R1 documentation synchronization = PASS / MERGED / COMPLETE
+-> P4-WP020-LIVE-R5-VIDU1-PREP = PASS / MERGED / COMPLETE (PR #92)
+-> P4-WP020-LIVE-R5-VIDU1-COR1 = PASS / MERGED / COMPLETE (PR #93)
 -> ACTIVE_WORK_PACKAGE = NONE
+-> VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
+-> VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
+-> VIDU1_PAID_EXECUTION = NOT AUTHORIZED
 -> R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
 -> R5_PAID_EXECUTION = NOT AUTHORIZED
 -> NEXT_GATE = OWNER DECISION REQUIRED

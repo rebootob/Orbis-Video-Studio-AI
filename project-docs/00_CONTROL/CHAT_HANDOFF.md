@@ -16,10 +16,10 @@ ACTIVE_WORK_PACKAGE = NONE
 CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-VIDU1_PREP_BASE_MAIN = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
-PARENT_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1 (PR #91)
+VIDU1_COR1_BASE_MAIN = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
+PARENT_GATE = P4-WP020-LIVE-R5-VIDU1-PREP (PR #92)
 
 VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
 VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
@@ -43,30 +43,37 @@ Next Gate Direction:
 
 ---
 
-## Pre-Merge PR #92 Review Routing (In-Flight Execution Note)
+## Pre-Merge PR #93 Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the PR #92 review/merge gate only. Once PR #92 is merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the PR #93 review/merge gate only. Once PR #93 is merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #92
-TITLE = ci(wp020-live): add R5-VIDU1 1-call dedicated probe tooling and contract
-BRANCH = ai/p4-wp020-live-r5-vidu1-prep
-BASE MAIN AT PREP START = 5107e3e9ef7702c8403fe74146062ab68e8e50b9
-GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+PR = #93
+TITLE = fix(wp020-live): resolve workflow issue comments pagination compatibility
+BRANCH = ai/p4-wp020-live-r5-vidu1-cor1
+BASE MAIN AT COR1 START = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
+GATE = P4-WP020-LIVE-R5-VIDU1-COR1
 STATUS = AWAITING CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-prep`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-cor1`.
 - Verify exact-head CI success.
 - Confirm TOOLING & CONTRACT only scope (zero provider calls, zero credits consumed).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
+- Fresh authorization note: Post-merge canonical main SHA advances; the prior authorization marker bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e` cannot be reused. A fresh explicit Owner authorization marker bound to the post-merge canonical main SHA will be required for any future paid probe.
 
 ---
 
 ## Historical Work Packages
+
+### Historical VIDU1-PREP Tooling Delivery (PR #92)
+- Tooling PR #92 merged to canonical `main` at commit `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+- Delivered dedicated 1-call probe runner, manual workflow, and contract tests.
+- Live probe run `34368643536` failed closed due to CLI syntax before fence or provider calls (0 POST, 0 credits).
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical R5-PRE1-CLOSE-R1 Gate (PR #91)
 - PR #91 merged to canonical `main` at commit `5107e3e9ef7702c8403fe74146062ab68e8e50b9`.
@@ -98,6 +105,7 @@ P4-WP020-LIVE-R5-PRE1 = PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R5-PRE1-CLOSE = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1 = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-PREP = PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-COR1 = PASS / MERGED / COMPLETE
 ACTIVE_WORK_PACKAGE = NONE
 NEXT_GATE = OWNER DECISION REQUIRED
 VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
