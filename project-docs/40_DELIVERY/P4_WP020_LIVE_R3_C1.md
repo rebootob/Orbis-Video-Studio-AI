@@ -7,8 +7,12 @@ OWNER_AUTHORIZED = YES
 TYPE = NO-PAID / CODE + TEST + CONTROL-DOC
 BASE_MAIN = 82ce42116e3f866227dd598814cf79c0b9c640c4
 BRANCH = ai/p4-wp020-live-r3-c1-gemini-429-evidence
-PROVIDER_CALLS_AUTHORIZED = 0
-SPEND_AUTHORIZATION = USD 0.00
+PR = #78
+EXACT_REVIEWED_HEAD = b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6
+MERGE_COMMIT = 1c63045497eb7ee708cd81876f6bf7a011907f77
+STATUS = PASS / MERGED / CLOSED
+PROVIDER_CALLS = 0
+SPEND = USD 0.00
 R3_RERUN = FORBIDDEN
 R4 = NOT AUTHORIZED
 ```
@@ -18,7 +22,7 @@ R4 = NOT AUTHORIZED
 R3 paid run:
 - execution ID `LIVE-20260909-363F-R3`;
 - workflow run `34297314995`;
-- exact main `82ce42116e3f866227dd598814cf79c0b9c640c4`;
+- exact execution main `82ce42116e3f866227dd598814cf79c0b9c640c4`;
 - immediate pre-fence preflight PASS;
 - execution fence consumed;
 - OpenAI STORY succeeded;
@@ -32,15 +36,9 @@ R3 paid run:
 
 R3 is immutable and must never be rerun.
 
-## Problem
+## Implemented Corrective
 
-R2-C1 made the exact HTTP status durable. R3 therefore proved Gemini returned HTTP 429, but the existing adapter intentionally discarded all provider-body details. That is safe but insufficient to distinguish observable quota/rate categories.
-
-C1 must improve diagnosis without retaining unrestricted provider text.
-
-## Authorized Implementation
-
-For HTTP 429 only, the Gemini adapter may parse the response JSON in memory and retain only a strict allowlist:
+For HTTP 429 only, the Gemini adapter parses response JSON in memory and retains only a strict allowlist:
 
 ```text
 provider
@@ -59,7 +57,7 @@ retry_delay
 quota_class
 ```
 
-`quota_class` may only be derived conservatively from the allowlisted structured fields:
+`quota_class` is derived conservatively from the allowlisted structured fields:
 - `QUOTA_ZERO`;
 - `DAILY_QUOTA`;
 - `RATE_LIMIT`;
@@ -68,7 +66,9 @@ quota_class
 
 Unknown or malformed structures fall back to the pre-existing base HTTP evidence.
 
-## Explicitly Forbidden Evidence
+A second nested allowlist in the R3 STOP-artifact sanitizer preserves only the same safe structured quota evidence. This prevents the durable artifact from copying arbitrary `GenerationJob.result` fields.
+
+## Explicitly Excluded Evidence
 
 Never persist:
 - provider `message`;
@@ -81,9 +81,9 @@ Never persist:
 - Help/debug links or descriptions;
 - unknown structured detail objects.
 
-## Tests
+## Test / Review Evidence
 
-Simulated local tests only:
+Simulated zero-network coverage includes:
 1. quota value zero;
 2. daily quota identifier;
 3. per-minute rate identifier;
@@ -91,30 +91,33 @@ Simulated local tests only:
 5. unknown detail types excluded;
 6. malformed/non-dict body falls back safely;
 7. `GenerationJob.result` persists the same sanitized allowlist;
-8. secrets/provider human messages are absent.
+8. STOP-artifact sanitizer keeps only nested safe quota fields;
+9. secrets/provider human messages are absent.
 
-No real provider request is permitted during C1.
+Exact-head evidence before merge:
+- backend CI run `34298997460` = SUCCESS;
+- backend tests = 511 passed / 2 skipped / 3 warnings;
+- PostgreSQL migrations `fresh-head` = PASS;
+- PostgreSQL migrations `from-revision-010` = PASS;
+- frontend CI run `34298997360` = SUCCESS;
+- independent review = PASS / READY FOR OWNER MERGE DECISION;
+- provider calls = 0;
+- spend = USD 0.00.
 
-## Non-Goals
+## Closure
 
-- do not change Gemini model;
-- do not change endpoint;
-- do not change pricing;
-- do not change retry behavior;
-- do not add automatic retry;
-- do not change R3/R4 execution workflow;
-- do not fix Google account quota/billing settings from code;
-- do not authorize R4;
-- do not release/tag/deploy.
+Owner approved merge of PR #78 at exact reviewed HEAD `b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6`.
 
-## Acceptance
+PR #78 merged to canonical `main` as `1c63045497eb7ee708cd81876f6bf7a011907f77`.
 
-C1 can be considered PASS only when:
-- exact-head backend CI passes;
-- migration checks pass;
-- frontend CI remains green;
-- diff remains within C1 scope;
-- independent review verifies no provider dispatch and no secret/body leakage;
-- control docs record R3 as STOPPED / CONSUMED and R4 as NOT AUTHORIZED.
+C1 is therefore **PASS / MERGED / CLOSED**.
 
-Then STOP for Owner merge decision. Merge does not authorize a future paid attempt.
+Merge/closure does not authorize:
+- R4;
+- any provider call;
+- any paid/live execution;
+- a new execution fence;
+- model/endpoint/pricing/retry-policy changes;
+- release/tag/deploy.
+
+No gate auto-authorizes the next one.
