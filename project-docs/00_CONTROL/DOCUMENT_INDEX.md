@@ -83,6 +83,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R3 Proposed Resume Contract | [`../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md`](../40_DELIVERY/P4_WP020_LIVE_R3_RESUME_CONTRACT.md) |
 | P4-WP020 LIVE R4 TOOL1 Contract | [`../40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md`](../40_DELIVERY/P4_WP020_LIVE_R4_TOOL1.md) |
 | Historical P4-WP020 LIVE R4 C1 Vidu Failure/Billing Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R4_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R4_C1.md) |
+| P4-WP020 LIVE R5 PRE1 Readiness Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_PRE1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_PRE1.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |

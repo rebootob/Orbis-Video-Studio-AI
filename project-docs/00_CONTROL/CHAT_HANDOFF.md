@@ -9,28 +9,34 @@ Canonical branch: `main`
 
 ---
 
-## Immediate Handoff Checkpoint — PR #88
+## Immediate Handoff Checkpoint — P4-WP020-LIVE-R5-PRE1
 
 ```text
-ACTIVE PR = #88
-TITLE = docs(wp020-live): close BILL1 provider billing disposition
-BRANCH = ai/p4-wp020-live-r4-bill1-close
-BASE MAIN = da381bbd2cc407393e7326e9824bef68ea356e6b
-PRE-HANDOFF-SUMMARY REVIEWED HEAD = 56fe78f6ec8bfc450db87b9dba62063b5ae781e6
-OWNER MERGE AUTHORIZATION = NOT YET GRANTED
+ACTIVE WORK PACKAGE = P4-WP020-LIVE-R5-PRE1
+TYPE = NO-PAID / READINESS-PREFLIGHT / TOOLING-ONLY
+BRANCH = ai/p4-wp020-live-r5-pre1
+BASE MAIN = 8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822
+READINESS IDENTITY = WP020-LIVE-R5-PRE1
+OWNER AUTHORIZATION = Issue #63 comment 5600206595
+EXECUTION CONTRACT = Issue #63 comment 5600227540
+NEXT GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_APPROVAL
+PROVIDER GENERATION CALLS = 0
+PAID PROVIDER CALLS = 0
+VIDU CREDITS CONSUMED = 0
+PAID FENCE WRITTEN = false
+PAID LIVE DISPATCH = false
 ```
 
-At the pre-handoff-summary checkpoint `56fe78f6ec8bfc450db87b9dba62063b5ae781e6`:
-- Backend Tests `34332792991` = SUCCESS;
-- backend suite = 538 passed / 2 skipped / 3 warnings;
-- migrations `fresh-head` = SUCCESS;
-- migrations `from-revision-010` = SUCCESS;
-- Frontend Tests `34332792980` = SUCCESS;
-- independent review = `PASS / READY FOR OWNER MERGE DECISION`.
+Current PR #89 Checkpoint & Review Routing:
+- PR: #89
+- Branch: `ai/p4-wp020-live-r5-pre1`
+- Canonical Base: `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822` (`origin/main`)
+- Purpose: Deliver dedicated NO-PAID readiness/preflight tooling for R5.
+- Immediate next action: Fresh-fetch canonical `main` and PR #89 exact current HEAD, verify exact-head CI success, confirm CONTROL-DOC only scope on corrective, and present for ChatGPT independent review and Owner merge authorization.
+- Hard guards: DO NOT merge without Owner approval. DO NOT dispatch `wp020-live-r5-pre1.yml`. Zero provider generation calls, zero paid calls, zero Vidu credit consumption, zero paid authorization markers, zero execution fences.
 
-This handoff-summary documentation update itself advances PR #88 HEAD. Therefore `56fe78...` is a historical checkpoint only and MUST NOT be used as a future merge target. A new chat MUST fresh-fetch canonical `main` and PR #88 exact current HEAD, require exact-head Backend/Frontend CI success, confirm the changed-file scope remains control-doc only, and perform/confirm independent review on that same exact current HEAD before presenting the Owner merge gate.
-
-Immediate next action is only: fresh-fetch PR #88 -> verify exact-head CI/scope -> independent review -> STOP for explicit Owner merge approval. Do not merge automatically. Do not start R5 readiness while PR #88 remains unmerged.
+Historical BILL1-CLOSE PR #88:
+- PR #88 was merged to canonical `main` at commit `8c8eb871b6d2a0522b1764c4d5e1eeae0ea1e822`. It is preserved as historical evidence only.
 
 ---
 
@@ -43,7 +49,9 @@ P4-WP020 = ACTIVE / NOT CLOSED
 Core V1 release = NOT DECLARED
 R4 = STOPPED / CONSUMED / NEVER RERUN
 R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
-R5 identity = NONE / NOT AUTHORIZED
+R5_READINESS_IDENTITY = WP020-LIVE-R5-PRE1
+R5_PAID_IDENTITY = NONE / NOT AUTHORIZED
+R5_PAID_EXECUTION = NOT AUTHORIZED
 ```
 
 Canonical main at BILL1-CLOSE start:
