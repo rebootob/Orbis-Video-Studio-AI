@@ -49,8 +49,11 @@ BILL1 PROVIDER-SIDE EVIDENCE
 - disposition = NOT CHARGED
 - authorization Issue #63 comment = 5598882289
 - disposition Issue #63 comment = 5598962073
-- accepted evidence = Owner-provided Vidu Usage view for 2026-09-09 UTC0, All Keys, all relevant filters ALL, no Usage History records
-- relevant R4 interval = 2026-09-09T05:45:42Z through approximately 2026-09-09T05:47:19Z
+- accepted evidence = Owner-provided Vidu Usage view with UTC0 date range shown as 2026-08-09 - 2026-09-09
+- All Keys selected
+- Type / Model Version / Resolution / Template / Generate Mode = ALL
+- Usage History shows No data to export / no usage rows for the displayed range
+- displayed range includes R4 interval 2026-09-09T05:45:42Z through approximately 2026-09-09T05:47:19Z
 - internal Vidu job estimate = USD 0.15 / ESTIMATED ONLY
 - failed R4 Vidu external billing = NOT CHARGED
 - last known committed/actual Orbis UAT cost at R4 STOP = USD 0.0738
