@@ -35,6 +35,9 @@ _SAFE_RESULT_KEYS = (
     "retryable",
     "submission_uncertain",
     "provider_status",
+    "provider_job_id",
+    "provider_error_code",
+    "provider_credits",
     "quota_class",
     "retry_delay",
 )
@@ -170,25 +173,48 @@ def sanitize_creative_audit(
 
 
 def sanitize_generation_job(job: Any) -> dict[str, Any]:
-    """Serialize only allowlisted GenerationJob failure metadata."""
+    """Serialize allowlisted GenerationJob failure metadata with explicit cost semantics.
+
+    GenerationJob.cost_usd is a dispatch estimate, not proof that an external
+    provider charged the amount. Failed Vidu jobs therefore retain the estimate
+    while external billing remains UNKNOWN until separately reconciled.
+    """
     if job is None:
         return {}
+    provider = getattr(job, "provider_name", None)
+    status = getattr(job, "status", None)
     evidence: dict[str, Any] = {
         "kind": "generation_job",
         "job_id": str(getattr(job, "id", "")),
-        "provider": getattr(job, "provider_name", None),
+        "provider": provider,
         "provider_job_id": getattr(job, "provider_job_id", None),
-        "status": getattr(job, "status", None),
+        "status": status,
         "job_type": getattr(job, "job_type", None),
-        "cost_usd": getattr(job, "cost_usd", None),
     }
+
+    estimated_cost = getattr(job, "cost_usd", None)
+    try:
+        estimated_cost_value = float(estimated_cost) if estimated_cost is not None else None
+    except (TypeError, ValueError):
+        estimated_cost_value = None
+    if estimated_cost_value is not None and math.isfinite(estimated_cost_value) and estimated_cost_value >= 0:
+        evidence["estimated_cost_usd"] = round(estimated_cost_value, 4)
+        evidence["cost_status"] = "ESTIMATED"
+
     raw_result = getattr(job, "result", None)
     result = _copy_allowlist(raw_result, _SAFE_RESULT_KEYS)
+    result_provider_job_id = result.pop("provider_job_id", None)
+    if not evidence.get("provider_job_id") and result_provider_job_id:
+        evidence["provider_job_id"] = result_provider_job_id
     quota_failures = _sanitize_quota_failures(raw_result)
     if quota_failures:
         result["quota_failures"] = quota_failures
     if result:
         evidence["result"] = result
+
+    if provider == "vidu" and status in {"FAILED", "RECONCILIATION_REQUIRED", "CANCELLED"}:
+        evidence["external_billing_status"] = "UNKNOWN"
+
     return {key: value for key, value in evidence.items() if value not in (None, "")}
 
 
