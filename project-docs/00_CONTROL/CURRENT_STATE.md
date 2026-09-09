@@ -3,6 +3,8 @@
 > Canonical location: `project-docs/00_CONTROL/CURRENT_STATE.md`
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
+>
+> The closure state below becomes effective when this BILL1-CLOSE record is merged to canonical `main`. While the PR is open, live PR truth governs the merge gate.
 
 ---
 
@@ -27,10 +29,10 @@ P4-WP020-LIVE-R4-C1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-C1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-C1-CLOSE-R1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R4-BILL1: PASS / EVIDENCE ACCEPTED / NOT CHARGED
-P4-WP020-LIVE-R4-BILL1-CLOSE: OWNER AUTHORIZED / CONTROL-DOC ONLY
+P4-WP020-LIVE-R4-BILL1-CLOSE: CLOSURE RECORD / EFFECTIVE ON MERGE TO MAIN
 
-ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R4-BILL1-CLOSE
-CURRENT_GATE: CONTROL-DOC ONLY / OWNER MERGE GATED
+ACTIVE_WORK_PACKAGE: NONE
+CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -117,19 +119,16 @@ R4 STOP is final for this identity. `LIVE-20260909-DE17-R4` MUST NEVER BE RERUN.
 
 ## C1 Closure Truth
 
-`P4-WP020-LIVE-R4-C1 — Vidu Failure Evidence & Billing Reconciliation (NO-PAID)` completed its bounded corrective and was merged through PR #85.
-
 ```text
-C1 exact reviewed HEAD: c6f02fe56d4248011b0ef0cb96910d6997195e60
-C1 merge commit: 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
-C1-CLOSE PR: #86
-C1-CLOSE merge commit: 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
-C1-CLOSE-R1 PR: #87
-C1-CLOSE-R1 merge commit: da381bbd2cc407393e7326e9824bef68ea356e6b
-Backend CI at C1 exact head: 34323625029 = SUCCESS
-Frontend CI at C1 exact head: 34323625048 = SUCCESS
-C1 provider calls: 0
-C1 spend added: USD 0.00
+C1 PR #85 = PASS / MERGED / COMPLETE
+C1 exact reviewed HEAD = c6f02fe56d4248011b0ef0cb96910d6997195e60
+C1 merge commit = 4ff697c9cd0698406ce248e95ec4a69df8cd2fc5
+C1-CLOSE PR #86 = PASS / MERGED / COMPLETE
+C1-CLOSE merge commit = 37bc4584eaa14bcf1d01243364548b2a3c39bcbb
+C1-CLOSE-R1 PR #87 = PASS / MERGED / COMPLETE
+C1-CLOSE-R1 merge commit = da381bbd2cc407393e7326e9824bef68ea356e6b
+C1 provider calls = 0
+C1 spend added = USD 0.00
 ```
 
 C1 preserves sanitized Vidu terminal task/provider metadata for future evidence, keeps unsafe/raw provider content excluded, and distinguishes internal estimated job cost from provider-side billing truth.
@@ -155,10 +154,8 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## BILL1-CLOSE Stop Rule
+## Post-BILL1-CLOSE Rule
 
-This gate is documentation-only. It authorizes no provider call, no provider generation, no R4 rerun, no R5 identity, no paid authorization marker, no execution fence, no paid/live workflow dispatch, no billing adjustment, no release, tag or deploy.
+Once this closure record is on canonical `main`, no active work package exists. A possible R5 NO-PAID readiness/preflight gate requires a separate explicit Owner authorization.
 
-After exact-head CI and independent review, STOP for explicit Owner merge decision.
-
-If BILL1-CLOSE is later merged, set `ACTIVE_WORK_PACKAGE = NONE` and wait for a separately authorized next gate. A future R5 readiness/preflight gate may be considered only after separate explicit Owner authorization; BILL1-CLOSE does not authorize it.
+Do not create R5, call any provider, write a paid authorization marker, create/consume a new execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag or deploy without a separate explicit Owner authorization.
