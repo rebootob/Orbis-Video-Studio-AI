@@ -26,6 +26,7 @@ def test_r3_python_tooling_parses():
         "wp020_live_r3_contract.py",
         "wp020_live_r3_preflight.py",
         "wp020_live_uat_r3.py",
+        "wp020_live_r3_failure_export.py",
     ):
         source = (SCRIPTS / name).read_text(encoding="utf-8")
         ast.parse(source, filename=name)
@@ -87,6 +88,28 @@ def test_every_provider_non_success_status_stops(provider: str, status: str):
             status,
             submission_uncertain=status == "RECONCILIATION_REQUIRED",
         )
+
+
+def test_sanitized_creative_failure_excludes_error_text_and_content_fields():
+    c = _load_contract()
+    audit = SimpleNamespace(
+        id="audit-1",
+        provider="unknown",
+        model="unknown",
+        request_type="STORY_GENERATE",
+        status="FAILED",
+        duration_ms=123.4,
+        error_message="SECRET provider detail",
+        prompt="private prompt",
+    )
+    evidence = c.sanitize_creative_audit(audit)
+    serialized = repr(evidence)
+    assert evidence["provider"] == "openai"
+    assert evidence["model"] == "gpt-4o"
+    assert evidence["status"] == "FAILED"
+    assert "error_message" not in serialized
+    assert "prompt" not in serialized
+    assert "SECRET" not in serialized
 
 
 def test_sanitized_generation_failure_excludes_raw_body_headers_payload_and_secret_fields():
@@ -175,7 +198,24 @@ def test_r3_runner_is_not_dynamic_r1_snapshot_patch_and_persists_sanitized_failu
     assert exception_block.index("_capture_durable_failure_evidence()") < exception_block.index("_write_evidence()")
 
 
-def test_paid_workflow_requires_owner_marker_fence_and_preflight_before_runner():
+def test_creative_failure_export_reads_only_durable_audit_metadata_and_no_provider_api():
+    source = (SCRIPTS / "wp020_live_r3_failure_export.py").read_text(encoding="utf-8")
+    assert "GenerationAuditLog" in source
+    assert "sanitize_creative_audit" in source
+    assert 'failure_evidence["creative_audit"]' in source
+    for forbidden in (
+        "httpx.",
+        "requests.",
+        ".generate_story(",
+        ".generate_image(",
+        ".generate_audio(",
+        ".generate_video(",
+        "error_message",
+    ):
+        assert forbidden not in source
+
+
+def test_paid_workflow_requires_owner_marker_fence_preflight_and_stop_enrichment_before_upload():
     workflow = (WORKFLOWS / "wp020-live-execution-r3.yml").read_text(encoding="utf-8")
     helper = (SCRIPTS / "wp020_live_r3_fence.sh").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
@@ -188,5 +228,8 @@ def test_paid_workflow_requires_owner_marker_fence_and_preflight_before_runner()
     assert "wp020_live_r3_preflight.py" in workflow
     assert "wp020_live_r3_fence.sh consume" in workflow
     assert "wp020_live_uat_r3.py" in workflow
+    assert "wp020_live_r3_failure_export.py" in workflow
     assert workflow.index("wp020_live_r3_preflight.py") < workflow.index("wp020_live_r3_fence.sh consume")
     assert workflow.index("wp020_live_r3_fence.sh consume") < workflow.index("wp020_live_uat_r3.py")
+    assert workflow.index("wp020_live_uat_r3.py") < workflow.index("wp020_live_r3_failure_export.py")
+    assert workflow.index("wp020_live_r3_failure_export.py") < workflow.index("Upload sanitized LIVE R3 evidence artifact")
