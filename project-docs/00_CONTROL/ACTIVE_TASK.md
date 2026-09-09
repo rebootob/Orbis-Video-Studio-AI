@@ -10,52 +10,73 @@
 
 ```text
 ACTIVE_WORK_PACKAGE = NONE
-LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R3-C1
-LAST_CLOSED_TITLE = Gemini 429 Quota/Rate-Limit Evidence Corrective
-LAST_CLOSED_STATUS = PASS / MERGED / CLOSED
-CLOSURE_SYNC = P4-WP020-LIVE-R3-C1-CLOSE
+LAST_CLOSED_WORK_PACKAGE = P4-WP020-LIVE-R4-PRE1
+LAST_CLOSED_TITLE = NO-PAID Runtime Readiness Verification
+LAST_CLOSED_STATUS = PASS / COMPLETED
+CLOSURE_SYNC = P4-WP020-LIVE-R4-PRE1-CLOSE
 CLOSURE_TYPE = CONTROL-DOC ONLY
-CLOSURE_PR = #79
-CANONICAL_MAIN = 1c63045497eb7ee708cd81876f6bf7a011907f77
-MERGED_PR = #78
-MERGED_C1_HEAD = b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6
+CANONICAL_MAIN = 170e82d19315e80cc7393922d7daa1b1c7f2093b
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 PAID_LIVE_EXECUTION = STOP / NOT AUTHORIZED
 R3_EXECUTION_ID = LIVE-20260909-363F-R3
 R3_EXECUTION_FENCE = CONSUMED / NEVER RERUN
-R4 = NOT AUTHORIZED
-NEXT_CANDIDATE_GATE = P4-WP020-LIVE-R4-PRE1 / NO-PAID / REQUIRES SEPARATE OWNER AUTHORIZATION
+R4_PAID_EXECUTION = NOT AUTHORIZED
+R4_EXECUTION_ID = NONE
+R4_EXECUTION_FENCE = NONE
+NEXT_CANDIDATE_GATE = R4 PAID EXECUTION PLANNING/AUTHORIZATION / REQUIRES SEPARATE OWNER AUTHORIZATION
 ```
 
 ---
 
-## Closed C1 Evidence
+## Closed R4-PRE1 Evidence
 
-`P4-WP020-LIVE-R3-C1 — Gemini 429 Quota/Rate-Limit Evidence Corrective`
+`P4-WP020-LIVE-R4-PRE1 — NO-PAID Runtime Readiness Verification`
 
-Closure truth:
-- Owner-authorized NO-PAID corrective;
-- PR #78 merged exact reviewed HEAD `b3bc2e3c3300ec2959d6eabfb54ae21e3d461af6`;
-- merge commit / canonical main `1c63045497eb7ee708cd81876f6bf7a011907f77`;
-- backend CI run `34298997460` = SUCCESS;
-- backend tests = 511 passed / 2 skipped / 3 warnings;
-- PostgreSQL migration paths `fresh-head` and `from-revision-010` = PASS;
-- frontend CI run `34298997360` = SUCCESS;
-- independent review = PASS / READY FOR OWNER MERGE DECISION before merge;
-- C1 provider calls = 0;
-- C1 spend = USD 0.00;
-- no model/endpoint/pricing/retry-policy change;
-- no paid workflow dispatch;
-- no release/tag/deploy.
+Owner-authorized boundary:
+- exact canonical main `170e82d19315e80cc7393922d7daa1b1c7f2093b`;
+- evidence-only/no-paid runtime validation;
+- no image generation;
+- no paid workflow execution;
+- no execution-fence consumption.
 
-C1 added strict sanitized Gemini HTTP 429 evidence classification and nested STOP-artifact allowlisting without retaining raw provider body, message, headers, credentials, prompt, arbitrary project dimensions, or debug/help payloads.
+Observed evidence:
+
+```text
+Run 34302711166
+Workflow: WP020 LIVE R3 No-Paid Preflight
+Conclusion: SUCCESS
+Head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+PREFLIGHT_PASS
+required_credentials_present=true
+generation_request_sent=false
+paid_provider_calls=0
+execution_fence_written=false
+
+Run 34302730786
+Workflow: WP020 LIVE R3 PRE1 Gemini Access Probe (No-Paid)
+Conclusion: SUCCESS
+Head SHA: 170e82d19315e80cc7393922d7daa1b1c7f2093b
+provider=gemini_image
+model=gemini-3.1-flash-image
+http_status=200
+status=ACCESS_PROBE_PASS
+generation_request_sent=false
+paid_generation_calls=0
+```
+
+The current GitHub Actions Gemini credential successfully authenticated in runtime and could read metadata for `gemini-3.1-flash-image`. The secret value itself remains unreadable and is not recorded.
+
+The two NO-PAID runs overlapped briefly but used the same exact main SHA and no paid mutable execution state or fence, so the evidence remains valid.
+
+R4-PRE1 provider generation calls = 0.
+R4-PRE1 spend added = USD 0.00.
 
 ---
 
-## External Account-Side Corrective Evidence
+## Confirmed External Gemini Remediation
 
-Owner supplied current Google AI Studio evidence after C1 merge:
+Owner-supplied Google AI Studio evidence:
 
 ```text
 Project: Orbis-Video-Production
@@ -68,11 +89,7 @@ Nano Banana 2 (Gemini 3.1 Flash Image):
 Prior Free-tier image quota: 0 / 0 / 0
 ```
 
-Owner also reported updating GitHub Actions `GEMINI_API_KEY` to the new Orbis project key. The secret value is not readable or recorded.
-
-Interpretation: the R3 HTTP 429 is consistent with the prior Free-tier image quota-zero condition. Runtime adoption of the replacement secret is still unproven and must be validated only through a separately authorized NO-PAID preflight.
-
-This does not authorize a provider generation request or R4 paid execution.
+Together with the successful runtime metadata probe, this closes the immediate credential/quota readiness blocker that caused the prior R3 Gemini HTTP 429. It does not authorize any new provider generation request.
 
 ---
 
@@ -107,19 +124,16 @@ Observed sequence:
 4. Gemini IMAGE = HTTP 429 / retryable true / submission_uncertain false.
 5. Conservative chargeable requests consumed = 2/6.
 6. Vidu / ElevenLabs / downstream = NOT EXECUTED.
-7. STOP marker exists; R3 identity must never be rerun.
-
-USD 0.0065 is Orbis known committed/actual evidence only. It does not prove whether the failed Gemini request incurred an external provider charge.
+7. R3 identity must never be rerun.
 
 ---
 
-## Stop Rule After C1 Closure
+## Stop Rule After R4-PRE1
 
 No new implementation or paid/live execution is active.
 
-Do not auto-start R4. The next candidate gate is `P4-WP020-LIVE-R4-PRE1`, a NO-PAID runtime readiness check requiring separate Owner authorization. It may validate credential/config presence and runtime adoption only; it must not generate an image or consume a paid execution fence.
+Do not auto-start R4 paid execution. After this closure sync merges, any R4 paid attempt requires a separate Owner-approved planning/authorization gate that creates a new immutable execution identity and binds it to the exact then-current main.
 
-Any future R4 paid attempt requires a new immutable execution identity, fresh exact-main authorization, fresh no-paid preflight, a new one-shot execution fence, and separate Owner run authorization.
+A future R4 paid run must still require fresh no-paid preflight, new one-shot fence, bounded budget/call limits, and separate explicit Owner run authorization.
 
-Contract retained for history:
-`project-docs/40_DELIVERY/P4_WP020_LIVE_R3_C1.md`
+No gate auto-authorizes the next one.
