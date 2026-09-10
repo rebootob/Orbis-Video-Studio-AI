@@ -83,10 +83,13 @@ jobs:
               echo "STOP: VIDU2 one-shot execution fence already consumed" >&2
               exit 1
             fi
-            if printf '%s
-' "${COMMENTS}" | grep -F "${TERMINAL_PASS}" >/dev/null || printf '%s
-' "${COMMENTS}" | grep -F "${TERMINAL_STOP}" >/dev/null; then
+            if printf '%s\n' "${COMMENTS}" | grep -F "${TERMINAL_PASS}" >/dev/null || printf '%s\n' "${COMMENTS}" | grep -F "${TERMINAL_STOP}" >/dev/null; then
               echo "STOP: VIDU2 execution identity already has terminal evidence" >&2
+              exit 1
+            fi
+
+            if [ -z "${VIDU_API_KEY:-}" ]; then
+              echo "STOP: VIDU_API_KEY is missing; execution fence NOT consumed" >&2
               exit 1
             fi
 

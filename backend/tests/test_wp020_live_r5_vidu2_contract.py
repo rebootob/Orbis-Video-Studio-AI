@@ -541,3 +541,40 @@ def test_req_u_mock_transport_only():
         ))
 
     assert mock_adapter.submit_generation_job.await_count == 0
+
+
+def test_req_v_vidu_api_key_guard_ordering_before_fence_and_permit():
+    """V. Prove ordering: VIDU_API_KEY presence guard
+    < "Consuming VIDU2 execution fence"
+    < VIDU2_OWNER_AUTHORIZATION_CONFIRMED=true
+    and VIDU_API_KEY presence guard < EXECUTION_FENCE_CONFIRMED=true.
+    """
+    assert WORKFLOW_PATH.is_file(), f"Missing {WORKFLOW_PATH}"
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    key_guard = 'if [ -z "${VIDU_API_KEY:-}" ]; then'
+    fence_msg = 'Consuming VIDU2 execution fence...'
+    fence_comment = 'gh issue comment "${ISSUE_NUMBER}" --body "${FENCE_MARKER}"'
+    auth_export = 'VIDU2_OWNER_AUTHORIZATION_CONFIRMED=true'
+    fence_export = 'EXECUTION_FENCE_CONFIRMED=true'
+
+    assert key_guard in content
+    assert fence_msg in content
+    assert fence_comment in content
+    assert auth_export in content
+    assert fence_export in content
+
+    idx_key_guard = content.index(key_guard)
+    idx_fence_msg = content.index(fence_msg)
+    idx_fence_comment = content.index(fence_comment)
+    idx_auth_export = content.index(auth_export)
+    idx_fence_export = content.index(fence_export)
+
+    # Required order:
+    # 1. VIDU_API_KEY presence guard < "Consuming VIDU2 execution fence" < VIDU2_OWNER_AUTHORIZATION_CONFIRMED=true
+    assert idx_key_guard < idx_fence_msg < idx_auth_export
+    # 2. VIDU_API_KEY presence guard < EXECUTION_FENCE_CONFIRMED=true
+    assert idx_key_guard < idx_fence_export
+    # 3. Fence comment is written strictly after key guard and before exports
+    assert idx_key_guard < idx_fence_comment < idx_auth_export
+    assert idx_key_guard < idx_fence_comment < idx_fence_export
