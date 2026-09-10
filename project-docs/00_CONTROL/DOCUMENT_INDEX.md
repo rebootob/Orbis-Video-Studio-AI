@@ -100,7 +100,7 @@ P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live
 
 `P4-WP020-LIVE-R5-VIDU2-PREP` is complete and merged via PR #96 at commit `fb72d683c0dd4daa721507b6a0c12dcec17d7366` (reviewed HEAD `8dce19e7dbd0ffba0bf358c6bbc59cbdb87e7076`). `P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` (PR #97) records post-merge control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
 
-Closure base main / authorization main is `fb72d683c0dd4daa721507b6a0c12dcec17d7366`. Canonical main must be fresh-fetched from repository truth.
+COR1 authorized base main is `8bc2765a8b09d93340c3aada4f7deff46dc29144` (historical VIDU2-PREP closure base: `fb72d683c0dd4daa721507b6a0c12dcec17d7366`). Canonical main must be fresh-fetched from repository truth.
 
 ---
 

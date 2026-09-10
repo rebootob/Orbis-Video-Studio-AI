@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / ".github" / "scripts" / "wp020_live_r5_vidu2.py"
@@ -578,3 +579,29 @@ def test_req_v_vidu_api_key_guard_ordering_before_fence_and_permit():
     # 3. Fence comment is written strictly after key guard and before exports
     assert idx_key_guard < idx_fence_comment < idx_auth_export
     assert idx_key_guard < idx_fence_comment < idx_fence_export
+
+
+def test_req_w_workflow_yaml_syntax_and_registration_validity():
+    """W. Prove workflow YAML syntax is valid and workflow_dispatch registration contract holds."""
+    assert WORKFLOW_PATH.is_file(), f"Missing {WORKFLOW_PATH}"
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    data = yaml.safe_load(content)
+    assert isinstance(data, dict), "Workflow YAML must parse into a mapping"
+    assert data.get("name") == "WP020 LIVE R5 Vidu2 1-Call Probe"
+
+    # PyYAML parses unquoted 'on:' as boolean True or string 'on'
+    triggers = data.get("on") if "on" in data else data.get(True)
+    assert isinstance(triggers, dict), "Workflow triggers must be a mapping"
+    assert "workflow_dispatch" in triggers, "Workflow must register workflow_dispatch trigger"
+    assert "push" not in triggers, "Workflow must NOT have push trigger"
+    assert "pull_request" not in triggers, "Workflow must NOT have pull_request trigger"
+    assert "schedule" not in triggers, "Workflow must NOT have schedule trigger"
+
+    dispatch_config = triggers["workflow_dispatch"]
+    assert "inputs" in dispatch_config
+    assert "mode" in dispatch_config["inputs"]
+    mode_input = dispatch_config["inputs"]["mode"]
+    assert mode_input["default"] == "dry-run"
+    assert mode_input["type"] == "choice"
+    assert mode_input["options"] == ["dry-run", "live"]

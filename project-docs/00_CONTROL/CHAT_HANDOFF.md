@@ -13,36 +13,22 @@ Canonical branch: `main`
 
 ```text
 ================================================================================
-CURRENT / IN-FLIGHT TRUTH (PR #97 OPEN / NOT MERGED)
+CURRENT / IN-FLIGHT TRUTH (P4-WP020-LIVE-R5-VIDU2-PF1-COR1)
 ================================================================================
-P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE = IN PROGRESS / PR #97 OPEN / IN REVIEW / NOT MERGED
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
-CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
+P4-WP020-LIVE-R5-VIDU2-PF1 = AUTHORIZED / BLOCKED BEFORE EXECUTION
+P4-WP020-LIVE-R5-VIDU2-PF1-COR1 = IN PROGRESS / PR OPEN
+
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1
+CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1
 NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
-PR = #97 (OPEN / IN REVIEW / NOT MERGED)
-BRANCH = ai/p4-wp020-live-r5-vidu2-prep-close
-CLOSURE_BASE_MAIN_SHA = fb72d683c0dd4daa721507b6a0c12dcec17d7366
-AUTHORIZATION_MAIN_SHA = fb72d683c0dd4daa721507b6a0c12dcec17d7366
-AUTH_COMMENT = 5617902191
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
-LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #96)
-PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE (PR #95)
-PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
-PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
-PREV4_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP (PR #92)
-PREV5_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1 (PR #91)
-
-================================================================================
-POST-MERGE TARGET (CANONICAL STATE AFTER PR #97 MERGE)
-================================================================================
-P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE = PASS / MERGED / COMPLETE
-ACTIVE_WORK_PACKAGE = NONE
-CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
-NEXT_GATE = OWNER DECISION REQUIRED
+AUTHORIZED_BASE_MAIN = 8bc2765a8b09d93340c3aada4f7deff46dc29144
+BRANCH = ai/p4-wp020-live-r5-vidu2-pf1-cor1
+COR1_OWNER_AUTHORIZATION = Issue #63 comment 5620461587
+PF1_OWNER_AUTHORIZATION = Issue #63 comment 5619653050
 
 LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
-LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #97)
+LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #97, commit 8bc2765a8b09d93340c3aada4f7deff46dc29144)
 PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP (PR #96)
 PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE (PR #95)
 PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
@@ -71,9 +57,10 @@ PAID_LIVE_DISPATCH = false
 ```
 
 Next Gate Direction:
-- While PR #97 is open, `ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` and `CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE`.
-- Upon Owner-approved merge of PR #97, canonical post-merge state becomes `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`.
-- Any future probe refers to VIDU2 tooling only and strictly requires SEPARATE EXPLICIT OWNER AUTHORIZATION, a fresh exact authorization marker bound to then-current canonical main SHA, and a fresh unconsumed fence.
+- Current in-flight gate: `P4-WP020-LIVE-R5-VIDU2-PF1-COR1` (PR #98 OPEN / IN REVIEW / NOT MERGED).
+- Blocked gate: `P4-WP020-LIVE-R5-VIDU2-PF1` (AUTHORIZED / BLOCKED BEFORE EXECUTION).
+- Old PF1 authorization comment `5619653050` was bound to canonical base main `8bc2765a8b09d93340c3aada4f7deff46dc29144` and DOES NOT carry forward after COR1 merge.
+- Upon Owner-approved merge of PR #98 to canonical `main`, a fresh explicit Owner PF1 authorization bound to the new post-merge canonical `main` SHA is strictly required before any dry-run dispatch.
 - Historical VIDU1 execution `LIVE-20260909-VIDU1-R5` (Run 34423580310) is permanently STOPPED / CONSUMED / NEVER RERUN.
 - VIDU2 paid execution is NOT authorized.
 
@@ -82,32 +69,35 @@ Next Gate Direction:
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-PF1-COR1 review/merge gate only.
 
 ```text
-PR = #97 (IN-FLIGHT)
-TITLE = docs(wp020-live): close VIDU2 prep post-merge control state
-BRANCH = ai/p4-wp020-live-r5-vidu2-prep-close
-BASE MAIN AT START = fb72d683c0dd4daa721507b6a0c12dcec17d7366
-GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
+PR = #98 (IN-FLIGHT)
+TITLE = fix(wp020-live): repair VIDU2 workflow registration
+BRANCH = ai/p4-wp020-live-r5-vidu2-pf1-cor1
+AUTHORIZED_BASE_MAIN = 8bc2765a8b09d93340c3aada4f7deff46dc29144
+GATE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1
 STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OWNER MERGE DECISION)
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-prep-close`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-pf1-cor1`.
 - Verify exact-head CI success.
-- Confirm DOCS-ONLY scope (zero provider calls, zero credits consumed).
+- Confirm NO-PAID scope (zero provider calls, zero credits consumed).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
-- Post-Merge Non-Reuse Rule:
-  - Consumed run `34423580310` (executed on canonical main `5a818b9dbf642b1e456dba51c9a80745d966919e`) / execution identity `LIVE-20260909-VIDU1-R5` MUST NEVER BE RERUN.
-  - Historical HTTP status remains `UNKNOWN`.
-  - Historical Vidu credits consumed remain `UNKNOWN / NOT CONFIRMED`.
-  - Any future probe requires a fresh dedicated execution identity, fresh explicit Owner authorization, and fresh exact marker bound to post-merge canonical main SHA.
+- Post-Merge PF1 Expiry Rule:
+  - Old PF1 authorization comment `5619653050` is exact-SHA-bound to `8bc2765a8b09d93340c3aada4f7deff46dc29144` and expires upon PR #98 merge.
+  - A fresh explicit Owner PF1 authorization bound to the new post-merge canonical `main` SHA is required before any dry-run dispatch.
 
 ---
 
 ## Historical Work Packages
+
+### Historical VIDU2-PREP-CLOSE Gate (PR #97)
+- PR #97 merged to canonical `main` at commit `8bc2765a8b09d93340c3aada4f7deff46dc29144`.
+- Delivered post-merge control closure sync following probe tooling delivery.
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical VIDU1-C1 Diagnostic Corrective (PR #94)
 - Implementation PR #94 merged to canonical `main` at commit `b8d935b2d9e63668663dda0b9d92b5e3c20f1546` (reviewed HEAD `a1c2b50eaa25e7f993fd555a39f37be8db76fa6c`).
