@@ -98,9 +98,9 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrected workflow comments pagination. Live probe run `34423580310` was consumed (1 POST, HTTP_ERROR, credits UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU1-C1` delivers safe HTTP failure diagnostic metadata and request contract verification with zero provider calls.
 
-`P4-WP020-LIVE-R5-VIDU1-C1` is complete and merged via PR #94 at commit `b8d935b2d9e63668663dda0b9d92b5e3c20f1546` (reviewed HEAD `a1c2b50eaa25e7f993fd555a39f37be8db76fa6c`). `P4-WP020-LIVE-R5-VIDU1-C1-CLOSE` (PR #95) records post-merge control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
+`P4-WP020-LIVE-R5-VIDU2-PREP` is complete and merged via PR #96 at commit `fb72d683c0dd4daa721507b6a0c12dcec17d7366` (reviewed HEAD `8dce19e7dbd0ffba0bf358c6bbc59cbdb87e7076`). `P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` (PR #97) records post-merge control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
 
-Canonical main is `fb72d683c0dd4daa721507b6a0c12dcec17d7366`. Fresh repository truth newer than this text remains authoritative.
+Closure base main / authorization main is `fb72d683c0dd4daa721507b6a0c12dcec17d7366`. Canonical main must be fresh-fetched from repository truth.
 
 ---
 
