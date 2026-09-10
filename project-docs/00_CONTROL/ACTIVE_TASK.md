@@ -86,9 +86,10 @@ Delivered Corrective Changes:
 - `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`: delivery specification.
 
 Fresh Authorization Requirement:
-- The previous authorization marker from Issue #63 comment `5604486823` was bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
-- Merging PR #93 will advance canonical main HEAD SHA. The old marker will no longer match and CANNOT be reused.
-- Any future paid probe requires a fresh explicit Owner authorization marker bound to the new post-merge canonical main SHA.
+- **COR1 NO-PAID Owner authorization:** Issue #63 comment `5604486823` — authorizes only this NO-PAID corrective work package.
+- **Prior paid VIDU1 authorization marker:** Issue #63 comment `5603798466` — contains `FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`, bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+- The prior paid marker at comment `5603798466` was bound to old canonical main SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e` and MUST NOT be reused after PR #93 merges to `main`.
+- Any future paid probe requires a fresh explicit Owner authorization with a fresh exact marker bound to the new post-merge canonical main SHA.
 
 ---
 

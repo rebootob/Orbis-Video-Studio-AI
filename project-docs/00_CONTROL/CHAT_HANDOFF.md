@@ -63,7 +63,11 @@ Pre-Merge Action Routing:
 - Confirm TOOLING & CONTRACT only scope (zero provider calls, zero credits consumed).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
-- Fresh authorization note: Post-merge canonical main SHA advances; the prior authorization marker bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e` cannot be reused. A fresh explicit Owner authorization marker bound to the post-merge canonical main SHA will be required for any future paid probe.
+- Fresh authorization provenance:
+  - COR1 NO-PAID Owner authorization: Issue #63 comment `5604486823` (authorizes this NO-PAID corrective only).
+  - Prior paid VIDU1 authorization marker: Issue #63 comment `5603798466` (`FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`).
+  - The prior paid marker at comment `5603798466` is bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e` and MUST NOT be reused after PR #93 merges.
+  - Any future paid probe requires fresh explicit Owner authorization with a fresh exact marker bound to the new post-merge canonical main SHA.
 
 ---
 

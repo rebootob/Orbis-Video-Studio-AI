@@ -526,3 +526,72 @@ def test_cor1_comment_parsing_simulation():
     # Case 6: Auth present but already stopped -> STOP_TERMINAL_STOP
     assert evaluate_comments([target_marker, stop_marker]) == "STOP_TERMINAL_STOP"
 
+
+# =========================================================================
+# Static Provenance Regression Tests (COR1 authorization identity)
+# =========================================================================
+
+# These constants are static truth — must NOT be interchangeable.
+COR1_AUTH_COMMENT = "5604486823"
+PRIOR_PAID_VIDU1_AUTH_COMMENT = "5603798466"
+PRIOR_PAID_VIDU1_MARKER_SHA = "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
+
+
+def test_cor1_provenance_comment_ids_are_distinct():
+    """COR1 NO-PAID authorization comment and prior paid VIDU1 authorization comment
+    are distinct issue comments and MUST NOT be interchangeable."""
+    assert COR1_AUTH_COMMENT != PRIOR_PAID_VIDU1_AUTH_COMMENT, (
+        "COR1 NO-PAID auth (5604486823) and prior paid VIDU1 auth (5603798466) "
+        "must be distinct — they are different Issue #63 comments."
+    )
+
+
+def test_cor1_auth_comment_authorizes_no_paid_work_only():
+    """5604486823 authorizes only the NO-PAID COR1 corrective.
+    It is NOT the paid VIDU1 authorization marker."""
+    # The COR1 auth comment ID must match the expected constant
+    assert COR1_AUTH_COMMENT == "5604486823"
+    # The prior paid VIDU1 marker comment ID must be different
+    assert COR1_AUTH_COMMENT != PRIOR_PAID_VIDU1_AUTH_COMMENT
+
+
+def test_prior_paid_vidu1_marker_comment_is_distinct():
+    """5603798466 is the prior paid VIDU1 marker comment.
+    It contains FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789ef...
+    This marker is bound to SHA 42d789efdb49725b1dd45b312ce39cb71ac02d1e and
+    MUST NOT be reused after COR1 (PR #93) merges to main."""
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT == "5603798466"
+    assert PRIOR_PAID_VIDU1_MARKER_SHA == "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
+    # The paid marker comment must differ from the COR1 auth comment
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT != COR1_AUTH_COMMENT
+
+
+def test_cor1_delivery_doc_does_not_attribute_paid_marker_to_cor1_auth_comment():
+    """Delivery doc P4_WP020_LIVE_R5_VIDU1_COR1.md must not attribute
+    FRESH_OWNER_AUTHORIZED_VIDU1 paid marker text to COR1 auth comment 5604486823.
+    That is: the FRESH_OWNER_AUTHORIZED_VIDU1 marker text and 5604486823 must not
+    appear on the SAME LINE, because they have different meanings."""
+    cor1_doc_path = REPO_ROOT / "project-docs" / "40_DELIVERY" / "P4_WP020_LIVE_R5_VIDU1_COR1.md"
+    assert cor1_doc_path.is_file(), f"Missing {cor1_doc_path}"
+    content = cor1_doc_path.read_text(encoding="utf-8")
+
+    # Verify correct provenance: 5604486823 is used only as COR1 NO-PAID auth
+    assert COR1_AUTH_COMMENT in content, "COR1 auth comment must be present in delivery doc"
+
+    # Verify prior paid marker comment is correctly referenced
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT in content, (
+        "Prior paid VIDU1 auth comment 5603798466 must be present in delivery doc"
+    )
+
+    # Critical: FRESH_OWNER_AUTHORIZED_VIDU1 paid marker text must NOT appear on the
+    # SAME line as COR1 auth comment 5604486823. They may appear in the same document
+    # section (as a two-bullet clarification list), but the marker text itself must
+    # only be attributed to comment 5603798466.
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if "FRESH_OWNER_AUTHORIZED_VIDU1" in line and COR1_AUTH_COMMENT in line:
+            raise AssertionError(
+                f"FRESH_OWNER_AUTHORIZED_VIDU1 paid marker must NOT be on the same line "
+                f"as COR1 auth comment {COR1_AUTH_COMMENT}. "
+                f"Line {i+1}: {line}"
+            )

@@ -305,7 +305,7 @@ Delivered corrective:
 - Added fail-closed empty comment validation (`[ -z "${COMMENTS}" ]`);
 - Updated `CANONICAL_BASE_SHA` to `42d789efdb49725b1dd45b312ce39cb71ac02d1e`;
 - Added contract tests A through H in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
-- Fresh authorization rule: The previous marker bound to `42d789efdb49725b1dd45b312ce39cb71ac02d1e` cannot be reused post-merge. Any future paid probe requires a fresh explicit Owner authorization marker bound to the new canonical main SHA.
+- Fresh authorization provenance: COR1 is authorized by Issue #63 comment `5604486823` (NO-PAID only). The prior paid VIDU1 marker at Issue #63 comment `5603798466` (`FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`) is bound to old canonical main SHA and MUST NOT be reused post-merge. Any future paid probe requires a fresh explicit Owner authorization marker bound to the new canonical main SHA.
 
 Detailed specification: `P4_WP020_LIVE_R5_VIDU1_COR1.md`.
 

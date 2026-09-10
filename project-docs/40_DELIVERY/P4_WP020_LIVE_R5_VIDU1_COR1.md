@@ -68,13 +68,17 @@ The syntax `gh issue view "${ISSUE_NUMBER}" --comments --json comments --jq '.co
 
 ## Post-Merge Authorization Requirement
 
-The authorization marker provided in Issue #63 comment 5604486823:
-`FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`
-was strictly bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+Two distinct Issue #63 comments govern this gate:
 
-When PR #93 is merged into `main`, canonical `main` HEAD SHA will advance. The previous marker will no longer match the canonical `main` HEAD SHA.
+- **COR1 NO-PAID Owner authorization:** Issue #63 comment `5604486823` — this authorizes only the NO-PAID corrective work in this PR.
+- **Prior paid VIDU1 authorization marker:** Issue #63 comment `5603798466` — this contains the exact marker:
+  `FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`
 
-Therefore, a **fresh Owner authorization marker** bound to the new post-merge canonical `main` HEAD SHA will be mandatory before any paid live probe may be dispatched.
+The prior paid marker at comment `5603798466` was strictly bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+
+When PR #93 is merged into `main`, canonical `main` HEAD SHA will advance. The prior paid marker at comment `5603798466` will no longer match the canonical `main` HEAD SHA and **MUST NOT be reused**.
+
+Therefore, a **fresh explicit Owner authorization** with a fresh exact marker bound to the **new post-merge canonical `main` HEAD SHA** will be mandatory before any paid live probe may be dispatched.
 
 ## Safety Invariants Confirmation
 
