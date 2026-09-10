@@ -87,6 +87,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R5 VIDU1 Prep Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md) |
 | P4-WP020 LIVE R5 VIDU1 Workflow Guard Compatibility Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md) |
 | P4-WP020 LIVE R5 VIDU1 HTTP Failure Diagnostics & Request Contract Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1.md) |
+| P4-WP020 LIVE R5 VIDU1 C1 Post-Merge Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
@@ -95,9 +96,9 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrected workflow comments pagination. Live probe run `34423580310` was consumed (1 POST, HTTP_ERROR, credits UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU1-C1` delivers safe HTTP failure diagnostic metadata and request contract verification with zero provider calls.
 
-Current in-flight state is `ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU1-C1` (PR #94 open / under review). Canonical post-merge state will be `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. Consumed run `34423580310` is never rerun. A future probe requires separate explicit Owner authorization.
+`P4-WP020-LIVE-R5-VIDU1-C1` is complete and merged via PR #94 at commit `b8d935b2d9e63668663dda0b9d92b5e3c20f1546` (reviewed HEAD `a1c2b50eaa25e7f993fd555a39f37be8db76fa6c`). Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
 
-Canonical main at VIDU1-C1 start is `5a818b9dbf642b1e456dba51c9a80745d966919e`. Fresh repository truth newer than this text remains authoritative.
+Canonical main is `b8d935b2d9e63668663dda0b9d92b5e3c20f1546`. Fresh repository truth newer than this text remains authoritative.
 
 ---
 

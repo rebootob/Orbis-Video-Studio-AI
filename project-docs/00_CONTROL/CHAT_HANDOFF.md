@@ -16,10 +16,11 @@ ACTIVE_WORK_PACKAGE = NONE
 CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-VIDU1_COR1_BASE_MAIN = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
-PARENT_GATE = P4-WP020-LIVE-R5-VIDU1-PREP (PR #92)
+VIDU1_C1_MERGE_COMMIT = b8d935b2d9e63668663dda0b9d92b5e3c20f1546
+VIDU1_C1_PR = #94 / MERGED
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
 
 VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
 VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
@@ -49,11 +50,11 @@ Next Gate Direction:
 > This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1 review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #94
-TITLE = fix(wp020-live): add safe VIDU1 HTTP failure diagnostics
-BRANCH = ai/p4-wp020-live-r5-vidu1-c1
-BASE MAIN AT C1 START = 5a818b9dbf642b1e456dba51c9a80745d966919e
-GATE = P4-WP020-LIVE-R5-VIDU1-C1
+PR = [CLOSURE PR TARGETING MAIN]
+TITLE = docs(wp020-live): close VIDU1 C1 post-merge control state
+BRANCH = ai/p4-wp020-live-r5-vidu1-c1-close
+BASE MAIN AT C1-CLOSE START = b8d935b2d9e63668663dda0b9d92b5e3c20f1546
+GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
 STATUS = AWAITING CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
 ```
 
@@ -72,6 +73,11 @@ Pre-Merge Action Routing:
 ---
 
 ## Historical Work Packages
+
+### Historical VIDU1-C1 Diagnostic Corrective (PR #94)
+- Implementation PR #94 merged to canonical `main` at commit `b8d935b2d9e63668663dda0b9d92b5e3c20f1546` (reviewed HEAD `a1c2b50eaa25e7f993fd555a39f37be8db76fa6c`).
+- Delivered safe HTTP failure diagnostics, outbound Vidu resolution contract `720p` (with adapter normalization), and mock test coverage.
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical VIDU1-COR1 Tooling Corrective (PR #93)
 - Tooling corrective PR #93 merged to canonical `main` at commit `5a818b9dbf642b1e456dba51c9a80745d966919e`.
@@ -115,6 +121,7 @@ P4-WP020-LIVE-R5-PRE1-CLOSE = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1 = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-PREP = PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-COR1 = PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-C1 = PASS / MERGED / COMPLETE (PR #94)
 ACTIVE_WORK_PACKAGE = NONE
 NEXT_GATE = OWNER DECISION REQUIRED
 VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
@@ -128,8 +135,8 @@ R4 = STOPPED / CONSUMED / NEVER RERUN
 R4 BILL1 = PASS / EVIDENCE ACCEPTED / NOT CHARGED
 ```
 
-Canonical base main at VIDU1-PREP start:
-`5107e3e9ef7702c8403fe74146062ab68e8e50b9`
+Canonical base main at VIDU1-C1-CLOSE start:
+`b8d935b2d9e63668663dda0b9d92b5e3c20f1546`
 
 Always fresh-fetch `main` before any status, merge, authorization or execution decision.
 
