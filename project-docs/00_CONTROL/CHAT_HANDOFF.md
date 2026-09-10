@@ -12,15 +12,16 @@ Canonical branch: `main`
 ## Canonical Project State (Post-Merge Truth)
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP
-CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
-NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+ACTIVE_WORK_PACKAGE = NONE
+CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
+NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-VIDU1_C1_CLOSE_PR = #95
-PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
-PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
+VIDU2_PREP_PR = #96
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE (PR #95)
+PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
+PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
 
 VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
 VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
@@ -47,14 +48,14 @@ Next Gate Direction:
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #96 (IN-FLIGHT)
-TITLE = feat(wp020-live): prepare fresh VIDU2 one-call probe
-BRANCH = ai/p4-wp020-live-r5-vidu2-prep
-BASE MAIN AT START = cdfe3ce44ba9a9d6219909d12c0536c1cd716cec
-GATE = P4-WP020-LIVE-R5-VIDU2-PREP
+PR = #97 (IN-FLIGHT)
+TITLE = docs(wp020-live): close VIDU2 prep post-merge control state
+BRANCH = ai/p4-wp020-live-r5-vidu2-prep-close
+BASE MAIN AT START = fb72d683c0dd4daa721507b6a0c12dcec17d7366
+GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
 STATUS = AWAITING CHATGPT INDEPENDENT REVIEW / OWNER MERGE DECISION
 ```
 

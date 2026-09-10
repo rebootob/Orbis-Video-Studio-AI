@@ -89,6 +89,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R5 VIDU1 HTTP Failure Diagnostics & Request Contract Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1.md) |
 | P4-WP020 LIVE R5 VIDU1 C1 Post-Merge Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md) |
 | P4-WP020 LIVE R5 VIDU2 Dedicated Probe Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md) |
+| P4-WP020 LIVE R5 VIDU2 PREP Post-Merge Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP_CLOSE.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
@@ -99,7 +100,7 @@ P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live
 
 `P4-WP020-LIVE-R5-VIDU1-C1` is complete and merged via PR #94 at commit `b8d935b2d9e63668663dda0b9d92b5e3c20f1546` (reviewed HEAD `a1c2b50eaa25e7f993fd555a39f37be8db76fa6c`). `P4-WP020-LIVE-R5-VIDU1-C1-CLOSE` (PR #95) records post-merge control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
 
-Canonical main is `cdfe3ce44ba9a9d6219909d12c0536c1cd716cec`. Fresh repository truth newer than this text remains authoritative.
+Canonical main is `fb72d683c0dd4daa721507b6a0c12dcec17d7366`. Fresh repository truth newer than this text remains authoritative.
 
 ---
 
