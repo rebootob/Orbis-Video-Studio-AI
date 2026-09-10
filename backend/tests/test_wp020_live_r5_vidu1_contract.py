@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 import pytest
@@ -9,7 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / ".github" / "scripts" / "wp020_live_r5_vidu1.py"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "wp020-live-r5-vidu1.yml"
-VALID_SHA = "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
+VALID_SHA = "5a818b9dbf642b1e456dba51c9a80745d966919e"
 
 
 def _load_script_module():
@@ -27,7 +28,7 @@ def test_vidu1_script_ast_and_syntax():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     assert tree is not None
-    assert 'TARGET_RESOLUTION = "720P"' in source
+    assert 'TARGET_RESOLUTION = "720p"' in source
 
 
 def test_vidu1_workflow_safety_and_structure():
@@ -264,7 +265,7 @@ def test_live_guard_branch_mismatch(tmp_path):
 # =========================================================================
 
 def test_live_guard_e_mocked_success_with_valid_permit_and_exact_resolution(tmp_path):
-    """E. only fully valid mocked live permit can reach exactly one mocked POST with 720P."""
+    """E. only fully valid mocked live permit can reach exactly one mocked POST with 720p."""
     mod = _load_script_module()
     from app.providers.base import ProviderJobResult
 
@@ -311,13 +312,13 @@ def test_live_guard_e_mocked_success_with_valid_permit_and_exact_resolution(tmp_
     assert result["vidu_credits_consumed"] is None
     assert result["vidu_credits_consumed_confirmed"] is False
 
-    # Corrective 3: exact resolution 720P
-    assert result["resolution"] == "720P"
+    # Corrective 3: exact resolution 720p
+    assert result["resolution"] == "720p"
 
-    # Verify adapter submission params: exact 720P resolution
+    # Verify adapter submission params: exact 720p resolution
     assert mock_adapter.submit_generation_job.await_count == 1
     called_params = mock_adapter.submit_generation_job.call_args[0][0]
-    assert called_params.provider_specific_params == {"resolution": "720P"}
+    assert called_params.provider_specific_params == {"resolution": "720p"}
     assert called_params.duration_seconds == 4.0
     assert called_params.aspect_ratio == "16:9"
 
@@ -383,13 +384,15 @@ def test_evidence_sanitization():
         "model": "viduq2",
         "mode": "text-to-video",
         "duration_seconds": 4.0,
-        "resolution": "720P",
+        "resolution": "720p",
         "status": "SUCCESS",
         "generation_posts": 1,
         "poll_attempts": 2,
         "provider_job_id": "vidu-task-999",
         "provider_status": "success",
         "provider_error_code": None,
+        "provider_http_status": 200,
+        "failure_classification": None,
         "provider_credits_reported": 4.0,
         "vidu_credits_consumed": None,
         "vidu_credits_consumed_confirmed": False,
@@ -406,7 +409,9 @@ def test_evidence_sanitization():
     assert "secret_token" not in sanitized
     assert "api_key" not in sanitized
     assert "raw_response" not in sanitized
-    assert sanitized["resolution"] == "720P"
+    assert sanitized["resolution"] == "720p"
+    assert sanitized["provider_http_status"] == 200
+    assert sanitized["failure_classification"] is None
     assert sanitized["provider_credits_reported"] == 4.0
     assert sanitized["vidu_credits_consumed"] is None
     assert sanitized["vidu_credits_consumed_confirmed"] is False
@@ -595,3 +600,414 @@ def test_cor1_delivery_doc_does_not_attribute_paid_marker_to_cor1_auth_comment()
                 f"as COR1 auth comment {COR1_AUTH_COMMENT}. "
                 f"Line {i+1}: {line}"
             )
+
+
+# =========================================================================
+# Diagnostic & Contract Tests for P4-WP020-LIVE-R5-VIDU1-C1 (Items 1 to 10)
+# =========================================================================
+
+def test_c1_classify_http_status_logic():
+    """Unit test for classify_http_status mapping."""
+    mod = _load_script_module()
+    classify = mod.classify_http_status
+
+    assert classify(400) == "HTTP_CLIENT_ERROR"
+    assert classify(401) == "HTTP_CLIENT_ERROR"
+    assert classify(403) == "HTTP_CLIENT_ERROR"
+    assert classify(404) == "HTTP_CLIENT_ERROR"
+    assert classify(422) == "HTTP_CLIENT_ERROR"
+    assert classify(429) == "HTTP_RATE_LIMITED"
+    assert classify(500) == "HTTP_SERVER_ERROR"
+    assert classify(502) == "HTTP_SERVER_ERROR"
+    assert classify(503) == "HTTP_SERVER_ERROR"
+    assert classify(504) == "HTTP_SERVER_ERROR"
+
+    # Non-error or invalid status codes return None
+    assert classify(200) is None
+    assert classify(201) is None
+    assert classify(None) is None
+    assert classify("400") is None
+    assert classify(True) is None
+    assert classify(99) is None
+    assert classify(600) is None
+
+
+def test_c1_http_400_mocked_response(tmp_path):
+    """1. HTTP 400 mocked response:
+    - status = FAILED
+    - error_code = HTTP_ERROR
+    - provider HTTP status preserved as 400
+    - failure_classification = HTTP_CLIENT_ERROR
+    - submission_uncertain = false
+    """
+    mod = _load_script_module()
+    from app.providers.base import ProviderJobResult
+
+    mock_adapter = MagicMock()
+    mock_adapter.submit_generation_job = AsyncMock(return_value=ProviderJobResult(
+        provider_job_id="",
+        status="FAILED",
+        error_code="HTTP_ERROR",
+        status_code=400,
+        submission_uncertain=False,
+    ))
+
+    runner = mod.Vidu1ProbeRunner(evidence_dir=tmp_path)
+    result = asyncio.run(runner.execute_probe(
+        adapter=mock_adapter,
+        authorized_main_sha=VALID_SHA,
+        current_sha=VALID_SHA,
+        auth_confirmed=True,
+        fence_confirmed=True,
+        ref_name="main",
+    ))
+
+    assert result["status"] == "FAILED"
+    assert result["error"] == "HTTP_ERROR"
+    assert result["provider_http_status"] == 400
+    assert result["failure_classification"] == "HTTP_CLIENT_ERROR"
+    assert runner.generation_post_count == 1
+    assert mock_adapter.submit_generation_job.await_count == 1
+
+
+def test_c1_http_401_403_mocked_response(tmp_path):
+    """2. HTTP 401/403 mocked response:
+    - status code preserved
+    - failure_classification = HTTP_CLIENT_ERROR
+    - no secret/raw body exposed
+    """
+    mod = _load_script_module()
+    from app.providers.base import ProviderJobResult
+
+    for code in (401, 403):
+        evidence_dir = tmp_path / f"evidence_{code}"
+        mock_adapter = MagicMock()
+        mock_adapter.submit_generation_job = AsyncMock(return_value=ProviderJobResult(
+            provider_job_id="",
+            status="FAILED",
+            error_code="HTTP_ERROR",
+            status_code=code,
+            submission_uncertain=False,
+        ))
+
+        runner = mod.Vidu1ProbeRunner(evidence_dir=evidence_dir)
+        result = asyncio.run(runner.execute_probe(
+            adapter=mock_adapter,
+            authorized_main_sha=VALID_SHA,
+            current_sha=VALID_SHA,
+            auth_confirmed=True,
+            fence_confirmed=True,
+            ref_name="main",
+        ))
+
+        assert result["status"] == "FAILED"
+        assert result["provider_http_status"] == code
+        assert result["failure_classification"] == "HTTP_CLIENT_ERROR"
+        assert "secret" not in result
+        assert "api_key" not in result
+        assert "Authorization" not in result
+
+        evidence_file = evidence_dir / "vidu1_execution_evidence.json"
+        assert evidence_file.is_file()
+        file_text = evidence_file.read_text(encoding="utf-8")
+        assert "api_key" not in file_text
+        assert "Token" not in file_text
+        assert "raw_response" not in file_text
+
+
+def test_c1_http_429_mocked_response_no_auto_retry(tmp_path):
+    """3. HTTP 429 mocked response:
+    - status code preserved as 429
+    - failure_classification = HTTP_RATE_LIMITED
+    - retryable metadata may remain true
+    - VIDU1 probe MUST NOT automatically retry generation POST (cap = 1)
+    """
+    mod = _load_script_module()
+    from app.providers.base import ProviderJobResult
+
+    mock_adapter = MagicMock()
+    mock_adapter.submit_generation_job = AsyncMock(return_value=ProviderJobResult(
+        provider_job_id="",
+        status="FAILED",
+        error_code="HTTP_ERROR",
+        status_code=429,
+        retryable=True,
+        submission_uncertain=False,
+    ))
+
+    runner = mod.Vidu1ProbeRunner(evidence_dir=tmp_path)
+    result = asyncio.run(runner.execute_probe(
+        adapter=mock_adapter,
+        authorized_main_sha=VALID_SHA,
+        current_sha=VALID_SHA,
+        auth_confirmed=True,
+        fence_confirmed=True,
+        ref_name="main",
+    ))
+
+    assert result["status"] == "FAILED"
+    assert result["provider_http_status"] == 429
+    assert result["failure_classification"] == "HTTP_RATE_LIMITED"
+    assert runner.generation_post_count == 1
+    assert mock_adapter.submit_generation_job.await_count == 1
+
+
+def test_c1_http_500_mocked_response_fail_closed_without_retry(tmp_path):
+    """4. HTTP 500 mocked response:
+    - status preserved as 500 in evidence
+    - failure_classification = HTTP_SERVER_ERROR
+    - submission uncertainty / fail-closed behavior preserved
+    - absolutely no blind POST retry
+    """
+    mod = _load_script_module()
+    from app.providers.base import ProviderJobResult
+
+    mock_adapter = MagicMock()
+    mock_adapter.submit_generation_job = AsyncMock(return_value=ProviderJobResult(
+        provider_job_id="",
+        status="FAILED",
+        error_code="HTTP_ERROR",
+        status_code=500,
+        retryable=True,
+        submission_uncertain=True,
+    ))
+
+    runner = mod.Vidu1ProbeRunner(evidence_dir=tmp_path)
+    with pytest.raises(RuntimeError, match="Ambiguous POST submission outcome"):
+        asyncio.run(runner.execute_probe(
+            adapter=mock_adapter,
+            authorized_main_sha=VALID_SHA,
+            current_sha=VALID_SHA,
+            auth_confirmed=True,
+            fence_confirmed=True,
+            ref_name="main",
+        ))
+
+    assert runner.generation_post_count == 1
+    assert mock_adapter.submit_generation_job.await_count == 1
+
+    evidence_file = tmp_path / "vidu1_execution_evidence.json"
+    assert evidence_file.is_file()
+    data = json.loads(evidence_file.read_text(encoding="utf-8"))
+    assert data["status"] == "STOPPED"
+    assert data["provider_http_status"] == 500
+    assert data["failure_classification"] == "HTTP_SERVER_ERROR"
+
+
+def test_c1_request_contract_payload_headers_and_path():
+    """5, 6, 7. Request contract verification using mock HTTP transport:
+    - Exactly one mocked POST target: /text2video
+    - Payload contains model=viduq2, duration=4, aspect_ratio=16:9, resolution=720p
+    - Authorization scheme is Token <api_key> (Token prefix verified, real secret never exposed)
+    - Content-Type is application/json
+    """
+    import httpx
+    from unittest.mock import patch
+    from app.providers.vidu import ViduProviderAdapter
+    from app.providers.base import VideoGenerationParams
+
+    captured_requests = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return httpx.Response(
+            status_code=200,
+            json={
+                "task_id": "vidu-task-mock-123",
+                "state": "queueing",
+                "credits": 4.0,
+            },
+        )
+
+    transport = httpx.MockTransport(mock_handler)
+    adapter = ViduProviderAdapter(
+        api_key="test-mock-api-key",
+        base_url="https://api.vidu.com/ent/v2",
+        model="viduq2",
+    )
+
+    params = VideoGenerationParams(
+        shot_id="shot-vidu1-probe",
+        prompt="Cinematic slow aerial shot of calm turquoise ocean waves breaking on a golden sand beach at dawn, soft warm morning lighting, photorealistic, 4k",
+        aspect_ratio="16:9",
+        duration_seconds=4.0,
+        provider_specific_params={"resolution": "720p"},
+    )
+
+    original_init = httpx.AsyncClient.__init__
+
+    def patched_init(client_self, *args, **kwargs):
+        kwargs["transport"] = transport
+        original_init(client_self, *args, **kwargs)
+
+    with patch.object(httpx.AsyncClient, "__init__", patched_init):
+        result = asyncio.run(adapter.submit_generation_job(params))
+
+    assert result.status == "QUEUED"
+    assert len(captured_requests) == 1
+
+    req = captured_requests[0]
+    # 5. Method and Path
+    assert req.method == "POST"
+    assert req.url.path == "/ent/v2/text2video"
+    assert str(req.url) == "https://api.vidu.com/ent/v2/text2video"
+
+    # 6. Payload field names and values
+    body = json.loads(req.content.decode("utf-8"))
+    assert body["model"] == "viduq2"
+    assert body["duration"] == 4
+    assert body["aspect_ratio"] == "16:9"
+    assert body["resolution"] == "720p"
+    assert body["prompt"] == params.prompt
+
+    # 7. Authorization scheme: Token
+    auth_header = req.headers.get("Authorization")
+    assert auth_header is not None
+    assert auth_header.startswith("Token ")
+    assert auth_header == "Token test-mock-api-key"
+    assert req.headers.get("Content-Type") == "application/json"
+
+
+def test_c1_vidu_adapter_resolution_normalization_and_validation():
+    """Verify ViduProviderAdapter normalizes resolution casing to lowercase
+    and validates supported values without broad refactoring."""
+    import httpx
+    from unittest.mock import patch
+    from app.providers.vidu import ViduProviderAdapter
+    from app.providers.base import VideoGenerationParams
+
+    for input_res, expected_res in [
+        ("720p", "720p"),
+        ("720P", "720p"),
+        ("1080P", "1080p"),
+        ("540P", "540p"),
+    ]:
+        captured = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(status_code=200, json={"task_id": "t1", "state": "queueing"})
+
+        transport = httpx.MockTransport(mock_handler)
+        adapter = ViduProviderAdapter(api_key="key", base_url="https://api.vidu.com/ent/v2", model="viduq2")
+        params = VideoGenerationParams(
+            shot_id="s1",
+            prompt="valid prompt",
+            duration_seconds=4.0,
+            provider_specific_params={"resolution": input_res},
+        )
+
+        original_init = httpx.AsyncClient.__init__
+
+        def patched_init(client_self, *args, **kwargs):
+            kwargs["transport"] = transport
+            original_init(client_self, *args, **kwargs)
+
+        with patch.object(httpx.AsyncClient, "__init__", patched_init):
+            result = asyncio.run(adapter.submit_generation_job(params))
+
+        assert result.status == "QUEUED"
+        body = json.loads(captured[0].content.decode("utf-8"))
+        assert body["resolution"] == expected_res
+
+    # Unsupported resolutions fail closed with INVALID_PARAMETERS
+    adapter = ViduProviderAdapter(api_key="key", base_url="https://api.vidu.com/ent/v2", model="viduq2")
+    for bad_res in ["4K", "unsupported", 720]:
+        bad_params = VideoGenerationParams(
+            shot_id="s1",
+            prompt="valid prompt",
+            duration_seconds=4.0,
+            provider_specific_params={"resolution": bad_res},
+        )
+        result = asyncio.run(adapter.submit_generation_job(bad_params))
+        assert result.status == "FAILED"
+        assert result.error_code == "INVALID_PARAMETERS"
+
+
+def test_c1_sanitized_evidence_safety_exclusions():
+    """8. Sanitized evidence excludes raw response body, response headers,
+    API key, Authorization value, and unsafe provider messages."""
+    mod = _load_script_module()
+
+    raw_state = {
+        "execution_id": "LIVE-20260909-VIDU1-R5",
+        "provider": "vidu",
+        "model": "viduq2",
+        "mode": "text-to-video",
+        "duration_seconds": 4.0,
+        "resolution": "720p",
+        "status": "FAILED",
+        "generation_posts": 1,
+        "poll_attempts": 0,
+        "provider_job_id": None,
+        "provider_status": "failed",
+        "provider_error_code": "HTTP_ERROR",
+        "provider_http_status": 400,
+        "failure_classification": "HTTP_CLIENT_ERROR",
+        "provider_credits_reported": None,
+        "vidu_credits_consumed": None,
+        "vidu_credits_consumed_confirmed": False,
+        "video_url_present": False,
+        "error": "HTTP_ERROR",
+        "error_type": None,
+        "openai_calls": 0,
+        "gemini_calls": 0,
+        "elevenlabs_calls": 0,
+        # Unsafe fields that must be stripped
+        "raw_response": {"message": "Invalid prompt formatting", "error_details": "sensitive"},
+        "response_headers": {"x-request-id": "req-123", "set-cookie": "secret-cookie"},
+        "api_key": "PRIVATE_KEY_VALUE",
+        "Authorization": "Token PRIVATE_KEY_VALUE",
+        "secret_token": "BEARER_SECRET",
+        "usd": 0.15,
+    }
+
+    sanitized = mod.sanitize_evidence(raw_state)
+
+    # Exclusions
+    assert "raw_response" not in sanitized
+    assert "response_headers" not in sanitized
+    assert "api_key" not in sanitized
+    assert "Authorization" not in sanitized
+    assert "secret_token" not in sanitized
+    assert "usd" not in sanitized
+
+    # Preserved safe fields
+    assert sanitized["provider_http_status"] == 400
+    assert sanitized["failure_classification"] == "HTTP_CLIENT_ERROR"
+    assert sanitized["vidu_credits_consumed"] is None
+    assert sanitized["vidu_credits_consumed_confirmed"] is False
+
+    # Out of range or invalid types sanitize to None
+    bad_status_state = {"provider_http_status": 999, "failure_classification": "INVALID_CLASS"}
+    sanitized_bad = mod.sanitize_evidence(bad_status_state)
+    assert sanitized_bad["provider_http_status"] is None
+    assert sanitized_bad["failure_classification"] is None
+
+    bool_status_state = {"provider_http_status": True, "failure_classification": True}
+    sanitized_bool = mod.sanitize_evidence(bool_status_state)
+    assert sanitized_bool["provider_http_status"] is None
+    assert sanitized_bool["failure_classification"] is None
+
+
+def test_c1_generation_post_cap_and_no_other_providers():
+    """9 & 10. Generation POST cap remains MAX_GENERATION_POSTS = 1,
+    and OpenAI/Gemini/ElevenLabs are not invoked."""
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "MAX_GENERATION_POSTS = 1" in source
+
+    tree = ast.parse(source)
+    called_attrs = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    forbidden = {
+        "generate_story",
+        "generate_image",
+        "generate_audio",
+        "call_openai",
+        "call_gemini",
+        "call_elevenlabs",
+    }
+    assert called_attrs.isdisjoint(forbidden)
