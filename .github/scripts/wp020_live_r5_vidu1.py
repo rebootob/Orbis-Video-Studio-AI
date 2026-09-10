@@ -134,6 +134,25 @@ def terminal_stop_marker(execution_id: str) -> str:
     return f"VIDU1_PROBE_STOPPED: {execution_id}"
 
 
+def classify_http_status(status_code: Optional[int]) -> Optional[str]:
+    """Return minimal typed failure classification for HTTP status code.
+
+    Examples:
+    - 429 -> HTTP_RATE_LIMITED
+    - 4xx -> HTTP_CLIENT_ERROR
+    - 5xx -> HTTP_SERVER_ERROR
+    """
+    if not isinstance(status_code, int) or isinstance(status_code, bool) or not (100 <= status_code <= 599):
+        return None
+    if status_code == 429:
+        return "HTTP_RATE_LIMITED"
+    if 400 <= status_code <= 499:
+        return "HTTP_CLIENT_ERROR"
+    if 500 <= status_code <= 599:
+        return "HTTP_SERVER_ERROR"
+    return None
+
+
 def sanitize_evidence(state: Dict[str, Any]) -> Dict[str, Any]:
     """Return only safe, non-sensitive metadata for public evidence."""
     safe_fields = [
@@ -149,6 +168,8 @@ def sanitize_evidence(state: Dict[str, Any]) -> Dict[str, Any]:
         "provider_job_id",
         "provider_status",
         "provider_error_code",
+        "provider_http_status",
+        "failure_classification",
         "provider_credits_reported",
         "vidu_credits_consumed",
         "vidu_credits_consumed_confirmed",
@@ -172,6 +193,18 @@ def sanitize_evidence(state: Dict[str, Any]) -> Dict[str, Any]:
             sanitized[key] = None
         elif key == "vidu_credits_consumed_confirmed":
             sanitized[key] = False
+        elif key == "provider_http_status":
+            # Safe integer only within valid HTTP range; never raw body or headers
+            if val is not None and isinstance(val, int) and not isinstance(val, bool) and 100 <= val <= 599:
+                sanitized[key] = val
+            else:
+                sanitized[key] = None
+        elif key == "failure_classification":
+            allowed_classifications = {"HTTP_CLIENT_ERROR", "HTTP_RATE_LIMITED", "HTTP_SERVER_ERROR"}
+            if val in allowed_classifications:
+                sanitized[key] = val
+            else:
+                sanitized[key] = None
         elif key == "provider_error_code":
             if val is not None and _SAFE_ERROR_CODE_RE.fullmatch(str(val)):
                 sanitized[key] = str(val)
@@ -214,6 +247,8 @@ class Vidu1ProbeRunner:
             "provider_job_id": None,
             "provider_status": None,
             "provider_error_code": None,
+            "provider_http_status": None,
+            "failure_classification": None,
             "provider_credits_reported": None,
             "vidu_credits_consumed": None,
             "vidu_credits_consumed_confirmed": False,
@@ -329,6 +364,10 @@ class Vidu1ProbeRunner:
             self.state["error_type"] = "SubmissionUncertain"
             self.state["provider_status"] = submission_result.provider_status
             self.state["provider_error_code"] = submission_result.provider_error_code or submission_result.error_code
+            status_code = getattr(submission_result, "status_code", None)
+            if isinstance(status_code, int) and not isinstance(status_code, bool) and 100 <= status_code <= 599:
+                self.state["provider_http_status"] = status_code
+                self.state["failure_classification"] = classify_http_status(status_code)
             self.write_evidence()
             raise RuntimeError(
                 "VIDU1 STOP: Ambiguous POST submission outcome; retry strictly forbidden"
@@ -339,6 +378,10 @@ class Vidu1ProbeRunner:
             self.state["error"] = submission_result.error_code or "PROVIDER_FAILED"
             self.state["provider_status"] = submission_result.provider_status or "failed"
             self.state["provider_error_code"] = submission_result.provider_error_code or submission_result.error_code
+            status_code = getattr(submission_result, "status_code", None)
+            if isinstance(status_code, int) and not isinstance(status_code, bool) and 100 <= status_code <= 599:
+                self.state["provider_http_status"] = status_code
+                self.state["failure_classification"] = classify_http_status(status_code)
             if submission_result.provider_credits is not None:
                 self.state["provider_credits_reported"] = submission_result.provider_credits
             self.write_evidence()
@@ -382,6 +425,10 @@ class Vidu1ProbeRunner:
                 self.state["status"] = poll_result.status
                 self.state["provider_error_code"] = poll_result.provider_error_code or poll_result.error_code
                 self.state["error"] = poll_result.error_code or f"PROVIDER_{poll_result.status}"
+                status_code = getattr(poll_result, "status_code", None)
+                if isinstance(status_code, int) and not isinstance(status_code, bool) and 100 <= status_code <= 599:
+                    self.state["provider_http_status"] = status_code
+                    self.state["failure_classification"] = classify_http_status(status_code)
                 self.write_evidence()
                 return sanitize_evidence(self.state)
 

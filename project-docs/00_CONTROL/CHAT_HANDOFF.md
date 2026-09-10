@@ -43,35 +43,40 @@ Next Gate Direction:
 
 ---
 
-## Pre-Merge PR #93 Review Routing (In-Flight Execution Note)
+## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the PR #93 review/merge gate only. Once PR #93 is merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1 review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #93
-TITLE = fix(wp020-live): resolve workflow issue comments pagination compatibility
-BRANCH = ai/p4-wp020-live-r5-vidu1-cor1
-BASE MAIN AT COR1 START = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
-GATE = P4-WP020-LIVE-R5-VIDU1-COR1
-STATUS = AWAITING CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
+PR = OPEN_PENDING
+TITLE = fix(wp020-live): add safe VIDU1 HTTP failure diagnostics & request contract tests
+BRANCH = ai/p4-wp020-live-r5-vidu1-c1
+BASE MAIN AT C1 START = 5a818b9dbf642b1e456dba51c9a80745d966919e
+GATE = P4-WP020-LIVE-R5-VIDU1-C1
+STATUS = AWAITING PR CREATION, CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-cor1`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-c1`.
 - Verify exact-head CI success.
-- Confirm TOOLING & CONTRACT only scope (zero provider calls, zero credits consumed).
+- Confirm TOOLING & CONTRACT only scope (zero provider calls, zero credits consumed by C1).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
-- Fresh authorization provenance:
-  - COR1 NO-PAID Owner authorization: Issue #63 comment `5604486823` (authorizes this NO-PAID corrective only).
-  - Prior paid VIDU1 authorization marker: Issue #63 comment `5603798466` (`FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`).
-  - The prior paid marker at comment `5603798466` is bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e` and MUST NOT be reused after PR #93 merges.
-  - Any future paid probe requires fresh explicit Owner authorization with a fresh exact marker bound to the new post-merge canonical main SHA.
+- Post-Merge Non-Reuse Rule:
+  - Consumed run `34423580310` / execution identity `LIVE-20260909-VIDU1-R5` MUST NEVER BE RERUN.
+  - Historical HTTP status remains `UNKNOWN`.
+  - Historical Vidu credits consumed remain `UNKNOWN / NOT CONFIRMED`.
+  - Any future probe requires a fresh dedicated execution identity, fresh explicit Owner authorization, and fresh exact marker bound to post-merge canonical main SHA.
 
 ---
 
 ## Historical Work Packages
+
+### Historical VIDU1-COR1 Tooling Corrective (PR #93)
+- Tooling corrective PR #93 merged to canonical `main` at commit `5a818b9dbf642b1e456dba51c9a80745d966919e`.
+- Delivered GitHub CLI REST API pagination compatibility (`gh api --paginate`) and contract tests.
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical VIDU1-PREP Tooling Delivery (PR #92)
 - Tooling PR #92 merged to canonical `main` at commit `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.

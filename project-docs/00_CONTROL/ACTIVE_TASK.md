@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records the canonical state effective upon merge of PR #93 to canonical `main` (pre-merge baseline main at VIDU1-COR1 start: `42d789efdb49725b1dd45b312ce39cb71ac02d1e`).
+> This specification records canonical state effective for P4-WP020-LIVE-R5-VIDU1-C1 on canonical `main` `5a818b9dbf642b1e456dba51c9a80745d966919e`.
 
 ---
 
@@ -13,16 +13,20 @@
 ```text
 ACTIVE_WORK_PACKAGE = NONE
 ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
-VIDU1_COR1_BASE_MAIN = 42d789efdb49725b1dd45b312ce39cb71ac02d1e
+VIDU1_C1_BASE_MAIN = 5a818b9dbf642b1e456dba51c9a80745d966919e
 NEXT_GATE = OWNER DECISION REQUIRED
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
+VIDU1_C1_AUTH_COMMENT = 5611111664
+
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1
+PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE
 VIDU1_COR1_AUTH_COMMENT = 5604486823
 VIDU1_COR1_MERGE_PR = #93
 
-PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
-PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE
+PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP
+PREV2_COMPLETED_STATUS = PASS / MERGED / COMPLETE
 VIDU1_PREP_AUTH_COMMENT = 5602834080
 VIDU1_PREP_MERGE_PR = #92
 
@@ -67,6 +71,39 @@ P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
 ```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU1-C1 Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-C1 — NO-PAID HTTP Failure Evidence & Request Contract Diagnostic Corrective` in Issue #63 (comment `5611111664`) on canonical main `5a818b9dbf642b1e456dba51c9a80745d966919e`.
+
+Immutable Consumed Live Execution Truth (Run 34423580310):
+- Execution ID: `LIVE-20260909-VIDU1-R5` on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`)
+- Fence comment: `5611052822`
+- Terminal STOP comment: `5611054713`
+- Status: `STOPPED / CONSUMED / NEVER RERUN`
+- Generation POSTs = 1
+- Provider error code: `HTTP_ERROR`
+- Provider job ID: `null`
+- Poll attempts = 0
+- OpenAI calls = 0, Gemini calls = 0, ElevenLabs calls = 0
+- Historical HTTP status: `UNKNOWN` (not preserved in sanitized evidence of run 34423580310)
+- Vidu credits consumed: `UNKNOWN / NOT CONFIRMED` (zero credits are NOT claimed)
+- `LIVE-20260909-VIDU1-R5` is permanently consumed and MUST NOT be rerun.
+
+Delivered Diagnostic Corrective:
+- Added safe HTTP status evidence (`provider_http_status`: typed integer 100–599) and typed `failure_classification` (`HTTP_CLIENT_ERROR`, `HTTP_RATE_LIMITED`, `HTTP_SERVER_ERROR`) to `.github/scripts/wp020_live_r5_vidu1.py`;
+- Updated workflow canonical base SHA to `5a818b9dbf642b1e456dba51c9a80745d966919e`;
+- Verified outbound Vidu request contract (POST `/text2video`, headers `Authorization: Token <API_KEY>`, `Content-Type: application/json`, payload `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720P`) in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
+- Added automated mock tests for HTTP 400, 401, 403, 429, and 500 failure responses;
+- Verified evidence sanitization excludes raw response bodies, headers, and secrets;
+- Verified `MAX_GENERATION_POSTS = 1` and zero calls to other providers;
+- C1 gate itself caused: `provider_generation_calls = 0`, `paid_provider_calls = 0`, `vidu_generation_posts = 0`, `vidu_credits_consumed = 0 by C1 itself`, `paid_fence_written = false`, `paid_live_dispatch = false`.
+
+Post-Merge Rule:
+- Consumed run `34423580310` / execution identity `LIVE-20260909-VIDU1-R5` MUST NEVER BE RERUN.
+- Any future probe requires a fresh dedicated execution identity, fresh explicit Owner authorization, and fresh exact marker bound to the post-merge canonical main SHA.
 
 ---
 
