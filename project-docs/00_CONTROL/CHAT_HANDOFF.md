@@ -12,9 +12,9 @@ Canonical branch: `main`
 ## Canonical Project State (Post-Merge Truth)
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
-CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
-NEXT_GATE = OWNER DECISION REQUIRED
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP
+CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
+NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
 
 LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
@@ -50,11 +50,11 @@ Next Gate Direction:
 > This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #95
-TITLE = docs(wp020-live): close VIDU1 C1 post-merge control state
-BRANCH = ai/p4-wp020-live-r5-vidu1-c1-close
-BASE MAIN AT C1-CLOSE START = b8d935b2d9e63668663dda0b9d92b5e3c20f1546
-GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
+PR = #96 (IN-FLIGHT)
+TITLE = feat(wp020-live): prepare fresh VIDU2 one-call probe
+BRANCH = ai/p4-wp020-live-r5-vidu2-prep
+BASE MAIN AT START = cdfe3ce44ba9a9d6219909d12c0536c1cd716cec
+GATE = P4-WP020-LIVE-R5-VIDU2-PREP
 STATUS = AWAITING CHATGPT INDEPENDENT REVIEW / OWNER MERGE DECISION
 ```
 

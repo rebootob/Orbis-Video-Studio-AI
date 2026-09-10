@@ -4,23 +4,35 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records canonical state effective for P4-WP020-LIVE-R5-VIDU1-C1-CLOSE on canonical `main` `b8d935b2d9e63668663dda0b9d92b5e3c20f1546`.
+> This specification records canonical state effective for P4-WP020-LIVE-R5-VIDU2-PREP on canonical `main` `cdfe3ce44ba9a9d6219909d12c0536c1cd716cec`.
 
 ---
 
 ## Active Work Package
 
 ```text
-ACTIVE_WORK_PACKAGE = NONE
-ACTIVE_STATUS = WAITING FOR EXPLICIT OWNER NEXT GATE
-CANONICAL_MAIN_SHA = b8d935b2d9e63668663dda0b9d92b5e3c20f1546
-CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
-NEXT_GATE = OWNER DECISION REQUIRED
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP
+ACTIVE_STATUS = IN PROGRESS / PR OPEN / IN REVIEW
+CANONICAL_MAIN_SHA = cdfe3ce44ba9a9d6219909d12c0536c1cd716cec
+CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
+NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+VIDU2_PREP_AUTH_COMMENT = 5615321579
+VIDU2_READINESS_IDENTITY = WP020-LIVE-R5-VIDU2-PREP
+VIDU2_TOOLING_RESERVED_IDENTITY = LIVE-20260910-VIDU2-R5 (TOOLING ONLY / NOT AUTHORIZED FOR LIVE EXECUTION)
+VIDU2_PAID_IDENTITY = NONE / NOT AUTHORIZED
+VIDU2_PAID_EXECUTION = NOT AUTHORIZED
+
+VIDU2_PREP_PROVIDER_GENERATION_CALLS = 0
+VIDU2_PREP_PAID_PROVIDER_CALLS = 0
+VIDU2_PREP_VIDU_GENERATION_POSTS = 0
+VIDU2_PREP_VIDU_CREDITS_CONSUMED = 0
+VIDU2_PREP_PAID_FENCE_WRITTEN = FALSE
+VIDU2_PREP_PAID_LIVE_DISPATCH = FALSE
 
 LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
 LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
 VIDU1_C1_CLOSE_AUTH_COMMENT = 5611514449
-VIDU1_C1_CLOSE_PR = #95 (POST-MERGE TARGET: PASS / MERGED / COMPLETE; IN-FLIGHT: OPEN / IN REVIEW / NOT MERGED)
+VIDU1_C1_CLOSE_PR = #95
 
 PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1
 PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE
@@ -79,6 +91,36 @@ R5_PAID_EXECUTION = NOT AUTHORIZED
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4_STATUS = STOPPED / CONSUMED / NEVER RERUN
+```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU2-PREP Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU2-PREP — NO-PAID Fresh Dedicated Vidu 1-Call Probe Tooling` in Issue #63 (comment `5615321579`) on canonical main `cdfe3ce44ba9a9d6219909d12c0536c1cd716cec`.
+
+Tooling Delivered:
+- `.github/scripts/wp020_live_r5_vidu2.py`: dedicated probe runner with independent runner-side live permit guard, hard 1-POST cap, exact `720p` resolution lock, safe HTTP status diagnostics, fail-closed handling of ambiguous transport outcomes, GET-only polling, and sanitized evidence export.
+- `.github/workflows/wp020-live-r5-vidu2.yml`: dedicated manual `workflow_dispatch` workflow with concurrency group `wp020-live-r5-vidu2-probe`, issue comments pagination, and fail-closed safety guards.
+- `backend/tests/test_wp020_live_r5_vidu2_contract.py`: dedicated contract test suite covering requirements A through U using mock HTTP transport only.
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md`: delivery specification.
+
+Tooling Invariants & Request Contract:
+- Target model: `viduq2`, mode: `text-to-video`, duration: `4.0`s, aspect ratio: `16:9`, resolution: exact `720p` (never `720P`).
+- Endpoint: `POST https://api.vidu.com/ent/v2/text2video`, headers: `Authorization: Token <key>`, `Content-Type: application/json`.
+- `MAX_GENERATION_POSTS = 1`.
+- Safe HTTP status diagnostics: integer `provider_http_status` and enum `failure_classification`. Raw response bodies and secrets excluded.
+- Zero calls to OpenAI, Gemini, ElevenLabs.
+- Reserved execution identity `LIVE-20260910-VIDU2-R5` is for tooling only and is NOT authorized for live execution.
+
+Safety Invariants Confirmation:
+```text
+PREP provider_generation_calls = 0
+PREP paid_provider_calls = 0
+PREP vidu_generation_posts = 0
+PREP vidu_credits_consumed = 0
+PREP paid_fence_written = false
+PREP paid_live_dispatch = false
 ```
 
 ---
