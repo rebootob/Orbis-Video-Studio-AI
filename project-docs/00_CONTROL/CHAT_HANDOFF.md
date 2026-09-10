@@ -9,22 +9,54 @@ Canonical branch: `main`
 
 ---
 
-## Canonical Project State (Post-Merge Truth)
+## Current & Target Project State
 
 ```text
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP
-CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
+================================================================================
+CURRENT / IN-FLIGHT TRUTH (PR #97 OPEN / NOT MERGED)
+================================================================================
+P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE = IN PROGRESS / PR #97 OPEN / IN REVIEW / NOT MERGED
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
+CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
 NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+PR = #97 (OPEN / IN REVIEW / NOT MERGED)
+BRANCH = ai/p4-wp020-live-r5-vidu2-prep-close
+CLOSURE_BASE_MAIN_SHA = fb72d683c0dd4daa721507b6a0c12dcec17d7366
+AUTHORIZATION_MAIN_SHA = fb72d683c0dd4daa721507b6a0c12dcec17d7366
+AUTH_COMMENT = 5617902191
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE
-LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE
-VIDU1_C1_CLOSE_PR = #95
-PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
-PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP
+LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #96)
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE (PR #95)
+PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
+PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
+PREV4_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP (PR #92)
+PREV5_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1 (PR #91)
 
-VIDU1_READINESS_IDENTITY = WP020-LIVE-R5-VIDU1-PREP
-VIDU1_PAID_IDENTITY = NONE / NOT AUTHORIZED
-VIDU1_PAID_EXECUTION = NOT AUTHORIZED
+================================================================================
+POST-MERGE TARGET (CANONICAL STATE AFTER PR #97 MERGE)
+================================================================================
+P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE = PASS / MERGED / COMPLETE
+ACTIVE_WORK_PACKAGE = NONE
+CURRENT_GATE = WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
+NEXT_GATE = OWNER DECISION REQUIRED
+
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
+LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #97)
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP (PR #96)
+PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1-CLOSE (PR #95)
+PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-C1 (PR #94)
+PREV4_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-COR1 (PR #93)
+PREV5_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU1-PREP (PR #92)
+PREV6_COMPLETED_GATE = P4-WP020-LIVE-R5-PRE1-CLOSE-R1 (PR #91)
+
+================================================================================
+TOOLING & READINESS INVARIANTS
+================================================================================
+VIDU2_READINESS_IDENTITY = WP020-LIVE-R5-VIDU2-PREP
+VIDU2_TOOLING_RESERVED_IDENTITY = LIVE-20260910-VIDU2-R5 (TOOLING ONLY / NOT AUTHORIZED FOR LIVE EXECUTION)
+VIDU2_PAID_IDENTITY = NONE / NOT AUTHORIZED
+VIDU2_PAID_EXECUTION = NOT AUTHORIZED
 
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
@@ -39,27 +71,30 @@ PAID_LIVE_DISPATCH = false
 ```
 
 Next Gate Direction:
-- Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`.
-- A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization.
+- While PR #97 is open, `ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` and `CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE`.
+- Upon Owner-approved merge of PR #97, canonical post-merge state becomes `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`.
+- Any future probe refers to VIDU2 tooling only and strictly requires SEPARATE EXPLICIT OWNER AUTHORIZATION, a fresh exact authorization marker bound to then-current canonical main SHA, and a fresh unconsumed fence.
+- Historical VIDU1 execution `LIVE-20260909-VIDU1-R5` (Run 34423580310) is permanently STOPPED / CONSUMED / NEVER RERUN.
+- VIDU2 paid execution is NOT authorized.
 
 ---
 
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = #96 (IN-FLIGHT)
-TITLE = feat(wp020-live): prepare fresh VIDU2 one-call probe
-BRANCH = ai/p4-wp020-live-r5-vidu2-prep
-BASE MAIN AT START = cdfe3ce44ba9a9d6219909d12c0536c1cd716cec
-GATE = P4-WP020-LIVE-R5-VIDU2-PREP
-STATUS = AWAITING CHATGPT INDEPENDENT REVIEW / OWNER MERGE DECISION
+PR = #97 (IN-FLIGHT)
+TITLE = docs(wp020-live): close VIDU2 prep post-merge control state
+BRANCH = ai/p4-wp020-live-r5-vidu2-prep-close
+BASE MAIN AT START = fb72d683c0dd4daa721507b6a0c12dcec17d7366
+GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE
+STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OWNER MERGE DECISION)
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu1-c1-close`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-prep-close`.
 - Verify exact-head CI success.
 - Confirm DOCS-ONLY scope (zero provider calls, zero credits consumed).
 - Present for ChatGPT independent review.
