@@ -85,17 +85,18 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | Historical P4-WP020 LIVE R4 C1 Vidu Failure/Billing Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R4_C1.md`](../40_DELIVERY/P4_WP020_LIVE_R4_C1.md) |
 | P4-WP020 LIVE R5 PRE1 Readiness Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_PRE1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_PRE1.md) |
 | P4-WP020 LIVE R5 VIDU1 Prep Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_PREP.md) |
+| P4-WP020 LIVE R5 VIDU1 Workflow Guard Compatibility Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
 | Release Gates | [`../40_DELIVERY/RELEASE_GATES.md`](../40_DELIVERY/RELEASE_GATES.md) |
 | WP007 Final Corrective Evidence | [`../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md`](../40_DELIVERY/WP007_FINAL_CORRECTIVE_EVIDENCE.md) |
 
-P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling with zero generation calls and zero credit consumption.
+P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrects workflow comments pagination with zero provider generation calls and zero credit consumption.
 
-Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. A future paid probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization.
+Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. A future paid probe (`P4-WP020-LIVE-R5-VIDU1`) requires separate explicit Owner authorization and a fresh authorization marker bound to the post-merge canonical main SHA.
 
-Canonical main at BILL1-CLOSE start is `da381bbd2cc407393e7326e9824bef68ea356e6b`. Fresh repository truth newer than this text remains authoritative.
+Canonical main at VIDU1-COR1 start is `42d789efdb49725b1dd45b312ce39cb71ac02d1e`. Fresh repository truth newer than this text remains authoritative.
 
 ---
 

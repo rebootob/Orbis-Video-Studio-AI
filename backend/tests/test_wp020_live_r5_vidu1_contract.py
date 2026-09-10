@@ -9,7 +9,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / ".github" / "scripts" / "wp020_live_r5_vidu1.py"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "wp020-live-r5-vidu1.yml"
-VALID_SHA = "5107e3e9ef7702c8403fe74146062ab68e8e50b9"
+VALID_SHA = "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
 
 
 def _load_script_module():
@@ -411,3 +411,187 @@ def test_evidence_sanitization():
     assert sanitized["vidu_credits_consumed"] is None
     assert sanitized["vidu_credits_consumed_confirmed"] is False
     assert "usd" not in sanitized  # No credits-to-USD conversion
+
+
+# =========================================================================
+# Behavioral & Contract Tests for P4-WP020-LIVE-R5-VIDU1-COR1 (Tests A through H)
+# =========================================================================
+
+def test_cor1_workflow_no_incompatible_gh_comments_flags():
+    """A. Workflow no longer contains incompatible --comments + --json flags."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "--comments --json" not in content
+    assert "--comments" not in content or "gh issue view" not in content
+    assert "gh issue view" not in content
+
+
+def test_cor1_workflow_uses_gh_api_paginate():
+    """B. Comment retrieval uses gh api --paginate with exact repository issues comments endpoint."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    expected_api_cmd = 'COMMENTS="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --jq \'.[].body\')"'
+    assert expected_api_cmd in content
+
+
+def test_cor1_workflow_pagination_preserved():
+    """C. Pagination is preserved explicitly via --paginate."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "--paginate" in content
+    assert 'repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments' in content
+
+
+def test_cor1_workflow_exact_owner_authorization_marker_required():
+    """D. Exact Owner authorization marker is required and checked with grep -Fx."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert 'AUTH_MARKER="FRESH_OWNER_AUTHORIZED_VIDU1: ${WP020_VIDU1_EXECUTION_ID} @ ${GITHUB_SHA}"' in content
+    assert 'grep -Fx "${AUTH_MARKER}"' in content
+    assert 'echo "STOP: exact fresh Owner VIDU1 paid authorization marker missing for current main"' in content
+
+
+def test_cor1_workflow_existing_fence_blocks_execution():
+    """E. Existing fence marker blocks execution fail-closed."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert 'FENCE_MARKER="EXECUTION_STARTED: ${WP020_VIDU1_EXECUTION_ID}"' in content
+    assert 'if printf \'%s\\n\' "${COMMENTS}" | grep -Fx "${FENCE_MARKER}" >/dev/null; then' in content
+    assert 'echo "STOP: VIDU1 one-shot execution fence already consumed"' in content
+
+
+def test_cor1_workflow_terminal_markers_block_execution():
+    """F. Existing terminal PASS/STOP markers block execution fail-closed."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert 'TERMINAL_PASS="VIDU1_PROBE_PASS: ${WP020_VIDU1_EXECUTION_ID}"' in content
+    assert 'TERMINAL_STOP="VIDU1_PROBE_STOPPED: ${WP020_VIDU1_EXECUTION_ID}"' in content
+    assert 'grep -F "${TERMINAL_PASS}"' in content
+    assert 'grep -F "${TERMINAL_STOP}"' in content
+
+
+def test_cor1_workflow_empty_or_failed_comment_retrieval_fails_closed():
+    """G. Missing or empty comment retrieval fails closed immediately."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert 'if [ -z "${COMMENTS}" ]; then' in content
+    assert 'echo "STOP: failed to retrieve Issue #${ISSUE_NUMBER} comments or comment list is empty" >&2' in content
+    assert 'exit 1' in content
+
+
+def test_cor1_workflow_preserves_safety_invariants():
+    """H. Preserves max generation POST = 1, exact execution identity, SHA binding, branch guard, no automatic generation retry, ambiguous POST => STOP."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "WP020_VIDU1_EXECUTION_ID: LIVE-20260909-VIDU1-R5" in content
+    assert f"CANONICAL_BASE_SHA: {VALID_SHA}" in content
+    assert 'if [ "$GITHUB_REF_NAME" != "main" ]; then' in content
+    assert "workflow_dispatch:" in content
+
+    # Check script safety invariants
+    script_content = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "MAX_GENERATION_POSTS = 1" in script_content
+    assert "EXPECTED_VIDU1_EXECUTION_ID = \"LIVE-20260909-VIDU1-R5\"" in script_content
+    assert "submission_uncertain" in script_content
+    assert "Ambiguous POST submission outcome" in script_content
+
+
+def test_cor1_comment_parsing_simulation():
+    """Simulation of the workflow shell guard comment parsing logic."""
+    target_marker = f"FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ {VALID_SHA}"
+    fence_marker = "EXECUTION_STARTED: LIVE-20260909-VIDU1-R5"
+    pass_marker = "VIDU1_PROBE_PASS: LIVE-20260909-VIDU1-R5"
+    stop_marker = "VIDU1_PROBE_STOPPED: LIVE-20260909-VIDU1-R5"
+
+    def evaluate_comments(comments: list[str]) -> str:
+        if not comments:
+            return "STOP_EMPTY"
+        if target_marker not in comments:
+            return "STOP_MISSING_AUTH"
+        if fence_marker in comments:
+            return "STOP_FENCE_CONSUMED"
+        if pass_marker in comments:
+            return "STOP_TERMINAL_PASS"
+        if stop_marker in comments:
+            return "STOP_TERMINAL_STOP"
+        return "AUTHORIZED"
+
+    # Case 1: Empty comments -> STOP_EMPTY
+    assert evaluate_comments([]) == "STOP_EMPTY"
+
+    # Case 2: Missing auth -> STOP_MISSING_AUTH
+    assert evaluate_comments(["Some comment", "Another comment"]) == "STOP_MISSING_AUTH"
+
+    # Case 3: Valid fresh auth -> AUTHORIZED
+    assert evaluate_comments(["Some comment", target_marker]) == "AUTHORIZED"
+
+    # Case 4: Auth present but fence already consumed -> STOP_FENCE_CONSUMED
+    assert evaluate_comments(["Some comment", target_marker, fence_marker]) == "STOP_FENCE_CONSUMED"
+
+    # Case 5: Auth present but already passed -> STOP_TERMINAL_PASS
+    assert evaluate_comments([target_marker, pass_marker]) == "STOP_TERMINAL_PASS"
+
+    # Case 6: Auth present but already stopped -> STOP_TERMINAL_STOP
+    assert evaluate_comments([target_marker, stop_marker]) == "STOP_TERMINAL_STOP"
+
+
+# =========================================================================
+# Static Provenance Regression Tests (COR1 authorization identity)
+# =========================================================================
+
+# These constants are static truth — must NOT be interchangeable.
+COR1_AUTH_COMMENT = "5604486823"
+PRIOR_PAID_VIDU1_AUTH_COMMENT = "5603798466"
+PRIOR_PAID_VIDU1_MARKER_SHA = "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
+
+
+def test_cor1_provenance_comment_ids_are_distinct():
+    """COR1 NO-PAID authorization comment and prior paid VIDU1 authorization comment
+    are distinct issue comments and MUST NOT be interchangeable."""
+    assert COR1_AUTH_COMMENT != PRIOR_PAID_VIDU1_AUTH_COMMENT, (
+        "COR1 NO-PAID auth (5604486823) and prior paid VIDU1 auth (5603798466) "
+        "must be distinct — they are different Issue #63 comments."
+    )
+
+
+def test_cor1_auth_comment_authorizes_no_paid_work_only():
+    """5604486823 authorizes only the NO-PAID COR1 corrective.
+    It is NOT the paid VIDU1 authorization marker."""
+    # The COR1 auth comment ID must match the expected constant
+    assert COR1_AUTH_COMMENT == "5604486823"
+    # The prior paid VIDU1 marker comment ID must be different
+    assert COR1_AUTH_COMMENT != PRIOR_PAID_VIDU1_AUTH_COMMENT
+
+
+def test_prior_paid_vidu1_marker_comment_is_distinct():
+    """5603798466 is the prior paid VIDU1 marker comment.
+    It contains FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789ef...
+    This marker is bound to SHA 42d789efdb49725b1dd45b312ce39cb71ac02d1e and
+    MUST NOT be reused after COR1 (PR #93) merges to main."""
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT == "5603798466"
+    assert PRIOR_PAID_VIDU1_MARKER_SHA == "42d789efdb49725b1dd45b312ce39cb71ac02d1e"
+    # The paid marker comment must differ from the COR1 auth comment
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT != COR1_AUTH_COMMENT
+
+
+def test_cor1_delivery_doc_does_not_attribute_paid_marker_to_cor1_auth_comment():
+    """Delivery doc P4_WP020_LIVE_R5_VIDU1_COR1.md must not attribute
+    FRESH_OWNER_AUTHORIZED_VIDU1 paid marker text to COR1 auth comment 5604486823.
+    That is: the FRESH_OWNER_AUTHORIZED_VIDU1 marker text and 5604486823 must not
+    appear on the SAME LINE, because they have different meanings."""
+    cor1_doc_path = REPO_ROOT / "project-docs" / "40_DELIVERY" / "P4_WP020_LIVE_R5_VIDU1_COR1.md"
+    assert cor1_doc_path.is_file(), f"Missing {cor1_doc_path}"
+    content = cor1_doc_path.read_text(encoding="utf-8")
+
+    # Verify correct provenance: 5604486823 is used only as COR1 NO-PAID auth
+    assert COR1_AUTH_COMMENT in content, "COR1 auth comment must be present in delivery doc"
+
+    # Verify prior paid marker comment is correctly referenced
+    assert PRIOR_PAID_VIDU1_AUTH_COMMENT in content, (
+        "Prior paid VIDU1 auth comment 5603798466 must be present in delivery doc"
+    )
+
+    # Critical: FRESH_OWNER_AUTHORIZED_VIDU1 paid marker text must NOT appear on the
+    # SAME line as COR1 auth comment 5604486823. They may appear in the same document
+    # section (as a two-bullet clarification list), but the marker text itself must
+    # only be attributed to comment 5603798466.
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if "FRESH_OWNER_AUTHORIZED_VIDU1" in line and COR1_AUTH_COMMENT in line:
+            raise AssertionError(
+                f"FRESH_OWNER_AUTHORIZED_VIDU1 paid marker must NOT be on the same line "
+                f"as COR1 auth comment {COR1_AUTH_COMMENT}. "
+                f"Line {i+1}: {line}"
+            )

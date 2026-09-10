@@ -4,7 +4,7 @@
 >
 > Fresh repository/workflow/Issue #63 truth overrides stale text.
 >
-> This specification records the canonical state effective upon merge of PR #92 to canonical `main` (pre-merge baseline main at VIDU1-PREP start: `5107e3e9ef7702c8403fe74146062ab68e8e50b9`).
+> This specification records the canonical state effective upon merge of PR #93 to canonical `main` (pre-merge baseline main at VIDU1-COR1 start: `42d789efdb49725b1dd45b312ce39cb71ac02d1e`).
 
 ---
 
@@ -13,7 +13,7 @@
 ```yaml
 PHASE: P4 — Multi-Output, Export & Core V1 Release
 CANONICAL_BRANCH: main
-VIDU1_PREP_BASE_MAIN: 5107e3e9ef7702c8403fe74146062ab68e8e50b9
+VIDU1_COR1_BASE_MAIN: 42d789efdb49725b1dd45b312ce39cb71ac02d1e
 
 P0-WP001_THROUGH_P4-WP019: PASS / CLOSED / MERGED
 P4-WP020: ACTIVE / NOT CLOSED
@@ -34,6 +34,7 @@ P4-WP020-LIVE-R5-PRE1: PASS / COMPLETED / NO-PAID
 P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-PREP: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-COR1: PASS / MERGED / COMPLETE
 
 ACTIVE_WORK_PACKAGE: NONE
 CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
@@ -53,6 +54,14 @@ VIDU1_PREP_VIDU_GENERATION_POSTS: 0
 VIDU1_PREP_VIDU_CREDITS_CONSUMED: 0
 VIDU1_PREP_PAID_FENCE_WRITTEN: false
 VIDU1_PREP_PAID_LIVE_DISPATCH: false
+
+VIDU1_COR1_PROVIDER_GENERATION_CALLS: 0
+VIDU1_COR1_PAID_PROVIDER_CALLS: 0
+VIDU1_COR1_VIDU_GENERATION_POSTS: 0
+VIDU1_COR1_VIDU_CREDITS_CONSUMED: 0
+VIDU1_COR1_PAID_FENCE_WRITTEN: false
+VIDU1_COR1_PAID_LIVE_DISPATCH: false
+VIDU1_FAILED_RUN_34368643536: FAILED_CLOSED / 0 POST / 0 CREDITS / NO FENCE CONSUMED
 
 R5_READINESS_IDENTITY: WP020-LIVE-R5-PRE1
 R5_PRE1_RUN: 34351326791
@@ -85,6 +94,29 @@ R4_VIDU_EXTERNAL_BILLING: NOT CHARGED / PROVIDER-SIDE EVIDENCE ACCEPTED
 
 VIDU_BALANCE_READINESS_EVIDENCE: 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT USD BILLING EVIDENCE
 ```
+
+---
+
+## P4-WP020-LIVE-R5-VIDU1-COR1 Accepted Truth
+
+Owner authorized `P4-WP020-LIVE-R5-VIDU1-COR1 — NO-PAID Workflow Guard Compatibility Corrective` in Issue #63 (comment `5604486823`) on canonical main `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+
+Failed Live Run Evidence:
+- Run ID: `34368643536` on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`)
+- Failed closed at workflow step `Check Owner authorization & fence if live` with error: `specify only one of --comments or --json`
+- Failed closed before fence consumption (`EXECUTION_STARTED: LIVE-20260909-VIDU1-R5` was not posted)
+- Provider generation calls: 0, paid provider calls: 0, Vidu generation POSTs: 0, Vidu credits consumed: 0
+
+Delivered Changes:
+- `.github/workflows/wp020-live-r5-vidu1.yml`: replaced incompatible `gh issue view` flags with `gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" --jq '.[].body'` and fail-closed non-empty validation;
+- `backend/tests/test_wp020_live_r5_vidu1_contract.py`: added automated tests A through H validating comment pagination and safety guards;
+- `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`: delivery specification.
+
+Post-Merge Fresh Authorization Rule:
+- **COR1 NO-PAID Owner authorization:** Issue #63 comment `5604486823` — authorizes only this NO-PAID corrective work package.
+- **Prior paid VIDU1 authorization marker:** Issue #63 comment `5603798466` — contains `FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`, bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
+- The prior paid marker at comment `5603798466` was bound to old canonical main SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e` and MUST NOT be reused after PR #93 merges to `main`.
+- Any future paid probe requires a fresh explicit Owner authorization with a fresh exact marker bound to the new post-merge canonical main SHA.
 
 ---
 
@@ -234,10 +266,10 @@ R3 MUST NEVER BE RERUN.
 
 ---
 
-## Post-R5-VIDU1-PREP Rule
+## Post-R5-VIDU1-COR1 Rule
 
-With P4-WP020-LIVE-R5-VIDU1-PREP merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
+With P4-WP020-LIVE-R5-VIDU1-COR1 merged to canonical `main`, no active work package exists (`ACTIVE_WORK_PACKAGE = NONE`). The next gate requires a separate explicit Owner decision (`NEXT_GATE = OWNER DECISION REQUIRED`).
 
-A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) is NOT authorized by PREP tooling and must receive separate explicit Owner authorization.
+A future bounded Vidu credit-generation probe (`P4-WP020-LIVE-R5-VIDU1`) is NOT authorized by PREP/COR1 tooling and must receive separate explicit Owner authorization and a fresh authorization marker bound to post-merge canonical main SHA.
 
 Do not create an R5 paid execution identity, call any external provider, write a paid authorization marker, create or consume an execution fence, dispatch a paid/live workflow, adjust billing, convert credits to USD, release, tag, or deploy without separate explicit Owner authorization.
