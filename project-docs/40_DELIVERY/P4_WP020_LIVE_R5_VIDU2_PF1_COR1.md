@@ -75,3 +75,14 @@ Because the workflow file was syntactically invalid YAML, GitHub Actions could n
    - No paid authorization marker written.
    - No execution fence written.
    - Zero credits consumed by COR1.
+
+## PF1 Authorization Expiry & Post-Merge Rule
+
+PF1 Owner authorization (Issue #63 comment `5619653050`) was strictly bound to canonical base main SHA `8bc2765a8b09d93340c3aada4f7deff46dc29144`.
+
+After PR #98 (COR1) merges to `main`, canonical `main` will advance to a NEW merge commit SHA.
+
+**Authorization Expiry Rule**:
+- The old PF1 authorization comment `5619653050` **MUST NOT BE REUSED** on post-COR1 canonical `main`.
+- A fresh explicit Owner PF1 authorization bound to the new exact post-merge canonical `main` SHA is strictly required before any dry-run dispatch.
+- This is a NO-PAID authorization refresh rule; it does NOT authorize paid or live execution.

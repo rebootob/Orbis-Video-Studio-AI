@@ -10,7 +10,7 @@ RESPOND TO OWNER IN THAI.
 PROJECT
 - Repository: rebootob/Orbis-Video-Studio-AI
 - Canonical branch: main
-- Canonical main SHA: fresh-fetch from GitHub repository truth (closure base main: fb72d683c0dd4daa721507b6a0c12dcec17d7366)
+- Canonical main SHA: fresh-fetch from GitHub repository truth (COR1 authorized base: 8bc2765a8b09d93340c3aada4f7deff46dc29144)
 
 ROLE MODEL
 - Owner = final human authority
@@ -34,6 +34,7 @@ MANDATORY STARTUP
    project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md
    project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md
    project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP_CLOSE.md
+   project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_COR1.md
 3. Newer repository/workflow/Issue/PR truth overrides stale docs.
 
 CANONICAL STATE & ACTIVE GATE:
@@ -43,7 +44,8 @@ CANONICAL STATE & ACTIVE GATE:
 - Core V1 release = NOT DECLARED
 - P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE = PASS / MERGED / COMPLETE (PR #97, commit 8bc2765a8b09d93340c3aada4f7deff46dc29144)
 - P4-WP020-LIVE-R5-VIDU2-PF1 = AUTHORIZED / BLOCKED BEFORE EXECUTION
-- P4-WP020-LIVE-R5-VIDU2-PF1-COR1 = IN PROGRESS / PR OPEN
+- P4-WP020-LIVE-R5-VIDU2-PF1-COR1 = IN PROGRESS / PR #98 OPEN / IN REVIEW / NOT MERGED
+- PF1_AUTHORIZATION_RULE = Old PF1 authorization comment 5619653050 expires upon PR #98 merge; fresh explicit Owner PF1 authorization on new canonical main SHA is strictly required before any dry-run dispatch
 - ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1
 - CURRENT_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1
 - NEXT_GATE = CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
