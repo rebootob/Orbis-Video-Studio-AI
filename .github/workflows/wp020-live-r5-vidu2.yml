@@ -73,13 +73,11 @@ jobs:
               exit 1
             fi
 
-            if ! printf '%s
-' "${COMMENTS}" | grep -Fx "${AUTH_MARKER}" >/dev/null; then
+            if ! printf '%s\n' "${COMMENTS}" | grep -Fx "${AUTH_MARKER}" >/dev/null; then
               echo "STOP: exact fresh Owner VIDU2 paid authorization marker missing for current main" >&2
               exit 1
             fi
-            if printf '%s
-' "${COMMENTS}" | grep -Fx "${FENCE_MARKER}" >/dev/null; then
+            if printf '%s\n' "${COMMENTS}" | grep -Fx "${FENCE_MARKER}" >/dev/null; then
               echo "STOP: VIDU2 one-shot execution fence already consumed" >&2
               exit 1
             fi
