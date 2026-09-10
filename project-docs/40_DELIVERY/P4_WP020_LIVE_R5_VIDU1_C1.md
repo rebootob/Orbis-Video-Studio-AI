@@ -18,11 +18,16 @@ C1_VIDU_CREDITS_CONSUMED: 0 (by C1 itself)
 C1_PAID_FENCE_WRITTEN: false
 C1_PAID_LIVE_DISPATCH: false
 CORE_V1_RELEASE: NOT DECLARED
+STATUS: IN REVIEW / PR #94 OPEN
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R5-VIDU1-C1
+CURRENT_GATE: P4-WP020-LIVE-R5-VIDU1-C1
+NEXT_GATE: CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+LAST_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU1-COR1
 ```
 
 ## Immutable Historical Truth (Run 34423580310)
 
-The live probe run `34423580310` executed on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`) was consumed:
+The live probe run `34423580310` executed on canonical `main` (`5a818b9dbf642b1e456dba51c9a80745d966919e`) was consumed:
 
 ```text
 Execution ID: LIVE-20260909-VIDU1-R5
@@ -62,7 +67,7 @@ Diagnose the consumed VIDU1 HTTP failure safely WITHOUT another provider call:
    - Verified outbound request contract using mock HTTP transport:
      - Target endpoint: `POST https://api.vidu.com/ent/v2/text2video`
      - Headers: `Authorization: Token <API_KEY>`, `Content-Type: application/json`
-     - Payload: `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720P`, non-empty prompt.
+     - Payload: `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720p` (with adapter-level normalization from `720P`), non-empty prompt.
    - Added mock behavioral tests for HTTP 400, 401, 403, 429, and 500 responses verifying status preservation and fail-closed behavior.
    - Verified `MAX_GENERATION_POSTS = 1` and zero calls to OpenAI, Gemini, or ElevenLabs.
 

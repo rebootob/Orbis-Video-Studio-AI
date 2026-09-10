@@ -28,7 +28,7 @@ def test_vidu1_script_ast_and_syntax():
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     assert tree is not None
-    assert 'TARGET_RESOLUTION = "720P"' in source
+    assert 'TARGET_RESOLUTION = "720p"' in source
 
 
 def test_vidu1_workflow_safety_and_structure():
@@ -265,7 +265,7 @@ def test_live_guard_branch_mismatch(tmp_path):
 # =========================================================================
 
 def test_live_guard_e_mocked_success_with_valid_permit_and_exact_resolution(tmp_path):
-    """E. only fully valid mocked live permit can reach exactly one mocked POST with 720P."""
+    """E. only fully valid mocked live permit can reach exactly one mocked POST with 720p."""
     mod = _load_script_module()
     from app.providers.base import ProviderJobResult
 
@@ -312,13 +312,13 @@ def test_live_guard_e_mocked_success_with_valid_permit_and_exact_resolution(tmp_
     assert result["vidu_credits_consumed"] is None
     assert result["vidu_credits_consumed_confirmed"] is False
 
-    # Corrective 3: exact resolution 720P
-    assert result["resolution"] == "720P"
+    # Corrective 3: exact resolution 720p
+    assert result["resolution"] == "720p"
 
-    # Verify adapter submission params: exact 720P resolution
+    # Verify adapter submission params: exact 720p resolution
     assert mock_adapter.submit_generation_job.await_count == 1
     called_params = mock_adapter.submit_generation_job.call_args[0][0]
-    assert called_params.provider_specific_params == {"resolution": "720P"}
+    assert called_params.provider_specific_params == {"resolution": "720p"}
     assert called_params.duration_seconds == 4.0
     assert called_params.aspect_ratio == "16:9"
 
@@ -384,7 +384,7 @@ def test_evidence_sanitization():
         "model": "viduq2",
         "mode": "text-to-video",
         "duration_seconds": 4.0,
-        "resolution": "720P",
+        "resolution": "720p",
         "status": "SUCCESS",
         "generation_posts": 1,
         "poll_attempts": 2,
@@ -409,7 +409,7 @@ def test_evidence_sanitization():
     assert "secret_token" not in sanitized
     assert "api_key" not in sanitized
     assert "raw_response" not in sanitized
-    assert sanitized["resolution"] == "720P"
+    assert sanitized["resolution"] == "720p"
     assert sanitized["provider_http_status"] == 200
     assert sanitized["failure_classification"] is None
     assert sanitized["provider_credits_reported"] == 4.0
@@ -797,7 +797,7 @@ def test_c1_http_500_mocked_response_fail_closed_without_retry(tmp_path):
 def test_c1_request_contract_payload_headers_and_path():
     """5, 6, 7. Request contract verification using mock HTTP transport:
     - Exactly one mocked POST target: /text2video
-    - Payload contains model=viduq2, duration=4, aspect_ratio=16:9, resolution=720P
+    - Payload contains model=viduq2, duration=4, aspect_ratio=16:9, resolution=720p
     - Authorization scheme is Token <api_key> (Token prefix verified, real secret never exposed)
     - Content-Type is application/json
     """
@@ -831,7 +831,7 @@ def test_c1_request_contract_payload_headers_and_path():
         prompt="Cinematic slow aerial shot of calm turquoise ocean waves breaking on a golden sand beach at dawn, soft warm morning lighting, photorealistic, 4k",
         aspect_ratio="16:9",
         duration_seconds=4.0,
-        provider_specific_params={"resolution": "720P"},
+        provider_specific_params={"resolution": "720p"},
     )
 
     original_init = httpx.AsyncClient.__init__
@@ -857,7 +857,7 @@ def test_c1_request_contract_payload_headers_and_path():
     assert body["model"] == "viduq2"
     assert body["duration"] == 4
     assert body["aspect_ratio"] == "16:9"
-    assert body["resolution"] == "720P"
+    assert body["resolution"] == "720p"
     assert body["prompt"] == params.prompt
 
     # 7. Authorization scheme: Token
@@ -866,6 +866,62 @@ def test_c1_request_contract_payload_headers_and_path():
     assert auth_header.startswith("Token ")
     assert auth_header == "Token test-mock-api-key"
     assert req.headers.get("Content-Type") == "application/json"
+
+
+def test_c1_vidu_adapter_resolution_normalization_and_validation():
+    """Verify ViduProviderAdapter normalizes resolution casing to lowercase
+    and validates supported values without broad refactoring."""
+    import httpx
+    from unittest.mock import patch
+    from app.providers.vidu import ViduProviderAdapter
+    from app.providers.base import VideoGenerationParams
+
+    for input_res, expected_res in [
+        ("720p", "720p"),
+        ("720P", "720p"),
+        ("1080P", "1080p"),
+        ("540P", "540p"),
+    ]:
+        captured = []
+
+        def mock_handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            return httpx.Response(status_code=200, json={"task_id": "t1", "state": "queueing"})
+
+        transport = httpx.MockTransport(mock_handler)
+        adapter = ViduProviderAdapter(api_key="key", base_url="https://api.vidu.com/ent/v2", model="viduq2")
+        params = VideoGenerationParams(
+            shot_id="s1",
+            prompt="valid prompt",
+            duration_seconds=4.0,
+            provider_specific_params={"resolution": input_res},
+        )
+
+        original_init = httpx.AsyncClient.__init__
+
+        def patched_init(client_self, *args, **kwargs):
+            kwargs["transport"] = transport
+            original_init(client_self, *args, **kwargs)
+
+        with patch.object(httpx.AsyncClient, "__init__", patched_init):
+            result = asyncio.run(adapter.submit_generation_job(params))
+
+        assert result.status == "QUEUED"
+        body = json.loads(captured[0].content.decode("utf-8"))
+        assert body["resolution"] == expected_res
+
+    # Unsupported resolutions fail closed with INVALID_PARAMETERS
+    adapter = ViduProviderAdapter(api_key="key", base_url="https://api.vidu.com/ent/v2", model="viduq2")
+    for bad_res in ["4K", "unsupported", 720]:
+        bad_params = VideoGenerationParams(
+            shot_id="s1",
+            prompt="valid prompt",
+            duration_seconds=4.0,
+            provider_specific_params={"resolution": bad_res},
+        )
+        result = asyncio.run(adapter.submit_generation_job(bad_params))
+        assert result.status == "FAILED"
+        assert result.error_code == "INVALID_PARAMETERS"
 
 
 def test_c1_sanitized_evidence_safety_exclusions():
@@ -879,7 +935,7 @@ def test_c1_sanitized_evidence_safety_exclusions():
         "model": "viduq2",
         "mode": "text-to-video",
         "duration_seconds": 4.0,
-        "resolution": "720P",
+        "resolution": "720p",
         "status": "FAILED",
         "generation_posts": 1,
         "poll_attempts": 0,

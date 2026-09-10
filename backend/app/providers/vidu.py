@@ -159,8 +159,16 @@ class ViduProviderAdapter(IVideoGenerationProviderAdapter):
         references = bool(params.reference_images)
         allowed_models = {"viduq2", "viduq1", "viduq3-turbo", "viduq3" if references else "viduq3-pro"}
         duration = params.duration_seconds
-        extras = params.provider_specific_params or {}
+        extras = dict(params.provider_specific_params or {})
         allowed_extras = {"resolution", "style", "movement_amplitude", "off_peak"}
+        if "resolution" in extras:
+            res_val = extras["resolution"]
+            if not isinstance(res_val, str):
+                return self._failure("INVALID_PARAMETERS")
+            res_norm = res_val.strip().lower()
+            if res_norm not in ("540p", "720p", "1080p"):
+                return self._failure("INVALID_PARAMETERS")
+            extras["resolution"] = res_norm
         if (self._model not in allowed_models or not math.isfinite(duration) or not duration.is_integer()
                 or not 1 <= duration <= (16 if "q3" in self._model else 10)
                 or (self._model == "viduq1" and duration != 5)

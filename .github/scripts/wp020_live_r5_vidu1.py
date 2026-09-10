@@ -5,7 +5,7 @@ NO provider generation calls or credit consumption occur during PREP.
 Future execution requires separate explicit Owner authorization and dedicated fence.
 
 Safety invariants:
-- Provider: Vidu only (viduq2, text2video, 4s, 720P)
+- Provider: Vidu only (viduq2, text2video, 4s, 720p)
 - Max generation POST: exactly 1 (hard capped; ambiguous transport fails closed without retry)
 - GET polling only after confirmed submission
 - OpenAI / Gemini / ElevenLabs calls = 0
@@ -37,7 +37,7 @@ TARGET_PROVIDER = "vidu"
 TARGET_MODEL = "viduq2"
 TARGET_MODE = "text-to-video"
 TARGET_DURATION_SECONDS = 4.0
-TARGET_RESOLUTION = "720P"
+TARGET_RESOLUTION = "720p"
 TARGET_PROMPT = (
     "Cinematic slow aerial shot of calm turquoise ocean waves breaking on a golden sand beach at dawn, "
     "soft warm morning lighting, photorealistic, 4k"

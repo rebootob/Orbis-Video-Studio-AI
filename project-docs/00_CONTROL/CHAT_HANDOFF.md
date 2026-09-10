@@ -64,7 +64,7 @@ Pre-Merge Action Routing:
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
 - Post-Merge Non-Reuse Rule:
-  - Consumed run `34423580310` / execution identity `LIVE-20260909-VIDU1-R5` MUST NEVER BE RERUN.
+  - Consumed run `34423580310` (executed on canonical main `5a818b9dbf642b1e456dba51c9a80745d966919e`) / execution identity `LIVE-20260909-VIDU1-R5` MUST NEVER BE RERUN.
   - Historical HTTP status remains `UNKNOWN`.
   - Historical Vidu credits consumed remain `UNKNOWN / NOT CONFIRMED`.
   - Any future probe requires a fresh dedicated execution identity, fresh explicit Owner authorization, and fresh exact marker bound to post-merge canonical main SHA.

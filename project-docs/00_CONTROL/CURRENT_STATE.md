@@ -35,11 +35,12 @@ P4-WP020-LIVE-R5-PRE1-CLOSE: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-PRE1-CLOSE-R1: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-PREP: PASS / MERGED / COMPLETE
 P4-WP020-LIVE-R5-VIDU1-COR1: PASS / MERGED / COMPLETE
-P4-WP020-LIVE-R5-VIDU1-C1: PASS / MERGED / COMPLETE
+P4-WP020-LIVE-R5-VIDU1-C1: ACTIVE / IN REVIEW / NOT MERGED (PR #94)
 
-ACTIVE_WORK_PACKAGE: NONE
-CURRENT_GATE: WAITING_FOR_EXPLICIT_OWNER_NEXT_GATE
-NEXT_GATE: OWNER DECISION REQUIRED
+ACTIVE_WORK_PACKAGE: P4-WP020-LIVE-R5-VIDU1-C1
+CURRENT_GATE: P4-WP020-LIVE-R5-VIDU1-C1
+NEXT_GATE: CHATGPT_REVIEW_AND_OWNER_MERGE_DECISION
+LAST_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU1-COR1
 
 COMPLETED_WORK_PACKAGES: 19 / 20
 CORE_V1_DELIVERY_PROGRESS: 95_PERCENT_BY_WP_COUNT
@@ -103,7 +104,7 @@ VIDU_BALANCE_READINESS_EVIDENCE: 2000 CREDITS / OWNER-PROVIDED SCREENSHOT / NOT 
 Owner authorized `P4-WP020-LIVE-R5-VIDU1-C1 — NO-PAID HTTP Failure Evidence & Request Contract Diagnostic Corrective` in Issue #63 (comment `5611111664`) on canonical main `5a818b9dbf642b1e456dba51c9a80745d966919e`.
 
 Immutable Consumed Live Execution Truth (Run 34423580310):
-- Execution ID: `LIVE-20260909-VIDU1-R5` on canonical `main` (`42d789efdb49725b1dd45b312ce39cb71ac02d1e`)
+- Execution ID: `LIVE-20260909-VIDU1-R5` on canonical `main` (`5a818b9dbf642b1e456dba51c9a80745d966919e`)
 - Fence comment: `5611052822`
 - Terminal STOP comment: `5611054713`
 - Status: `STOPPED / CONSUMED / NEVER RERUN`
@@ -119,7 +120,7 @@ Immutable Consumed Live Execution Truth (Run 34423580310):
 Delivered Diagnostic Corrective:
 - Added safe HTTP status evidence (`provider_http_status`: typed integer 100–599) and typed `failure_classification` (`HTTP_CLIENT_ERROR`, `HTTP_RATE_LIMITED`, `HTTP_SERVER_ERROR`) to `.github/scripts/wp020_live_r5_vidu1.py`;
 - Updated workflow canonical base SHA to `5a818b9dbf642b1e456dba51c9a80745d966919e`;
-- Verified outbound Vidu request contract (POST `/text2video`, headers `Authorization: Token <API_KEY>`, `Content-Type: application/json`, payload `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720P`) in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
+- Verified outbound Vidu request contract (POST `/text2video`, headers `Authorization: Token <API_KEY>`, `Content-Type: application/json`, payload `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720p` (with adapter normalization from `720P`)) in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
 - Added automated mock tests for HTTP 400, 401, 403, 429, and 500 failure responses;
 - Verified evidence sanitization excludes raw response bodies, headers, and secrets;
 - Verified `MAX_GENERATION_POSTS = 1` and zero calls to other providers;

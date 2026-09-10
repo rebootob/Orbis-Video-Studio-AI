@@ -95,7 +95,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrected workflow comments pagination. Live probe run `34423580310` was consumed (1 POST, HTTP_ERROR, credits UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU1-C1` delivers safe HTTP failure diagnostic metadata and request contract verification with zero provider calls.
 
-Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. Consumed run `34423580310` is never rerun. A future probe requires separate explicit Owner authorization.
+Current in-flight state is `ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-VIDU1-C1` (PR #94 open / under review). Canonical post-merge state will be `ACTIVE_WORK_PACKAGE = NONE` and `NEXT_GATE = OWNER DECISION REQUIRED`. Consumed run `34423580310` is never rerun. A future probe requires separate explicit Owner authorization.
 
 Canonical main at VIDU1-C1 start is `5a818b9dbf642b1e456dba51c9a80745d966919e`. Fresh repository truth newer than this text remains authoritative.
 
