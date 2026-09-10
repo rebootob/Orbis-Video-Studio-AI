@@ -49,12 +49,12 @@ Next Gate Direction:
 > This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU1-C1 review/merge gate only. Once merged to `main`, canonical authority resides solely in the post-merge project state above.
 
 ```text
-PR = OPEN_PENDING
-TITLE = fix(wp020-live): add safe VIDU1 HTTP failure diagnostics & request contract tests
+PR = #94
+TITLE = fix(wp020-live): add safe VIDU1 HTTP failure diagnostics
 BRANCH = ai/p4-wp020-live-r5-vidu1-c1
 BASE MAIN AT C1 START = 5a818b9dbf642b1e456dba51c9a80745d966919e
 GATE = P4-WP020-LIVE-R5-VIDU1-C1
-STATUS = AWAITING PR CREATION, CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
+STATUS = AWAITING CHATGPT INDEPENDENT REVIEW & OWNER MERGE APPROVAL
 ```
 
 Pre-Merge Action Routing:
