@@ -90,6 +90,8 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R5 VIDU1 C1 Post-Merge Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_C1_CLOSE.md) |
 | P4-WP020 LIVE R5 VIDU2 Dedicated Probe Tooling | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP.md) |
 | P4-WP020 LIVE R5 VIDU2 PREP Post-Merge Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PREP_CLOSE.md) |
+| P4-WP020 LIVE R5 VIDU2 PF1 Workflow Registration Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_COR1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_COR1.md) |
+| P4-WP020 LIVE R5 VIDU2 PF1 Post-Run Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_CLOSE.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
@@ -98,9 +100,9 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrected workflow comments pagination. Live probe run `34423580310` was consumed (1 POST, HTTP_ERROR, credits UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU1-C1` delivers safe HTTP failure diagnostic metadata and request contract verification with zero provider calls.
 
-`P4-WP020-LIVE-R5-VIDU2-PREP` is complete and merged via PR #96 at commit `fb72d683c0dd4daa721507b6a0c12dcec17d7366` (reviewed HEAD `8dce19e7dbd0ffba0bf358c6bbc59cbdb87e7076`). `P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` (PR #97) records post-merge control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP`. Consumed run `34423580310` is permanently consumed and never rerun. A future probe requires separate explicit Owner authorization.
+`P4-WP020-LIVE-R5-VIDU2-PREP` is complete and merged via PR #96 at commit `fb72d683c0dd4daa721507b6a0c12dcec17d7366` (reviewed HEAD `8dce19e7dbd0ffba0bf358c6bbc59cbdb87e7076`). `P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE` is complete and merged via PR #97 at commit `8bc2765a8b09d93340c3aada4f7deff46dc29144`. `P4-WP020-LIVE-R5-VIDU2-PF1-COR1` is complete and merged via PR #98 at commit `33bf0a9f36b0db2321b2f4afd7074bb3de5d7734` (reviewed HEAD `ea2dbd06e6e3f31b9e93b9d571ea23bf3790976d`). `P4-WP020-LIVE-R5-VIDU2-PF1` dry-run execution succeeded under run `34501285649` (`PASS / COMPLETED / NO-PAID`, 0 calls, 0 credits). `P4-WP020-LIVE-R5-VIDU2-PF1-CLOSE` records post-run control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1`. Consumed run `34423580310` is permanently consumed and never rerun. Any future probe requires separate explicit Owner authorization.
 
-COR1 authorized base main is `8bc2765a8b09d93340c3aada4f7deff46dc29144` (historical VIDU2-PREP closure base: `fb72d683c0dd4daa721507b6a0c12dcec17d7366`). Canonical main must be fresh-fetched from repository truth.
+Closure authorized base main is `33bf0a9f36b0db2321b2f4afd7074bb3de5d7734`. Canonical main must be fresh-fetched from repository truth.
 
 ---
 
