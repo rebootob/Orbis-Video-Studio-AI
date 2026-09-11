@@ -52,18 +52,18 @@ VIDU2_PROVIDER_CREDITS_REPORTED = 30.0
 VIDU2_ACTUAL_CREDITS_CONSUMED = UNKNOWN / NOT CONFIRMED
 VIDU2_NEXT_PAID_IDENTITY = NONE / NOT AUTHORIZED
 VIDU2_NEXT_PAID_EXECUTION = NOT AUTHORIZED
-FULL_R5_PAID_EXECUTION = NOT AUTHORIZED
+FULL_R5_NEXT_PAID_EXECUTION = NOT AUTHORIZED
 
 P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4 = STOPPED / CONSUMED / NEVER RERUN
 
-PROVIDER_GENERATION_CALLS = 0
-PAID_PROVIDER_CALLS = 0
-VIDU_GENERATION_POSTS = 0
-VIDU_CREDITS_CONSUMED = 0
-PAID_FENCE_WRITTEN = false
-PAID_LIVE_DISPATCH = false
+RUN1_CLOSE_PROVIDER_GENERATION_CALLS = 0
+RUN1_CLOSE_PAID_PROVIDER_CALLS = 0
+RUN1_CLOSE_VIDU_GENERATION_POSTS = 0
+RUN1_CLOSE_PROVIDER_CREDIT_ACTIVITY = 0
+RUN1_CLOSE_PAID_FENCE_WRITTEN = false
+RUN1_CLOSE_PAID_LIVE_DISPATCH = false
 ```
 
 Next Gate Direction:
@@ -73,7 +73,7 @@ Next Gate Direction:
   - `LIVE-20260910-VIDU2-R5` (Run 34569728383): PASS / CONSUMED / NEVER RERUN (1 POST, video present, credits reported 30.0, actual credits consumed UNKNOWN / NOT CONFIRMED).
   - `LIVE-20260909-VIDU1-R5` (Run 34423580310): STOPPED / CONSUMED / NEVER RERUN (1 POST, HTTP status UNKNOWN, credits UNKNOWN / NOT CONFIRMED).
 - VIDU2 next paid execution: NONE / NOT AUTHORIZED.
-- Full R5 paid execution: NOT AUTHORIZED.
+- Full R5 next paid execution: NOT AUTHORIZED.
 
 ---
 
@@ -93,7 +93,7 @@ STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OW
 Pre-Merge Action Routing:
 - Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-run1-close`.
 - Verify exact-head CI success.
-- Confirm DOCS-ONLY scope (zero application code/workflow/test changes, zero provider calls, zero credits consumed).
+- Confirm DOCS-ONLY scope (zero application code/workflow/test changes, zero provider calls and zero provider/credit activity CAUSED BY THIS DOCS-ONLY RUN1-CLOSE GATE).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner merge authorization. DO NOT merge without Owner approval.
 

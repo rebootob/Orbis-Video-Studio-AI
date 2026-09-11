@@ -73,7 +73,7 @@ IMMUTABLE CONSUMED LIVE HISTORY
 FUTURE PAID STATUS
 - VIDU2_NEXT_PAID_IDENTITY = NONE / NOT AUTHORIZED
 - VIDU2_NEXT_PAID_EXECUTION = NOT AUTHORIZED
-- FULL_R5_PAID_EXECUTION = NOT AUTHORIZED
+- FULL_R5_NEXT_PAID_EXECUTION = NOT AUTHORIZED
 - Any future live action strictly requires fresh explicit Owner authorization on newest canonical main SHA, a fresh exact marker, and a fresh unconsumed fence.
 
 NO AUTO-START: Wait for explicit Owner instruction for the next gate.
