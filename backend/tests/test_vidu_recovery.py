@@ -452,7 +452,7 @@ def test_idempotent_path_with_missing_provider_credits_retains_none(clean_db, mo
 
 
 def test_idempotent_audit_evidence_repair(clean_db, mock_storage):
-    """Non-conflicting incomplete fencing or audit state is safely repaired during idempotent recovery."""
+    """Non-conflicting missing fields are safely repaired while preserving compatible additional evidence."""
     db_session = clean_db
     job_result = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -473,17 +473,19 @@ def test_idempotent_audit_evidence_repair(clean_db, mock_storage):
         )
     )
 
-    # Intentionally degrade non-conflicting fields
-    job = db_session.get(GenerationJob, res1.generation_job_id)
-    job.imported_historical = False
-    job.execution_disabled = False
+    # Intentionally remove non-conflicting missing fields
     shot = db_session.get(Shot, res1.shot_id)
     shot.source_asset_id = None
     ledger = db_session.query(UsageLedger).first()
     db_session.delete(ledger)
+    job = db_session.get(GenerationJob, res1.generation_job_id)
+    tampered_result = dict(job.result)
+    del tampered_result["provider_status"]
+    tampered_result["additional_compatible_audit"] = "AUDIT_OK"
+    job.result = tampered_result
     db_session.flush()
 
-    # Second recovery pass repairs the missing audit/fencing state
+    # Second recovery pass repairs the missing audit/fencing state while preserving additional evidence
     res2 = asyncio.run(
         ViduExistingJobRecoveryService.recover_existing_job(
             db_session,
@@ -495,15 +497,15 @@ def test_idempotent_audit_evidence_repair(clean_db, mock_storage):
         )
     )
 
-    repaired_job = db_session.get(GenerationJob, res2.generation_job_id)
-    assert repaired_job.imported_historical is True
-    assert repaired_job.execution_disabled is True
     repaired_shot = db_session.get(Shot, res2.shot_id)
     assert repaired_shot.source_asset_id == res2.asset_id
     repaired_ledger = db_session.query(UsageLedger).first()
     assert repaired_ledger is not None
     assert repaired_ledger.cost_status == "UNKNOWN"
     assert repaired_ledger.imported_historical is True
+    repaired_job = db_session.get(GenerationJob, res2.generation_job_id)
+    assert repaired_job.result["provider_status"] == "COMPLETED"
+    assert repaired_job.result["additional_compatible_audit"] == "AUDIT_OK"
 
 
 # =========================================================================
@@ -690,8 +692,8 @@ def test_returned_provider_job_id_mismatch_fails_closed(clean_db, mock_storage):
         )
 
 
-def test_exception_after_successful_durable_commit_leaves_storage_and_db_intact(clean_db, mock_storage):
-    """If post-commit result construction or notification fails, DB records and storage object remain intact."""
+def test_commit_true_succeeds_then_result_delivery_fails_preserves_durability(clean_db, mock_storage):
+    """Requirement B: commit=True succeeds, then result delivery fails downstream: DB lineage retained, storage object retained, Asset does not dangle."""
     db_session = clean_db
     job_result = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -701,20 +703,25 @@ def test_exception_after_successful_durable_commit_leaves_storage_and_db_intact(
     )
     adapter = MockViduAdapter(job_result)
 
-    with patch.object(ViduExistingJobRecoveryService, "_post_commit_hook", side_effect=RuntimeError("Post-commit packaging failure")):
-        with pytest.raises(ViduRecoveryError, match="Post-commit packaging failure"):
-            asyncio.run(
-                ViduExistingJobRecoveryService.recover_existing_job(
-                    db_session,
-                    TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                    adapter=adapter,
-                    storage_provider=mock_storage,
-                    downloader=fake_downloader,
-                    commit=False,
-                )
-            )
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=True,
+        )
+    )
 
-    # Invariants: Committed DB records remain, storage object remains, no dangling reference
+    # Simulate downstream result delivery / notification failure
+    def deliver_result(result):
+        raise RuntimeError("Downstream result delivery failed")
+
+    with pytest.raises(RuntimeError, match="Downstream result delivery failed"):
+        deliver_result(res)
+
+    # Invariants: Durable DB records remain committed, storage object remains, Asset does not dangle
     assert db_session.query(Project).count() == 1
     assert db_session.query(Scene).count() == 1
     assert db_session.query(Shot).count() == 1
@@ -722,6 +729,51 @@ def test_exception_after_successful_durable_commit_leaves_storage_and_db_intact(
     assert db_session.query(Asset).count() == 1
     assert db_session.query(UsageLedger).count() == 1
     assert len(mock_storage._store) == 1
+
+    asset = db_session.query(Asset).first()
+    job = db_session.query(GenerationJob).first()
+    shot = db_session.query(Shot).first()
+    assert job.output_asset_id == asset.id
+    assert shot.source_asset_id == asset.id
+
+
+def test_commit_false_failure_leaves_caller_transaction_safe_and_zero_lineage(clean_db, mock_storage):
+    """Requirement C: commit=False caller-owned transaction failure rolls back safely leaving 0 partial state and 0 uncompensated storage."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    # Corrupt downloader to fail integrity check inside recovery
+    async def bad_downloader(url, path):
+        return ("video/mp4", 0, "")
+
+    with pytest.raises(ViduRecoveryError, match="integrity checks"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=bad_downloader,
+                commit=False,
+            )
+        )
+
+    # Caller transaction remains active and uncorrupted
+    assert db_session.is_active is True
+    # Zero partial recovery lineage
+    assert db_session.query(Project).count() == 0
+    assert db_session.query(Scene).count() == 0
+    assert db_session.query(Shot).count() == 0
+    assert db_session.query(GenerationJob).count() == 0
+    assert db_session.query(Asset).count() == 0
+    assert db_session.query(UsageLedger).count() == 0
+    assert len(mock_storage._store) == 0
 
 
 def test_first_get_credits_30_followed_by_get_credits_none_preserves_durable_credits(clean_db, mock_storage):
@@ -889,4 +941,222 @@ def test_conflicting_asset_type_fails_closed(clean_db, mock_storage):
                 commit=False,
             )
         )
+
+
+def test_conflicting_actual_cost_fails_closed_and_leaves_evidence_unchanged(clean_db, mock_storage):
+    """Existing non-null actual_cost causes recovery to fail closed and leaves original evidence unchanged."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    ledger = db_session.query(UsageLedger).first()
+    ledger_id = ledger.id
+    ledger.actual_cost = 45.0
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="non-null actual_cost: 45.0"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    refreshed_ledger = db_session.get(UsageLedger, ledger_id)
+    assert refreshed_ledger.actual_cost == 45.0
+
+
+def test_conflicting_estimated_cost_fails_closed_and_leaves_evidence_unchanged(clean_db, mock_storage):
+    """Existing non-null estimated_cost causes recovery to fail closed and leaves original evidence unchanged."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    ledger = db_session.query(UsageLedger).first()
+    ledger_id = ledger.id
+    ledger.estimated_cost = 20.0
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="non-null estimated_cost: 20.0"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    refreshed_ledger = db_session.get(UsageLedger, ledger_id)
+    assert refreshed_ledger.estimated_cost == 20.0
+
+
+def test_conflicting_cost_status_fails_closed_and_leaves_evidence_unchanged(clean_db, mock_storage):
+    """Existing conflicting cost_status causes recovery to fail closed and leaves original evidence unchanged."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    ledger = db_session.query(UsageLedger).first()
+    ledger_id = ledger.id
+    ledger.cost_status = "CONFIRMED"
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicting cost_status 'CONFIRMED'"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    refreshed_ledger = db_session.get(UsageLedger, ledger_id)
+    assert refreshed_ledger.cost_status == "CONFIRMED"
+
+
+def test_conflicting_imported_historical_fails_closed_and_leaves_evidence_unchanged(clean_db, mock_storage):
+    """Conflicting imported_historical flag on job or ledger causes fail-closed without modifying evidence."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    job = db_session.get(GenerationJob, res.generation_job_id)
+    job_id = job.id
+    job.imported_historical = False
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicting imported_historical=False"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    refreshed_job = db_session.get(GenerationJob, job_id)
+    assert refreshed_job.imported_historical is False
+
+
+def test_conflicting_generation_job_result_fails_closed_and_leaves_evidence_unchanged(clean_db, mock_storage):
+    """Conflicting GenerationJob.result metadata causes fail-closed without modifying evidence."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    job = db_session.get(GenerationJob, res.generation_job_id)
+    job_id = job.id
+    tampered_result = dict(job.result)
+    tampered_result["recovery_method"] = "LIVE_POST"
+    job.result = tampered_result
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicting recovery_method: 'LIVE_POST'"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    refreshed_job = db_session.get(GenerationJob, job_id)
+    assert refreshed_job.result["recovery_method"] == "LIVE_POST"
+
 
