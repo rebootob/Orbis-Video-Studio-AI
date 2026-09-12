@@ -13,31 +13,31 @@ Canonical branch: `main`
 
 ```text
 ================================================================================
-CURRENT / IN-FLIGHT TRUTH (P4-WP020-LIVE-R5-FINAL-GAP1)
+CURRENT / IN-FLIGHT TRUTH (P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE)
 ================================================================================
-P4-WP020-LIVE-R5-VIDU2-RUN1 = PASS / CONSUMED / NEVER RERUN (Run 34569728383)
-P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
-P4-WP020-LIVE-R5-FINAL-GAP1 = IN PROGRESS / EVIDENCE-ONLY / PR OPEN / NOT MERGED
+P4-WP020-LIVE-R5-FINAL-GAP1 = PASS / MERGED / COMPLETE (PR #101, merge commit a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0)
+P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE = IN PROGRESS / DOCS-ONLY / PR OPEN / NOT MERGED
 
-ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-FINAL-GAP1
-CURRENT_GATE = P4-WP020-LIVE-R5-FINAL-GAP1
+ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE
+CURRENT_GATE = P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE
 NEXT_GATE = CHATGPT_INDEPENDENT_REVIEW
 
-AUTHORIZED_BASE_MAIN = 1bdcaff64ab756e7144f45f0af44eca1e1bad731
-BRANCH = ai/p4-wp020-live-r5-final-gap1
-FINAL_GAP1_OWNER_AUTHORIZATION = Issue #63 comment 5642043077
+AUTHORIZED_BASE_MAIN = a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0
+BRANCH = ai/p4-wp020-live-r5-final-gap1-close
+FINAL_GAP1_CLOSE_OWNER_AUTHORIZATION = Issue #63 comment 5645164597
 
-LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
-LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
-PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1
-PREV_COMPLETED_STATUS = PASS / CONSUMED / NEVER RERUN (Run 34569728383)
-PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-CLOSE
-PREV2_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #99, commit 04909d7e1f89af25d7d47615775e496948303fd5)
-PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1
-PREV3_COMPLETED_STATUS = PASS / COMPLETED / NO-PAID (Run 34501285649)
-PREV4_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1 (PR #98)
-PREV5_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE (PR #97)
-PREV6_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP (PR #96)
+LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-FINAL-GAP1
+LAST_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0)
+PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
+PREV_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
+PREV2_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1
+PREV2_COMPLETED_STATUS = PASS / CONSUMED / NEVER RERUN (Run 34569728383)
+PREV3_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-CLOSE
+PREV3_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #99, commit 04909d7e1f89af25d7d47615775e496948303fd5)
+PREV4_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1
+PREV4_COMPLETED_STATUS = PASS / COMPLETED / NO-PAID (Run 34501285649)
+PREV5_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PF1-COR1 (PR #98)
+PREV6_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-PREP-CLOSE (PR #97)
 
 ================================================================================
 CONSUMED RUN1 & NEXT PAID INVARIANTS
@@ -59,17 +59,17 @@ P4-WP020 = ACTIVE / NOT CLOSED
 CORE_V1_RELEASE = NOT DECLARED
 R4 = STOPPED / CONSUMED / NEVER RERUN
 
-FINAL_GAP1_PROVIDER_GENERATION_CALLS = 0
-FINAL_GAP1_PAID_PROVIDER_CALLS = 0
-FINAL_GAP1_VIDU_GENERATION_POSTS = 0
-FINAL_GAP1_PROVIDER_CREDIT_ACTIVITY = 0
-FINAL_GAP1_PAID_FENCE_WRITTEN = false
-FINAL_GAP1_PAID_LIVE_DISPATCH = false
+FINAL_GAP1_CLOSE_PROVIDER_GENERATION_CALLS = 0
+FINAL_GAP1_CLOSE_PAID_PROVIDER_CALLS = 0
+FINAL_GAP1_CLOSE_VIDU_GENERATION_POSTS = 0
+FINAL_GAP1_CLOSE_PROVIDER_CREDIT_ACTIVITY = 0
+FINAL_GAP1_CLOSE_PAID_FENCE_WRITTEN = false
+FINAL_GAP1_CLOSE_PAID_LIVE_DISPATCH = false
 ```
 
 Next Gate Direction:
-- Current in-flight gate: `P4-WP020-LIVE-R5-FINAL-GAP1` (EVIDENCE-ONLY / PR OPEN / IN REVIEW / NOT MERGED).
-- Last merged closure: `P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE` (PASS / MERGED / COMPLETE, PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731).
+- Current in-flight gate: `P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE` (DOCS-ONLY / PR OPEN / IN REVIEW / NOT MERGED).
+- Last merged gate: `P4-WP020-LIVE-R5-FINAL-GAP1` (PASS / MERGED / COMPLETE, PR #101, commit a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0).
 - Executed gate: `P4-WP020-LIVE-R5-VIDU2-RUN1` (PASS / CONSUMED / NEVER RERUN, Run 34569728383).
 - Consumed live runs:
   - `LIVE-20260910-VIDU2-R5` (Run 34569728383): PASS / CONSUMED / NEVER RERUN (1 POST, video present, credits reported 30.0, actual credits consumed UNKNOWN / NOT CONFIRMED).
@@ -82,26 +82,32 @@ Next Gate Direction:
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-FINAL-GAP1 review/merge gate only.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE review/merge gate only.
 
 ```text
-GATE = P4-WP020-LIVE-R5-FINAL-GAP1
-TYPE = EVIDENCE-ONLY / DOCS-ONLY Final UAT & Release Gap Review
-BRANCH = ai/p4-wp020-live-r5-final-gap1
-AUTHORIZED_BASE_MAIN = 1bdcaff64ab756e7144f45f0af44eca1e1bad731
+GATE = P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE
+TYPE = DOCS-ONLY Post-Merge Control Closure Sync
+BRANCH = ai/p4-wp020-live-r5-final-gap1-close
+AUTHORIZED_BASE_MAIN = a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0
 STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OWNER NEXT-GATE DECISION)
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-final-gap1`.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-final-gap1-close`.
 - Verify exact-head CI success.
-- Confirm EVIDENCE-ONLY / DOCS-ONLY scope (zero application code/workflow/test changes, zero provider calls and zero provider/credit activity).
+- Confirm DOCS-ONLY scope (zero application code/workflow/test changes, zero provider calls and zero provider/credit activity).
 - Present for ChatGPT independent review.
 - STOP for explicit Owner decision. DO NOT merge without Owner approval.
 
 ---
 
 ## Historical Work Packages
+
+### Historical FINAL-GAP1 Gap Review Gate (PR #101)
+- Merged to canonical `main` at commit `a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0`.
+- Delivered comprehensive, evidence-reconciled UAT and release gap review across historical runs R4, R5 PRE1, VIDU2 PF1, and VIDU2 RUN1.
+- Accepted gap findings: OpenAI/Gemini execution proven but durable DB/MinIO retention incomplete (PARTIAL / NOT RETAINED); Vidu execution proven but recoverable URL/file NOT PROVEN (PARTIAL / NOT RETAINED); ElevenLabs audio NOT PROVEN (0 calls); downstream live UAT NOT PROVEN (actual Human/Owner approval required); budget criterion #2 PARTIAL (known USD 0.0738; VIDU2 economic impact unconverted); S0/S1 no proven release blocker found in reviewed evidence.
+- Status: `PASS / MERGED / COMPLETE`.
 
 ### Historical VIDU2-RUN1-CLOSE Gate (PR #100)
 - Merged to canonical `main` at commit `1bdcaff64ab756e7144f45f0af44eca1e1bad731`.
