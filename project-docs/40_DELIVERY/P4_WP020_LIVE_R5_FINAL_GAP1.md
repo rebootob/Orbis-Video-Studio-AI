@@ -42,7 +42,7 @@ The purpose is to rigorously reconcile all accepted provider and tooling evidenc
    - Failed R4 Vidu task = `NOT CHARGED` provider-side (BILL1 evidence accepted).
    - VIDU2 RUN1 reported `provider_credits_reported = 30.0`; actual credits consumed = `UNKNOWN / NOT CONFIRMED`.
    - VIDU2 USD cost equivalent is `UNKNOWN / NOT CONVERTED` (no provider-side credit-to-USD conversion rate is accepted into contract).
-   - Net committed USD spend in Orbis tracking at R4 STOP remains `USD 0.0738`, safely below the `USD 1.00` authorization ceiling. Remaining global budget cannot be stated as exactly USD 0.9262 because Vidu credit consumption is unconverted.
+   - Net committed USD spend in Orbis tracking at R4 STOP remains `USD 0.0738`, and there is no evidence that the `USD 1.00` cap was exceeded, but total committed economic cost cannot yet be proven because VIDU2 external credit/USD impact is unresolved. Remaining global budget cannot be stated as exactly USD 0.9262 because Vidu credit consumption is unconverted. Contract Criterion #2 is conservatively classified as **PARTIAL** pending economic reconciliation.
 7. **FINAL-GAP1 Activity:** Zero provider calls, zero credits consumed, and zero spend were caused by `P4-WP020-LIVE-R5-FINAL-GAP1` itself.
 
 ---
@@ -67,12 +67,12 @@ Evaluation against [`P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md`](P4_WP020_LIVE_AUT
 | # | PASS Criterion | Evaluation & Exact Evidence Truth | Status |
 | :-: | :--- | :--- | :---: |
 | **1** | All authorized real-provider calls stay within exact limits (max 6: OpenAI 1, Gemini 1, Vidu 1, ElevenLabs 3) | **INDIVIDUAL AUTHORIZED HISTORICAL CALL LIMITS = RESPECTED** (R4 used 1 OpenAI + 1 Gemini + 1 Vidu attempt; VIDU2 RUN1 used exactly 1 Vidu POST). **ORIGINAL SINGLE LIVE SEQUENCE = NOT COMPLETED** (the continuous 6-call run stopped in R4 and was never completed as an uninterrupted sequence). Accepted historical evidence across runs may be aggregated for review, but execution history is not rewritten. | **PARTIAL** |
-| **2** | Total committed UAT project cost remains <= USD 1.00 | Total committed USD cost recorded in Orbis UAT tracking at R4 STOP is `USD 0.0738`. Failed Vidu was NOT CHARGED provider-side. VIDU2 RUN1 reported 30.0 credits from pre-paid balance (actual credits consumed `UNKNOWN / NOT CONFIRMED`; USD conversion `UNKNOWN / NOT CONVERTED`). Net tracked USD spend is USD 0.0738, well below the USD 1.00 ceiling. Remaining budget cannot be stated as exactly USD 0.9262 due to unconverted Vidu credits. | **PASS** |
+| **2** | Total committed UAT project cost remains <= USD 1.00 | Known Orbis-tracked committed USD is `USD 0.0738` and there is no evidence that the USD 1.00 cap was exceeded, but total committed economic cost cannot yet be proven because VIDU2 external credit/USD impact is unresolved (provider reported 30.0 credits; actual consumed `UNKNOWN / NOT CONFIRMED`; USD equivalent `UNKNOWN / NOT CONVERTED`). Failed R4 Vidu was NOT CHARGED provider-side. Remaining global USD budget cannot be stated exactly. | **PARTIAL** |
 | **3** | Every successful provider result becomes durable Orbis truth with correct lineage | OpenAI story and Gemini image were materialized only in ephemeral runner containers in R4; database and storage were destroyed upon job completion. VIDU2 RUN1 confirmed provider generation and `video_url_present = true`, but the runner did not write to an Orbis DB or S3 storage, and the actual URL was excluded from sanitized artifacts. ElevenLabs was never called. Retained durable Orbis truth with lineage is missing. | **GAP** |
 | **4** | Chargeable events are represented by auditable cost/UsageLedger evidence | R4 committed cost USD 0.0738 is recorded in logs and evidence comments, but queryable database UsageLedger rows were in ephemeral DB. VIDU2 RUN1 credit evidence (30.0 reported) exists in sanitized JSON artifact `10187325740`, but no DB UsageLedger row exists. ElevenLabs has zero evidence. | **PARTIAL** |
 | **5** | No ambiguous provider outcome is silently retried | Strict fail-closed behavior was enforced across all runs. R4 stopped immediately upon Vidu failure. VIDU1 stopped immediately upon HTTP failure. VIDU2 RUN1 executed exactly 1 POST with 0 retries. Zero silent or unsafe retries occurred. | **PASS** |
 | **6** | Downstream Assembly / Subtitle / QC / Approval / Render / Multi-output / .orbis path succeeds with live assets | All downstream capabilities are implemented and pass unit/mock integration tests. However, downstream execution using real provider video/audio assets has NOT been executed. Live UAT strictly requires an actual Human/Owner approval checkpoint. | **GAP** |
-| **7** | No S0/S1 blocker is found | Inspection of repository issues, PRs, and test suites confirms zero open S0 or S1 blockers. All 19 prior WPs (`P0-WP001` through `P4-WP019`) are merged and green. | **PASS** |
+| **7** | No S0/S1 blocker is found | Inspection of reviewed repository issues, PRs, commit history, and test suites confirms NO PROVEN CURRENT S0/S1 RELEASE BLOCKER FOUND IN REVIEWED EVIDENCE. All 19 prior WPs (`P0-WP001` through `P4-WP019`) are merged and green. Criterion #7 is PASS only in the meaning that no S0/S1 blocker was found or proven in the reviewed evidence. | **PASS** |
 | **8** | Owner-observable UAT evidence is retained for final review | Execution artifacts, runner logs, and Issue #63 comment fences are retained. Retained observable deliverables (rendered multi-output video files and exported `.orbis` package derived from real provider assets) are pending downstream execution. | **PARTIAL** |
 
 ---
@@ -138,11 +138,12 @@ Evaluation against [`P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md`](P4_WP020_LIVE_AUT
 
 ## 6. S0 / S1 Defect Status
 
-- Inspection of repository issues, pull requests, and commit history confirms:
-  - Zero open S0 (Critical / Data Loss / Security / Crash) defects.
-  - Zero open S1 (Major / Workflow Blocking) defects.
+- Inspection of reviewed repository issues, pull requests, commit history, and test suites confirms:
+  - NO PROVEN CURRENT S0/S1 RELEASE BLOCKER FOUND IN REVIEWED EVIDENCE.
+  - No S0 (Critical / Data Loss / Security / Crash) blocker was found or proven in the reviewed evidence.
+  - No S1 (Major / Workflow Blocking) blocker was found or proven in the reviewed evidence.
 - All 19 prior Core V1 Work Packages (`P0-WP001` through `P4-WP019`) are merged, tested, and passing CI (`backend-tests`, `frontend-tests`, `fresh-postgres-migrations`).
-- Status: **PASS**.
+- Status: **PASS** (strictly in the meaning that no S0/S1 blocker was found or proven in the reviewed evidence).
 
 ---
 
@@ -162,6 +163,7 @@ Evaluation against [`P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md`](P4_WP020_LIVE_AUT
 - `VIDU2 RUN1` actual credit consumption is **NOT stated as definitely 30 credits** (it is provider-reported evidence only).
 - Remaining global budget is **NOT stated as exactly USD 0.9262** (because Vidu credit consumption is unconverted to USD).
 - Net committed USD spend in Orbis tracking at R4 STOP remains `USD 0.0738`.
+- Known Orbis-tracked committed USD is USD 0.0738 and there is no evidence that the USD 1.00 cap was exceeded, but total committed economic cost cannot yet be proven because VIDU2 external credit/USD impact is unresolved. Contract Criterion #2 is conservatively classified as **PARTIAL** pending reconciliation.
 
 ---
 
@@ -174,9 +176,9 @@ Evaluation against [`P4_WP020_LIVE_AUTHORIZATION_CONTRACT.md`](P4_WP020_LIVE_AUT
 | **Vidu Video Generation** | 1, 5 | **PASS** (P2-WP007) | **PASS** (VIDU2 RUN1) | **PARTIAL** (Task ID only; URL not retained) | **GAP** (No S3/DB Asset) | **GAP** (Probe only) | **YES** | Provider call succeeded; actual video URL/file not recoverable from artifact. No new Vidu generation authorized. |
 | **ElevenLabs Audio (VO/BGM/SFX)**| 1, 3, 4 | **PASS** (P3-WP014) | **GAP** (0 calls) | **GAP** (None) | **GAP** (None) | **GAP** (None) | **YES** | Real provider audio generation never executed. Mock audio does not satisfy contract. |
 | **Downstream Live Pipeline** | 6 | **PASS** (WP015–WP019, WP020-R2) | **GAP** (No live run) | **GAP** (None) | **GAP** (None) | **GAP** (None) | **YES** | Complete code capability proven; live-asset execution and real Human/Owner approval checkpoint pending. |
-| **UAT Budget & Billing Truth** | 2 | **PASS** (P2-WP009) | **PASS** (R4 + RUN1) | **PASS** (Logs, JSON) | **PARTIAL** (Probe JSON only) | **PASS** (Spend <= $1.00) | **NO** | Net tracked USD spend USD 0.0738 <= USD 1.00; credit consumption and billing truth maintained. |
+| **UAT Budget & Billing Truth** | 2 | **PASS** (P2-WP009) | **PASS** (R4 + RUN1) | **PASS** (Logs, JSON) | **PARTIAL** (Probe JSON only) | **PARTIAL** (Unresolved VIDU2 impact) | **NO** | Known Orbis-tracked committed USD is USD 0.0738 and no evidence indicates the USD 1.00 cap was exceeded, but total economic cost is not yet proven due to unresolved VIDU2 credit/USD impact. Remaining global USD budget cannot be stated exactly. |
 | **No Unsafe Retries** | 5 | **PASS** (P2-WP007, WP020 Tooling)| **PASS** (R4, VIDU1, VIDU2)| **PASS** (Logs, Fences)| **PASS** (Fail-closed) | **PASS** (0 retries) | **NO** | Fail-closed behavior proven across all runs; zero duplicate submissions. |
-| **S0/S1 Defect Closure** | 7 | **PASS** (Full Test Suite) | **PASS** (19 WPs) | **PASS** (PR history) | **PASS** (Clean repo) | **PASS** (0 blockers) | **NO** | Zero open S0/S1 defects. |
+| **S0/S1 Defect Closure** | 7 | **PASS** (Full Test Suite) | **PASS** (19 WPs) | **PASS** (PR history) | **PASS** (Clean repo) | **PASS** (No blocker proven) | **NO** | NO PROVEN CURRENT S0/S1 RELEASE BLOCKER FOUND IN REVIEWED EVIDENCE. |
 | **Owner-Observable Deliverables**| 8 | **PASS** (P4-WP018, P4-WP019) | **GAP** (Pending UAT) | **PARTIAL** (Artifacts) | **GAP** (Pending UAT) | **GAP** (Pending UAT) | **YES** | Final multi-output video files and `.orbis` package derived from real provider assets pending downstream run. |
 
 ---
