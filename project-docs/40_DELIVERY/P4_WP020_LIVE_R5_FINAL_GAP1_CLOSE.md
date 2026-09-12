@@ -18,7 +18,11 @@ MERGED_PR: #101
 MERGE_COMMIT: a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0
 REVIEWED_HEAD: 7dfe44ec98d9a40154d9632ed805188fc194fd72
 OWNER_AUTHORIZATION: Issue #63 comment 5642043077
-CHATGPT_REVIEWS: 5184443375, 5185577293
+CHATGPT_REVIEWS:
+  - 5184443375 = CHANGES REQUIRED
+  - 5185577293 = CHANGES REQUIRED
+  - 5185834678 = FINAL PASS / READY FOR EXPLICIT OWNER MERGE DECISION
+FINAL_ACCEPTED_REVIEWED_HEAD_PR101: 7dfe44ec98d9a40154d9632ed805188fc194fd72
 
 OPENAI_STATUS: PARTIAL / NOT RETAINED (Real provider execution PROVEN in R4; ephemeral DB destroyed)
 GEMINI_STATUS: PARTIAL / NOT RETAINED (Real provider execution PROVEN in R4; ephemeral MinIO destroyed)
@@ -72,7 +76,7 @@ NEXT_PAID_LIVE_EXECUTION: NONE / NOT AUTHORIZED
 
 Following the merge of PR #100 (`P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE`) to canonical `main` at commit `1bdcaff64ab756e7144f45f0af44eca1e1bad731`, Owner authorized `P4-WP020-LIVE-R5-FINAL-GAP1` in Issue #63 comment `5642043077` to conduct an evidence-only review reconciling all historical execution telemetry, provider proofs, and release-blocking gaps.
 
-PR #101 was reviewed under ChatGPT Reviews `5184443375` and `5185577293`, incorporating rigorous evidence standards across 10 review points and conservative budget/S0-S1 classifications, and merged to canonical `main` at commit `a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0`.
+PR #101 was reviewed under ChatGPT Reviews `5184443375` (CHANGES REQUIRED), `5185577293` (CHANGES REQUIRED), and `5185834678` (FINAL PASS / READY FOR EXPLICIT OWNER MERGE DECISION at accepted reviewed HEAD `7dfe44ec98d9a40154d9632ed805188fc194fd72`), incorporating rigorous evidence standards across 10 review points and conservative budget/S0-S1 classifications, and merged to canonical `main` at commit `a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0`. Neither `5184443375` nor `5185577293` were PASS reviews.
 
 Owner subsequently authorized this control sync gate `P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE` in Issue #63 comment `5645164597` to synchronize control documentation across the repository.
 
@@ -112,15 +116,19 @@ Owner subsequently authorized this control sync gate `P4-WP020-LIVE-R5-FINAL-GAP
 5. **Budget & Billing Truth:**
    - Known Orbis-tracked committed USD cost at R4 STOP = `USD 0.0738` (OpenAI + Gemini).
    - Failed R4 Vidu task = `NOT CHARGED` provider-side (BILL1 evidence accepted).
-   - VIDU2 RUN1 reported `30.0` credits against pre-paid balance (actual credits consumed: `UNKNOWN / NOT CONFIRMED`; USD conversion: `UNKNOWN / NOT CONVERTED`).
-   - Contract Criterion #2 (Total committed UAT project cost <= USD 1.00) is conservatively classified as **PARTIAL** pending economic reconciliation. There is no evidence the USD 1.00 cap was exceeded, but total economic cost cannot yet be proven. Remaining global budget cannot be stated exactly.
+   - VIDU2 RUN1 billing status:
+     - `VIDU2_PROVIDER_CREDITS_REPORTED = 30.0`
+     - `VIDU2_ACTUAL_CREDITS_CONSUMED = UNKNOWN / NOT CONFIRMED`
+     - `VIDU2_USD_EQUIVALENT = UNKNOWN / NOT CONVERTED`
+   - Contract Criterion #2 (Total committed UAT project cost <= USD 1.00) is conservatively classified as **PARTIAL** pending economic reconciliation. There is no evidence the USD 1.00 cap was exceeded, but total economic cost cannot yet be proven. No claim is made that exactly 30 credits were deducted, that prepaid balance was definitely consumed, that USD cost was 0, or that remaining budget can be stated exactly. Budget Criterion #2 remains PARTIAL.
 
 6. **Defect Status:**
    - **NO PROVEN CURRENT S0/S1 RELEASE BLOCKER FOUND IN REVIEWED EVIDENCE**.
    - Contract Criterion #7 is **PASS** only in the meaning that no S0/S1 blocker was found or proven in the reviewed evidence.
 
-7. **Zero Activity Invariants:**
-   - Zero provider API calls, zero credits consumed, zero spend added, and zero workflow dispatches were caused by `P4-WP020-LIVE-R5-FINAL-GAP1` or `P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE`.
+7. **Zero Activity Invariants (Scope of Zero Activity):**
+   - Statements of zero provider API calls, zero credits consumed, zero spend added, and zero workflow dispatches explicitly define activity caused by `P4-WP020-LIVE-R5-FINAL-GAP1-CLOSE` itself (and `P4-WP020-LIVE-R5-FINAL-GAP1` where cited).
+   - These zero-activity statements refer strictly to these gap review and documentation closure gates and do NOT imply that historical VIDU2 consumption was zero.
 
 ---
 
@@ -140,8 +148,8 @@ Upon completion and merge of this closure PR:
 ## 4. Absolute Exclusions & Invariants
 
 During and following this closure sync:
-- Zero provider API calls (OpenAI, Gemini, Vidu, ElevenLabs = 0).
+- Zero provider API calls (OpenAI, Gemini, Vidu, ElevenLabs = 0) caused by this closure gate.
 - Zero workflow dispatches.
-- Zero credits consumed; zero spend added.
+- Zero credits consumed; zero spend added by this closure gate (does not negate historical VIDU2 consumption).
 - Zero code modifications outside `project-docs/`.
 - Zero next-gate execution without separate explicit Owner authorization.
