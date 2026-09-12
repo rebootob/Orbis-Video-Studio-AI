@@ -93,6 +93,7 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 | P4-WP020 LIVE R5 VIDU2 PF1 Workflow Registration Corrective | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_COR1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_COR1.md) |
 | P4-WP020 LIVE R5 VIDU2 PF1 Post-Run Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_PF1_CLOSE.md) |
 | P4-WP020 LIVE R5 VIDU2 RUN1 Post-Run Control Closure | [`../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_RUN1_CLOSE.md`](../40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_RUN1_CLOSE.md) |
+| P4-WP020 LIVE R5 FINAL-GAP1 Review | [`../40_DELIVERY/P4_WP020_LIVE_R5_FINAL_GAP1.md`](../40_DELIVERY/P4_WP020_LIVE_R5_FINAL_GAP1.md) |
 | WP Acceptance Criteria | [`../40_DELIVERY/ACCEPTANCE_CRITERIA.md`](../40_DELIVERY/ACCEPTANCE_CRITERIA.md) |
 | Test / Provider Mock / UAT Strategy | [`../40_DELIVERY/TEST_UAT_STRATEGY.md`](../40_DELIVERY/TEST_UAT_STRATEGY.md) |
 | Risk Register | [`../40_DELIVERY/RISKS_ISSUES.md`](../40_DELIVERY/RISKS_ISSUES.md) |
@@ -101,9 +102,9 @@ Product-wide locks currently include Multi-Project, Full History Retention, Auto
 
 P4-WP020 remains active and Owner-gated. R1/R2/R3/R4 are consumed immutable live histories. R4 stopped at Vidu after OpenAI and Gemini succeeded. `P4-WP020-LIVE-R4-C1`, C1-CLOSE, C1-CLOSE-R1, and BILL1-CLOSE are complete. P4-WP020-LIVE-R5-PRE1 and its closure gates are complete with zero provider generation calls. P4-WP020-LIVE-R5-VIDU1-PREP delivers dedicated 1-call probe tooling. P4-WP020-LIVE-R5-VIDU1-COR1 corrected workflow comments pagination. Live probe run `34423580310` was consumed (1 POST, HTTP_ERROR, credits UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU1-C1` delivers safe HTTP failure diagnostic metadata and request contract verification with zero provider calls.
 
-`P4-WP020-LIVE-R5-VIDU2-PF1-CLOSE` is complete and merged via PR #99 at commit `04909d7e1f89af25d7d47615775e496948303fd5`. `P4-WP020-LIVE-R5-VIDU2-RUN1` live execution succeeded under run `34569728383` (`PASS / CONSUMED / NEVER RERUN`, 1 POST, video URL present, provider credits reported: 30.0, actual credits consumed: UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE` records post-run control closure. Canonical post-merge state is `ACTIVE_WORK_PACKAGE = NONE`, `NEXT_GATE = OWNER DECISION REQUIRED`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1`. Consumed runs `34423580310` (VIDU1) and `34569728383` (VIDU2) are permanently consumed and never rerun. No next paid/live execution is authorized.
+`P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE` is complete and merged via PR #100 at commit `1bdcaff64ab756e7144f45f0af44eca1e1bad731`. `P4-WP020-LIVE-R5-VIDU2-RUN1` live execution succeeded under run `34569728383` (`PASS / CONSUMED / NEVER RERUN`, 1 POST, video URL present, provider credits reported: 30.0, actual credits consumed: UNKNOWN / NOT CONFIRMED). `P4-WP020-LIVE-R5-FINAL-GAP1` executes evidence-only UAT and release gap review. Current active state is `ACTIVE_WORK_PACKAGE = P4-WP020-LIVE-R5-FINAL-GAP1`, `CURRENT_GATE = P4-WP020-LIVE-R5-FINAL-GAP1`, `NEXT_GATE = CHATGPT_INDEPENDENT_REVIEW`, `LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE`, and `PREV_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1`. Consumed runs `34423580310` (VIDU1) and `34569728383` (VIDU2) are permanently consumed and never rerun. No next paid/live execution is authorized.
 
-Closure authorized base main is `04909d7e1f89af25d7d47615775e496948303fd5`. Canonical main must be fresh-fetched from repository truth.
+Authorized base main is `1bdcaff64ab756e7144f45f0af44eca1e1bad731`. Canonical main must be fresh-fetched from repository truth.
 
 ---
 
