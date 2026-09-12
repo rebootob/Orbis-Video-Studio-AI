@@ -254,15 +254,103 @@ class ViduExistingJobRecoveryService:
         # Check if already fully materialized and idempotent
         job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{provider_job_id}")
         asset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_id}")
+        project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{provider_job_id}")
+        scene_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/scene/{provider_job_id}/1")
+        shot_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/shot/{provider_job_id}/1")
+        ledger_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/ledger/{provider_job_id}")
+
         existing_asset = db.get(Asset, asset_id)
         existing_job = db.get(GenerationJob, job_id)
-        if (
-            existing_asset
-            and existing_job
-            and existing_job.output_asset_id == existing_asset.id
-        ):
-            logger.info("Provider job %s already durably materialized", provider_job_id)
-            shot = db.get(Shot, existing_job.shot_id)
+        existing_project = db.get(Project, project_id)
+        existing_scene = db.get(Scene, scene_id)
+        existing_shot = db.get(Shot, shot_id)
+        existing_ledger = db.get(UsageLedger, ledger_id)
+
+        if existing_asset and existing_job:
+            # 1. Deterministic relationship validation (Fail closed on conflicting state)
+            if existing_job.provider_job_id != provider_job_id:
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} has provider_job_id {existing_job.provider_job_id} != {provider_job_id}"
+                )
+            if existing_job.output_asset_id != existing_asset.id:
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} output_asset_id conflicts with Asset {existing_asset.id}"
+                )
+            if existing_asset.project_id != project_id:
+                raise ViduConflictingLineageError(
+                    f"Existing Asset {existing_asset.id} project_id {existing_asset.project_id} conflicts with expected {project_id}"
+                )
+            if existing_project and existing_scene and existing_scene.project_id != existing_project.id:
+                raise ViduConflictingLineageError(
+                    f"Existing Scene {existing_scene.id} project_id {existing_scene.project_id} != {existing_project.id}"
+                )
+            if existing_scene and existing_shot and existing_shot.scene_id != existing_scene.id:
+                raise ViduConflictingLineageError(
+                    f"Existing Shot {existing_shot.id} scene_id {existing_shot.scene_id} != {existing_scene.id}"
+                )
+            if existing_job.shot_id != shot_id:
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} shot_id {existing_job.shot_id} != {shot_id}"
+                )
+
+            # 2. Repair non-conflicting incomplete fencing/audit state inside transaction
+            needs_flush = False
+            if not existing_job.imported_historical or not existing_job.execution_disabled:
+                existing_job.imported_historical = True
+                existing_job.execution_disabled = True
+                needs_flush = True
+
+            if existing_shot and existing_shot.source_asset_id != existing_asset.id:
+                existing_shot.source_asset_id = existing_asset.id
+                existing_shot.updated_at = _utc_now()
+                needs_flush = True
+
+            expected_result = {
+                "provider_job_id": provider_job_id,
+                "recovery_method": "GET_ONLY_EXISTING_JOB",
+                "new_generation_posts": 0,
+                "provider_status": job_result.status or "COMPLETED",
+                "provider_credits_reported": job_result.provider_credits,
+                "actual_credits_consumed": "UNKNOWN / NOT CONFIRMED",
+                "usd_equivalent": "UNKNOWN / NOT CONVERTED",
+                "imported_historical": True,
+                "execution_disabled": True,
+            }
+            if existing_job.result != expected_result:
+                existing_job.result = expected_result
+                needs_flush = True
+
+            if not existing_ledger:
+                ledger_entry = UsageLedger(
+                    id=ledger_id,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    job_id=job_id,
+                    provider="vidu",
+                    operation="historical_recovery_get",
+                    model="viduq2",
+                    estimated_cost=None,
+                    actual_cost=None,
+                    currency="USD",
+                    cost_status="UNKNOWN",
+                    provider_event_id=provider_job_id,
+                    idempotency_key=f"vidu-recovery-{provider_job_id}",
+                    description="Historical VIDU2 recovery (GET-only existing job 995880130565918720; zero spend added)",
+                    imported_historical=True,
+                )
+                db.add(ledger_entry)
+                needs_flush = True
+            elif existing_ledger.cost_status != "UNKNOWN" or not existing_ledger.imported_historical:
+                existing_ledger.cost_status = "UNKNOWN"
+                existing_ledger.imported_historical = True
+                needs_flush = True
+
+            if needs_flush:
+                db.flush()
+                if commit:
+                    db.commit()
+
+            logger.info("Provider job %s already durably materialized and verified", provider_job_id)
             return ViduRecoveryResult(
                 provider_job_id=provider_job_id,
                 status="COMPLETED",
@@ -275,9 +363,9 @@ class ViduExistingJobRecoveryService:
                 content_type=existing_asset.content_type,
                 file_size_bytes=existing_asset.file_size_bytes,
                 checksum_sha256=existing_asset.checksum_sha256,
-                provider_credits_reported=30.0,
+                provider_credits_reported=job_result.provider_credits,
                 posts_attempted=0,
-                get_calls_attempted=0,
+                get_calls_attempted=1,
                 imported_historical=True,
                 execution_disabled=True,
                 idempotent_reused=True,
@@ -374,7 +462,7 @@ class ViduExistingJobRecoveryService:
                     estimated_cost=None,
                     actual_cost=None,
                     currency="USD",
-                    cost_status="CONFIRMED",
+                    cost_status="UNKNOWN",
                     provider_event_id=provider_job_id,
                     idempotency_key=f"vidu-recovery-{provider_job_id}",
                     description="Historical VIDU2 recovery (GET-only existing job 995880130565918720; zero spend added)",
@@ -407,18 +495,29 @@ class ViduExistingJobRecoveryService:
             )
 
         except Exception as exc:
-            savepoint.rollback()
-            # Clean up newly uploaded object to prevent orphaned storage
+            # 1. Safely rollback DB state (savepoint if still active, else db transaction)
+            try:
+                if savepoint.is_active:
+                    savepoint.rollback()
+                else:
+                    db.rollback()
+            except Exception as rb_err:
+                logger.warning("DB rollback failed during recovery cleanup: %s", rb_err)
+
+            # 2. Storage cleanup must execute even if savepoint/db rollback failed
             if uploaded_new_object and uploaded_bucket and uploaded_key:
                 try:
                     storage.delete_object(uploaded_bucket, uploaded_key)
-                except Exception:
-                    pass
+                except Exception as del_err:
+                    logger.warning("Storage compensation failed for %s/%s: %s", uploaded_bucket, uploaded_key, del_err)
+
             if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
                 except Exception:
                     pass
+
+            # 3. Never mask the original failure
             if isinstance(exc, ViduRecoveryError):
                 raise
             raise ViduRecoveryError(f"Video recovery failed: {exc}") from exc

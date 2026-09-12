@@ -13,6 +13,7 @@ from app.models.shot import Shot
 from app.models.usage_ledger import UsageLedger
 from app.providers.base import IVideoGenerationProviderAdapter, ProviderJobResult
 from app.services.budget import BudgetService
+from app.services.job_dispatch import JobDispatchService
 from app.services.storage.mock import InMemoryObjectStorageProvider
 from app.services.vidu_recovery import (
     TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -137,32 +138,47 @@ def test_recovered_job_is_fenced_and_cannot_be_claimed_or_dispatched(clean_db, m
     assert job.execution_disabled is True
     assert job.status == "COMPLETED"
 
-    # Queue claiming fence: eligible query excludes imported_historical
+    # Canonical claiming fence: claim_next_job excludes execution_disabled / imported_historical
+    claimed = JobDispatchService.claim_next_job(db_session, worker_id="test-worker")
+    assert claimed is None
+
+    # Canonical queue querying fence: eligible query excludes imported_historical and execution_disabled
     eligible_jobs = (
         db_session.query(GenerationJob)
         .filter(
             GenerationJob.id == job.id,
             GenerationJob.imported_historical.isnot(True),
+            GenerationJob.execution_disabled.isnot(True),
         )
         .all()
     )
     assert len(eligible_jobs) == 0
 
-    # Query active production jobs fence: active jobs exclude imported_historical
+    # Active production jobs query fence: excludes imported_historical and execution_disabled
     active_production_jobs = (
         db_session.query(GenerationJob)
         .filter(
             GenerationJob.shot_id == job.shot_id,
             GenerationJob.status.in_(["PENDING", "CLAIMED", "PROCESSING", "POLLING"]),
             GenerationJob.imported_historical.isnot(True),
+            GenerationJob.execution_disabled.isnot(True),
         )
         .all()
     )
     assert len(active_production_jobs) == 0
 
+    # Polling status fence: poll_job_status rejects imported_historical / execution_disabled
+    can_poll = (
+        job.status in ["PENDING", "CLAIMED", "PROCESSING", "POLLING"]
+        and bool(job.provider_job_id)
+        and not job.imported_historical
+        and not job.execution_disabled
+    )
+    assert can_poll is False
+
 
 # =========================================================================
-# 3. Transaction Atomicity / No Ghost Lineage on Failures
+# 3. Transaction Atomicity / Clean Rollback (Zero Ghost Lineage)
 # =========================================================================
 
 @pytest.mark.parametrize(
@@ -226,32 +242,28 @@ def test_failure_paths_leave_zero_ghost_db_or_storage_artifacts(
     assert db_session.query(UsageLedger).count() == 0
 
 
-def test_storage_or_download_failure_rolls_back_cleanly_and_cleans_object(clean_db, mock_storage):
-    """If download fails, DB transaction rolls back and 0 objects are orphaned."""
+def test_unsafe_private_url_leaves_zero_lineage_and_storage(clean_db, mock_storage):
+    """Private / loopback / SSRF URLs are rejected leaving 0 DB records and 0 storage objects."""
     db_session = clean_db
     job_result = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
-        video_url="https://video.example.invalid/fail_download.mp4",
+        video_url="https://127.0.0.1/private_video.mp4",
     )
     adapter = MockViduAdapter(job_result)
 
-    async def failing_downloader(url, target_file):
-        raise RuntimeError("Network download interrupted")
-
-    with pytest.raises(ViduRecoveryError, match="Network download interrupted"):
+    with pytest.raises(ViduRecoveryError, match="URL validation failed"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db_session,
                 TARGET_HISTORICAL_PROVIDER_JOB_ID,
                 adapter=adapter,
                 storage_provider=mock_storage,
-                downloader=failing_downloader,
+                downloader=None,  # Trigger real URL validation
                 commit=False,
             )
         )
 
-    # Verify complete rollback
     assert db_session.query(Project).count() == 0
     assert db_session.query(Scene).count() == 0
     assert db_session.query(Shot).count() == 0
@@ -260,12 +272,81 @@ def test_storage_or_download_failure_rolls_back_cleanly_and_cleans_object(clean_
     assert db_session.query(UsageLedger).count() == 0
 
 
+def test_storage_upload_failure_rolls_back_cleanly(clean_db):
+    """If storage upload fails, DB rolls back and 0 DB records remain."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    class FailingStorage(InMemoryObjectStorageProvider):
+        def upload_file_object(self, *args, **kwargs):
+            raise IOError("S3 network write timeout")
+
+    failing_storage = FailingStorage()
+
+    with pytest.raises(ViduRecoveryError, match="S3 network write timeout"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=failing_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    assert db_session.query(Project).count() == 0
+    assert db_session.query(Scene).count() == 0
+    assert db_session.query(Shot).count() == 0
+    assert db_session.query(GenerationJob).count() == 0
+    assert db_session.query(Asset).count() == 0
+    assert db_session.query(UsageLedger).count() == 0
+
+
+def test_db_commit_failure_after_new_upload_cleans_new_storage_object(clean_db, mock_storage):
+    """If upload succeeds but commit fails, storage compensation deletes the new object and rolls back DB."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with patch.object(db_session, "commit", side_effect=RuntimeError("Database lock conflict on commit")):
+        with pytest.raises(ViduRecoveryError, match="Database lock conflict on commit"):
+            asyncio.run(
+                ViduExistingJobRecoveryService.recover_existing_job(
+                    db_session,
+                    TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                    adapter=adapter,
+                    storage_provider=mock_storage,
+                    downloader=fake_downloader,
+                    commit=True,
+                )
+            )
+
+    # Invariants: 0 DB records, 0 orphaned objects in storage
+    assert db_session.query(Project).count() == 0
+    assert db_session.query(Scene).count() == 0
+    assert db_session.query(Shot).count() == 0
+    assert db_session.query(GenerationJob).count() == 0
+    assert db_session.query(Asset).count() == 0
+    assert db_session.query(UsageLedger).count() == 0
+    assert len(mock_storage._store) == 0
+
+
 # =========================================================================
 # 4. Durable Provider & Billing Audit Truth (Zero Spend Added)
 # =========================================================================
 
 def test_durable_audit_truth_and_budget_isolation(clean_db, mock_storage):
-    """Proves conservative audit metadata, 0 added spend, and idempotency."""
+    """Proves conservative audit metadata, cost_status=UNKNOWN, 0 added spend, and idempotency."""
     db_session = clean_db
     job_result = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -286,6 +367,9 @@ def test_durable_audit_truth_and_budget_isolation(clean_db, mock_storage):
         )
     )
 
+    assert res1.get_calls_attempted == 1
+    assert res1.provider_credits_reported == 30.0
+
     # Verify Ledger record
     ledger_entries = (
         db_session.query(UsageLedger)
@@ -297,7 +381,7 @@ def test_durable_audit_truth_and_budget_isolation(clean_db, mock_storage):
     assert entry.imported_historical is True
     assert entry.actual_cost is None
     assert entry.estimated_cost is None
-    assert entry.cost_status == "CONFIRMED"
+    assert entry.cost_status == "UNKNOWN"
 
     # Committed project cost must be exactly 0.0
     committed = BudgetService.get_project_committed_cost(db_session, res1.project_id)
@@ -316,6 +400,9 @@ def test_durable_audit_truth_and_budget_isolation(clean_db, mock_storage):
     )
     assert res2.asset_id == res1.asset_id
     assert res2.idempotent_reused is True
+    # Accurate GET count
+    assert res2.get_calls_attempted == 1
+    assert len(adapter.check_status_calls) == 2
 
     # Invariant: still only 1 ledger entry, 0 new spend
     assert (
@@ -327,19 +414,110 @@ def test_durable_audit_truth_and_budget_isolation(clean_db, mock_storage):
     assert BudgetService.get_project_committed_cost(db_session, res1.project_id) == 0.0
 
 
+def test_idempotent_path_with_missing_provider_credits_retains_none(clean_db, mock_storage):
+    """When provider omits credits, provider_credits_reported remains None, never hardcoded."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=None,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res1 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res1.provider_credits_reported is None
+
+    res2 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res2.provider_credits_reported is None
+    assert res2.idempotent_reused is True
+
+
+def test_idempotent_audit_evidence_repair(clean_db, mock_storage):
+    """Non-conflicting incomplete fencing or audit state is safely repaired during idempotent recovery."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res1 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    # Intentionally degrade non-conflicting fields
+    job = db_session.get(GenerationJob, res1.generation_job_id)
+    job.imported_historical = False
+    job.execution_disabled = False
+    shot = db_session.get(Shot, res1.shot_id)
+    shot.source_asset_id = None
+    ledger = db_session.query(UsageLedger).first()
+    db_session.delete(ledger)
+    db_session.flush()
+
+    # Second recovery pass repairs the missing audit/fencing state
+    res2 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    repaired_job = db_session.get(GenerationJob, res2.generation_job_id)
+    assert repaired_job.imported_historical is True
+    assert repaired_job.execution_disabled is True
+    repaired_shot = db_session.get(Shot, res2.shot_id)
+    assert repaired_shot.source_asset_id == res2.asset_id
+    repaired_ledger = db_session.query(UsageLedger).first()
+    assert repaired_ledger is not None
+    assert repaired_ledger.cost_status == "UNKNOWN"
+    assert repaired_ledger.imported_historical is True
+
+
 # =========================================================================
 # 5. Lineage Integrity (Fail Closed on Conflicts)
 # =========================================================================
 
-def test_conflicting_lineage_fails_closed(clean_db, mock_storage):
-    """Existing Scene/Shot with mismatched project_id/scene_id fails closed without silent mutation."""
+def test_conflicting_lineage_scene_project_id_fails_closed(clean_db, mock_storage):
+    """Existing Scene with mismatched project_id fails closed without silent mutation."""
     db_session = clean_db
     other_project_id = uuid.uuid4()
     other_project = Project(id=other_project_id, title="Other Project", video_mode="STORY")
     db_session.add(other_project)
     db_session.flush()
 
-    # Pre-seed a scene tied to the other project but with our deterministic ID
     scene_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/scene/{TARGET_HISTORICAL_PROVIDER_JOB_ID}/1")
     conflicting_scene = Scene(id=scene_id, project_id=other_project_id, scene_number=1)
     db_session.add(conflicting_scene)
@@ -353,6 +531,143 @@ def test_conflicting_lineage_fails_closed(clean_db, mock_storage):
     adapter = MockViduAdapter(job_result)
 
     with pytest.raises(ViduConflictingLineageError, match="conflicts with"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+
+def test_conflicting_lineage_shot_scene_id_fails_closed(clean_db, mock_storage):
+    """Existing Shot with mismatched scene_id fails closed without silent mutation."""
+    db_session = clean_db
+    project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    other_scene_id = uuid.uuid4()
+
+    shot_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/shot/{TARGET_HISTORICAL_PROVIDER_JOB_ID}/1")
+    conflicting_shot = Shot(id=shot_id, scene_id=other_scene_id, shot_number=1, shot_type="VIDEO")
+    db_session.add(conflicting_shot)
+    db_session.flush()
+
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicts with"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+
+def test_conflicting_generation_job_provider_id_fails_closed(clean_db, mock_storage):
+    """Existing GenerationJob with mismatched provider_job_id fails closed."""
+    db_session = clean_db
+    job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    asset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_id}")
+    project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    shot_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/shot/{TARGET_HISTORICAL_PROVIDER_JOB_ID}/1")
+
+    job = GenerationJob(
+        id=job_id,
+        shot_id=shot_id,
+        job_type="VIDEO",
+        provider_name="vidu",
+        provider_job_id="OTHER_PROVIDER_JOB_ID",
+        output_asset_id=asset_id,
+        status="COMPLETED",
+    )
+    asset = Asset(
+        id=asset_id,
+        project_id=project_id,
+        name="Recovered",
+        original_filename="rec.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=100,
+        checksum_sha256="abc",
+        storage_bucket="orbis-assets",
+        storage_key="test",
+    )
+    db_session.add(job)
+    db_session.add(asset)
+    db_session.flush()
+
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with pytest.raises(ViduConflictingLineageError, match="has provider_job_id"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+
+def test_conflicting_asset_project_id_fails_closed(clean_db, mock_storage):
+    """Existing Asset with mismatched project_id fails closed."""
+    db_session = clean_db
+    job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    asset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_id}")
+    other_project_id = uuid.uuid4()
+    shot_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/shot/{TARGET_HISTORICAL_PROVIDER_JOB_ID}/1")
+
+    job = GenerationJob(
+        id=job_id,
+        shot_id=shot_id,
+        job_type="VIDEO",
+        provider_name="vidu",
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        output_asset_id=asset_id,
+        status="COMPLETED",
+    )
+    asset = Asset(
+        id=asset_id,
+        project_id=other_project_id,
+        name="Recovered",
+        original_filename="rec.mp4",
+        asset_type="VIDEO",
+        content_type="video/mp4",
+        file_size_bytes=100,
+        checksum_sha256="abc",
+        storage_bucket="orbis-assets",
+        storage_key="test",
+    )
+    db_session.add(job)
+    db_session.add(asset)
+    db_session.flush()
+
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicts with expected"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db_session,
