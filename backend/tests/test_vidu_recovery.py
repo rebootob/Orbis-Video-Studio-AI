@@ -667,7 +667,17 @@ def test_conflicting_asset_project_id_fails_closed(clean_db, mock_storage):
     )
     adapter = MockViduAdapter(job_result)
 
-    with pytest.raises(ViduConflictingLineageError, match="conflicts with expected"):
+def test_returned_provider_job_id_mismatch_fails_closed(clean_db, mock_storage):
+    """If provider returns mismatched provider_job_id, recovery fails closed."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id="DIFFERENT_RETURNED_ID",
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with pytest.raises(ViduConflictingLineageError, match="mismatched provider_job_id"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db_session,
@@ -678,3 +688,205 @@ def test_conflicting_asset_project_id_fails_closed(clean_db, mock_storage):
                 commit=False,
             )
         )
+
+
+def test_exception_after_successful_durable_commit_leaves_storage_and_db_intact(clean_db, mock_storage):
+    """If post-commit result construction or notification fails, DB records and storage object remain intact."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    with patch.object(ViduExistingJobRecoveryService, "_post_commit_hook", side_effect=RuntimeError("Post-commit packaging failure")):
+        with pytest.raises(ViduRecoveryError, match="Post-commit packaging failure"):
+            asyncio.run(
+                ViduExistingJobRecoveryService.recover_existing_job(
+                    db_session,
+                    TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                    adapter=adapter,
+                    storage_provider=mock_storage,
+                    downloader=fake_downloader,
+                    commit=False,
+                )
+            )
+
+    # Invariants: Committed DB records remain, storage object remains, no dangling reference
+    assert db_session.query(Project).count() == 1
+    assert db_session.query(Scene).count() == 1
+    assert db_session.query(Shot).count() == 1
+    assert db_session.query(GenerationJob).count() == 1
+    assert db_session.query(Asset).count() == 1
+    assert db_session.query(UsageLedger).count() == 1
+    assert len(mock_storage._store) == 1
+
+
+def test_first_get_credits_30_followed_by_get_credits_none_preserves_durable_credits(clean_db, mock_storage):
+    """If first recovery records credits=30.0, a later idempotent GET with credits=None preserves retained 30.0."""
+    db_session = clean_db
+    job_result_with_credits = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter1 = MockViduAdapter(job_result_with_credits)
+
+    res1 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter1,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res1.provider_credits_reported == 30.0
+
+    # Second recovery where provider omits credits
+    job_result_without_credits = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=None,
+    )
+    adapter2 = MockViduAdapter(job_result_without_credits)
+
+    res2 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter2,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res2.idempotent_reused is True
+    # Retained credit evidence is preserved
+    assert res2.provider_credits_reported == 30.0
+    job = db_session.get(GenerationJob, res2.generation_job_id)
+    assert job.result["provider_credits_reported"] == 30.0
+
+
+def test_no_credit_history_remains_none_when_credits_were_never_reported(clean_db, mock_storage):
+    """If credits were never reported, credits remain None across repeated idempotent recovery."""
+    db_session = clean_db
+    job_result_none = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=None,
+    )
+    adapter = MockViduAdapter(job_result_none)
+
+    res1 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res1.provider_credits_reported is None
+
+    res2 = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+    assert res2.provider_credits_reported is None
+    job = db_session.get(GenerationJob, res2.generation_job_id)
+    assert job.result["provider_credits_reported"] is None
+
+
+def test_conflicting_usage_ledger_bindings_fail_closed(clean_db, mock_storage):
+    """Conflicting UsageLedger fields cause idempotent recovery to fail closed."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    # Initial successful recovery
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    ledger = db_session.query(UsageLedger).first()
+    # Tamper with provider binding to trigger conflict
+    ledger.provider = "other_provider"
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="provider 'other_provider' != 'vidu'"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+
+def test_conflicting_asset_type_fails_closed(clean_db, mock_storage):
+    """Conflicting Asset asset_type causes idempotent recovery to fail closed."""
+    db_session = clean_db
+    job_result = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://video.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    adapter = MockViduAdapter(job_result)
+
+    res = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db_session,
+            TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=adapter,
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=False,
+        )
+    )
+
+    asset = db_session.get(Asset, res.asset_id)
+    asset.asset_type = "AUDIO"
+    db_session.flush()
+
+    with pytest.raises(ViduConflictingLineageError, match="asset_type 'AUDIO' != 'VIDEO'"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+

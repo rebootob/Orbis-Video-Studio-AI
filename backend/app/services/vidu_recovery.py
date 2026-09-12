@@ -101,6 +101,11 @@ class ViduRecoveryResult:
 
 class ViduExistingJobRecoveryService:
     @classmethod
+    def _post_commit_hook(cls, result: ViduRecoveryResult) -> None:
+        """Extension point for post-commit actions (e.g. event publishing)."""
+        pass
+
+    @classmethod
     def validate_authorized_job_id(cls, provider_job_id: str) -> None:
         """Enforce strict bounding to the exact authorized historical provider job ID."""
         if provider_job_id != TARGET_HISTORICAL_PROVIDER_JOB_ID:
@@ -237,6 +242,13 @@ class ViduExistingJobRecoveryService:
         vidu_adapter = adapter or ViduProviderAdapter()
         job_result: ProviderJobResult = await vidu_adapter.check_job_status(provider_job_id)
 
+        # Validate returned provider_job_id if present
+        if job_result.provider_job_id and job_result.provider_job_id != TARGET_HISTORICAL_PROVIDER_JOB_ID:
+            raise ViduConflictingLineageError(
+                f"Provider returned mismatched provider_job_id '{job_result.provider_job_id}', "
+                f"expected '{TARGET_HISTORICAL_PROVIDER_JOB_ID}'"
+            )
+
         # Step 3: Validate provider response strictly
         if job_result.status == "FAILED":
             if job_result.provider_error_code in ("TASK_NOT_FOUND", "NOT_FOUND") or job_result.status_code == 404:
@@ -268,18 +280,42 @@ class ViduExistingJobRecoveryService:
 
         if existing_asset and existing_job:
             # 1. Deterministic relationship validation (Fail closed on conflicting state)
+            if existing_job.provider_name != "vidu":
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} provider_name '{existing_job.provider_name}' != 'vidu'"
+                )
             if existing_job.provider_job_id != provider_job_id:
                 raise ViduConflictingLineageError(
                     f"Existing GenerationJob {existing_job.id} has provider_job_id {existing_job.provider_job_id} != {provider_job_id}"
+                )
+            if existing_job.job_type != "VIDEO":
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} job_type '{existing_job.job_type}' != 'VIDEO'"
+                )
+            if existing_job.status != "COMPLETED":
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} status '{existing_job.status}' != 'COMPLETED'"
+                )
+            if existing_job.shot_id != shot_id:
+                raise ViduConflictingLineageError(
+                    f"Existing GenerationJob {existing_job.id} shot_id {existing_job.shot_id} != {shot_id}"
                 )
             if existing_job.output_asset_id != existing_asset.id:
                 raise ViduConflictingLineageError(
                     f"Existing GenerationJob {existing_job.id} output_asset_id conflicts with Asset {existing_asset.id}"
                 )
+
+            # Asset validations
             if existing_asset.project_id != project_id:
                 raise ViduConflictingLineageError(
                     f"Existing Asset {existing_asset.id} project_id {existing_asset.project_id} conflicts with expected {project_id}"
                 )
+            if existing_asset.asset_type != "VIDEO":
+                raise ViduConflictingLineageError(
+                    f"Existing Asset {existing_asset.id} asset_type '{existing_asset.asset_type}' != 'VIDEO'"
+                )
+
+            # Scene and Shot validations
             if existing_project and existing_scene and existing_scene.project_id != existing_project.id:
                 raise ViduConflictingLineageError(
                     f"Existing Scene {existing_scene.id} project_id {existing_scene.project_id} != {existing_project.id}"
@@ -288,12 +324,47 @@ class ViduExistingJobRecoveryService:
                 raise ViduConflictingLineageError(
                     f"Existing Shot {existing_shot.id} scene_id {existing_shot.scene_id} != {existing_scene.id}"
                 )
-            if existing_job.shot_id != shot_id:
-                raise ViduConflictingLineageError(
-                    f"Existing GenerationJob {existing_job.id} shot_id {existing_job.shot_id} != {shot_id}"
-                )
 
-            # 2. Repair non-conflicting incomplete fencing/audit state inside transaction
+            # UsageLedger validations (if present, fail closed on conflicting fields)
+            if existing_ledger:
+                if existing_ledger.project_id != project_id:
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} project_id {existing_ledger.project_id} != {project_id}"
+                    )
+                if existing_ledger.shot_id != shot_id:
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} shot_id {existing_ledger.shot_id} != {shot_id}"
+                    )
+                if existing_ledger.job_id != job_id:
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} job_id {existing_ledger.job_id} != {job_id}"
+                    )
+                if existing_ledger.provider != "vidu":
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} provider '{existing_ledger.provider}' != 'vidu'"
+                    )
+                if existing_ledger.operation != "historical_recovery_get":
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} operation '{existing_ledger.operation}' != 'historical_recovery_get'"
+                    )
+                if existing_ledger.provider_event_id != provider_job_id:
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} provider_event_id '{existing_ledger.provider_event_id}' != '{provider_job_id}'"
+                    )
+                if existing_ledger.idempotency_key != f"vidu-recovery-{provider_job_id}":
+                    raise ViduConflictingLineageError(
+                        f"Existing UsageLedger {existing_ledger.id} idempotency_key '{existing_ledger.idempotency_key}' != 'vidu-recovery-{provider_job_id}'"
+                    )
+
+            # 2. Reconcile provider credits reported:
+            # If current GET reports credits, use them.
+            # If current GET omits credits but prior evidence retained credits, preserve retained credits.
+            prior_credits = None
+            if existing_job.result and isinstance(existing_job.result, dict):
+                prior_credits = existing_job.result.get("provider_credits_reported")
+            effective_credits = job_result.provider_credits if job_result.provider_credits is not None else prior_credits
+
+            # 3. Repair non-conflicting incomplete fencing/audit state inside transaction
             needs_flush = False
             if not existing_job.imported_historical or not existing_job.execution_disabled:
                 existing_job.imported_historical = True
@@ -310,7 +381,7 @@ class ViduExistingJobRecoveryService:
                 "recovery_method": "GET_ONLY_EXISTING_JOB",
                 "new_generation_posts": 0,
                 "provider_status": job_result.status or "COMPLETED",
-                "provider_credits_reported": job_result.provider_credits,
+                "provider_credits_reported": effective_credits,
                 "actual_credits_consumed": "UNKNOWN / NOT CONFIRMED",
                 "usd_equivalent": "UNKNOWN / NOT CONVERTED",
                 "imported_historical": True,
@@ -340,10 +411,19 @@ class ViduExistingJobRecoveryService:
                 )
                 db.add(ledger_entry)
                 needs_flush = True
-            elif existing_ledger.cost_status != "UNKNOWN" or not existing_ledger.imported_historical:
-                existing_ledger.cost_status = "UNKNOWN"
-                existing_ledger.imported_historical = True
-                needs_flush = True
+            else:
+                if existing_ledger.cost_status != "UNKNOWN":
+                    existing_ledger.cost_status = "UNKNOWN"
+                    needs_flush = True
+                if not existing_ledger.imported_historical:
+                    existing_ledger.imported_historical = True
+                    needs_flush = True
+                if existing_ledger.actual_cost is not None:
+                    existing_ledger.actual_cost = None
+                    needs_flush = True
+                if existing_ledger.estimated_cost is not None:
+                    existing_ledger.estimated_cost = None
+                    needs_flush = True
 
             if needs_flush:
                 db.flush()
@@ -363,7 +443,7 @@ class ViduExistingJobRecoveryService:
                 content_type=existing_asset.content_type,
                 file_size_bytes=existing_asset.file_size_bytes,
                 checksum_sha256=existing_asset.checksum_sha256,
-                provider_credits_reported=job_result.provider_credits,
+                provider_credits_reported=effective_credits,
                 posts_attempted=0,
                 get_calls_attempted=1,
                 imported_historical=True,
@@ -388,6 +468,9 @@ class ViduExistingJobRecoveryService:
         uploaded_new_object = False
 
         savepoint = db.begin_nested()
+        durable_commit_succeeded = False
+        result_payload = None
+
         try:
             project, scene, shot, job = cls.ensure_or_reconstruct_lineage(db, provider_job_id=provider_job_id)
 
@@ -471,11 +554,8 @@ class ViduExistingJobRecoveryService:
                 db.add(ledger_entry)
                 db.flush()
 
-            savepoint.commit()
-            if commit:
-                db.commit()
-
-            return ViduRecoveryResult(
+            # Capture/build immutable result data BEFORE committing where safe
+            result_payload = ViduRecoveryResult(
                 provider_job_id=provider_job_id,
                 status="COMPLETED",
                 asset_id=asset.id,
@@ -494,22 +574,33 @@ class ViduExistingJobRecoveryService:
                 execution_disabled=True,
             )
 
-        except Exception as exc:
-            # 1. Safely rollback DB state (savepoint if still active, else db transaction)
-            try:
-                if savepoint.is_active:
-                    savepoint.rollback()
-                else:
-                    db.rollback()
-            except Exception as rb_err:
-                logger.warning("DB rollback failed during recovery cleanup: %s", rb_err)
+            savepoint.commit()
+            if commit:
+                db.commit()
+            durable_commit_succeeded = True
 
-            # 2. Storage cleanup must execute even if savepoint/db rollback failed
-            if uploaded_new_object and uploaded_bucket and uploaded_key:
+            # Trigger post-commit hooks / packaging where failure could theoretically occur
+            cls._post_commit_hook(result_payload)
+
+            return result_payload
+
+        except Exception as exc:
+            # 1. Safely rollback DB state ONLY if durable commit has NOT succeeded
+            if not durable_commit_succeeded:
                 try:
-                    storage.delete_object(uploaded_bucket, uploaded_key)
-                except Exception as del_err:
-                    logger.warning("Storage compensation failed for %s/%s: %s", uploaded_bucket, uploaded_key, del_err)
+                    if savepoint.is_active:
+                        savepoint.rollback()
+                    else:
+                        db.rollback()
+                except Exception as rb_err:
+                    logger.warning("DB rollback failed during recovery cleanup: %s", rb_err)
+
+                # 2. Storage cleanup executes ONLY before durable DB commit is known successful
+                if uploaded_new_object and uploaded_bucket and uploaded_key:
+                    try:
+                        storage.delete_object(uploaded_bucket, uploaded_key)
+                    except Exception as del_err:
+                        logger.warning("Storage compensation failed for %s/%s: %s", uploaded_bucket, uploaded_key, del_err)
 
             if temp_path and os.path.exists(temp_path):
                 try:
