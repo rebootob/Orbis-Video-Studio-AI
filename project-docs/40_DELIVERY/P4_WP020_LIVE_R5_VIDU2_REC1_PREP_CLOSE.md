@@ -6,7 +6,7 @@
 PROJECT: Orbis Video Studio AI
 GATE: P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE
 TYPE: DOCS-ONLY Post-Merge Control Closure Sync
-OWNER_AUTHORIZED: YES
+OWNER_AUTHORIZED: YES (Direct chat session instruction for DOCS-ONLY post-merge control sync; no Issue #63 comment claimed)
 CLOSURE_BASE_MAIN_SHA: 7ff516f317f84278f6143f15cc58b91fd3fa34d5
 AUTHORIZATION_MAIN_SHA: 7ff516f317f84278f6143f15cc58b91fd3fa34d5
 AUTHORIZED_BRANCH: ai/p4-wp020-live-r5-vidu2-rec1-prep-close
@@ -97,7 +97,7 @@ Exact-head CI passed completely:
 
 Owner authorized merging PR #103 into `main`. Hermes executed the merge to canonical `main` at merge commit `7ff516f317f84278f6143f15cc58b91fd3fa34d5`.
 
-This closure gate `P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE` performs a strictly **DOCS-ONLY** post-merge control synchronization across repository documentation to record the completion of `P4-WP020-LIVE-R5-VIDU2-REC1-PREP`.
+This closure gate `P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE` performs a strictly **DOCS-ONLY** post-merge control synchronization across repository documentation under direct Owner authorization in the chat session (no Issue #63 comment claimed without exact evidence) to record the completion of `P4-WP020-LIVE-R5-VIDU2-REC1-PREP`.
 
 ---
 
@@ -114,7 +114,7 @@ PR #103 merged the following verified recovery tooling and test contracts:
    - Conservative audit truth: records `cost_status="UNKNOWN"`, `actual_cost=None`, `estimated_cost=None`, retains provider-reported credits (30.0) without claiming confirmed consumption or USD $0.00.
 2. `backend/tests/test_vidu_recovery.py`:
    - 27 unit tests verifying hard bounding, historical worker fencing (cannot be claimed or dispatched), atomic failure rollbacks, private URL rejection, commit-failure compensation, durable post-commit retention, caller-owned transaction safety, provider credits retention, and fail-closed conflicting lineage behavior.
-3. Total backend test suite passing: 80 passed (100%).
+3. Targeted backend suites passing: 80 tests passed (100%).
 
 ---
 

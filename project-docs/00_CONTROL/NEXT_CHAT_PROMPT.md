@@ -13,9 +13,10 @@ PROJECT
 - Canonical main SHA: fresh-fetch from GitHub repository truth (REC1-PREP-CLOSE authorized base: 7ff516f317f84278f6143f15cc58b91fd3fa34d5)
 
 ROLE MODEL
-- Owner = final human authority
-- ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer
-- Antigravity = LOW-CREDIT / BOUNDED Execution Plane only when explicitly authorized
+- Owner = final human authority / merge approval
+- ChatGPT = Control Plane / Project Lead / Architect / Independent Reviewer (ตรวจ GitHub อิสระ)
+- Hermes = Execution Coordinator / direct control sync & safe git operator
+- Antigravity = LOW-CREDIT / BOUNDED Execution Plane (bounded implementation/testing เฉพาะที่จำเป็นเมื่อได้รับอนุมัติ)
 - Codex = STOP by default
 - Claude Code = STOP by default
 - repository truth is authoritative
