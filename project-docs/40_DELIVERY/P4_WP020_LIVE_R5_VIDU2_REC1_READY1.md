@@ -6,10 +6,11 @@
 PROJECT: Orbis Video Studio AI
 REPOSITORY: rebootob/Orbis-Video-Studio-AI
 GATE: P4-WP020-LIVE-R5-VIDU2-REC1-READY1
-TYPE: EVIDENCE-ONLY / READ-ONLY / NO-PROVIDER Readiness Review
+TYPE: EVIDENCE-ONLY / READ-ONLY / NO-PROVIDER Readiness Review (Corrective Updated)
 STATUS: COMPLETE / BLOCKED FOR LIVE RUN
 INSPECTED_MAIN_SHA: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c
 AUTHORIZED_BRANCH: ai/p4-wp020-live-r5-vidu2-rec1-ready1
+REVIEW_CORRECTIVE: Addressing ChatGPT Review 5189474118 (CHANGES REQUIRED)
 OWNER_AUTHORIZATION: Direct chat session instruction (Readiness review before REC1-RUN1; no Issue #63 comment claimed)
 
 INVARIANTS HELD DURING REVIEW:
@@ -25,40 +26,67 @@ INVARIANTS HELD DURING REVIEW:
 
 ## 1. Executive Summary
 
-Under direct Owner authorization in the chat session, this gate evaluates the repository truth, source implementation, and runtime readiness before any potential live execution of `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1`.
+Under direct Owner authorization in the chat session and following ChatGPT Review `5189474118`, this gate evaluates repository truth, code capability, and operational runtime readiness before any potential execution of `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1`.
 
 **Overall Verdict**: **BLOCKED (NOT READY FOR LIVE RUN)**
 
-While the underlying service logic in `backend/app/services/vidu_recovery.py` has proven code capability through 27 unit tests and 80 targeted backend test suite passes, **runtime readiness is not proven**:
-1. **Invocation Path & Entry Point**: There is no runtime script, CLI entry point, API router, or GitHub Actions workflow to invoke recovery.
-2. **Transaction Ownership in Production**: Because no runtime harness exists, runtime transaction ownership is unassigned.
-3. **Approval Gates & Execution Fence**: No live workflow or runner script exists to check fresh Owner authorization or consume a one-shot execution fence before issuing provider GET requests.
-4. **Durable Persistence**: Past UAT environments used ephemeral Docker PostgreSQL and ephemeral Docker MinIO containers (`--rm`) which destroyed all data upon runner completion. No persistent database or persistent object storage with post-runner retention is configured or proven for this repository.
+While the recovery service in `backend/app/services/vidu_recovery.py` demonstrates verified code capability (proven via 27 unit tests in `backend/tests/test_vidu_recovery.py` and 80 targeted backend test suite passes), **operational runtime readiness is not proven**:
+1. **Invocation Entry Point**: No CLI runner script, API route endpoint, or GitHub Actions workflow exists to invoke `ViduExistingJobRecoveryService.recover_existing_job`.
+2. **Transaction Ownership at Runtime**: In the absence of an operational runner harness, runtime transaction ownership is unassigned.
+3. **Approval Gates & Execution Fence**: No runtime execution harness exists to verify fresh Owner authorization markers or consume a one-shot execution fence prior to provider I/O.
+4. **Persistence & Retention**:
+   - The repository defines local container persistence via named volumes in `docker-compose.yml` (`postgres_data`, `minio_data`).
+   - However, deployed operational runtime infrastructure and backing storage retention are **UNKNOWN / NOT VERIFIED** from repository inspection alone.
+   - Historical live probe workflows (e.g. `wp020-live-r5-vidu2.yml`) ran in ephemeral GitHub Actions runners without persistent database or object storage attachment.
+5. **Historical Media Non-Retention Root Cause**:
+   - For historical run `LIVE-20260910-VIDU2-R5` (`34569728383`), non-retention of media was caused by:
+     - Sanitized telemetry stripping the raw provider video URL;
+     - The video binary was never downloaded or stored by the probe runner;
+     - No durable `Asset` or database lineage was materialized.
+   - Ephemeral container teardown is a separate prospective durability risk for future recovery workflows.
 
 ---
 
-## 2. Detailed Topic Evaluations
+## 2. Detailed Scoped Inspections & Evaluated Topics
 
 ### Topic 1: Invocation Path & Transaction Ownership
-- **Source References**:
-  - `backend/app/services/vidu_recovery.py` (lines 102–655)
+- **Inspected Sources**:
+  - `backend/app/services/vidu_recovery.py` (commit `ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c`, lines 102–655)
   - `backend/tests/test_vidu_recovery.py` (lines 1–1180)
+- **Scoped Search Command & Sanitized Results**:
+  ```bash
+  # Search 1: Service references across backend/
+  search_files(path="backend", pattern="ViduExistingJobRecoveryService")
+  # Result: Matches found ONLY in backend/app/services/vidu_recovery.py and backend/tests/test_vidu_recovery.py
+
+  # Search 2: Function invocation across .github/ and backend/
+  search_files(path=".github", pattern="recover_existing_job")
+  # Result: 0 matches
+
+  # Search 3: API endpoints for recovery
+  search_files(path="backend/app/api", pattern="recover_existing_job")
+  # Result: 0 matches
+
+  # Search 4: Workflow files for recovery
+  search_files(path=".github/workflows", pattern="*recovery*")
+  # Result: 0 files found
+
+  # Search 5: Runner scripts in .github/scripts/
+  # Result: 17 scripts exist (r2, r3, r4, r5_pre1, r5_vidu1, r5_vidu2); ZERO recovery runner scripts exist
+  ```
 - **Code Capability (PROVEN)**:
-  - `ViduExistingJobRecoveryService.recover_existing_job(db: Session, provider_job_id: str, ..., commit: bool = True)` provides clean transaction semantics:
-    - When `commit=True`: executes under a savepoint, performs durable DB commit on success, and triggers DB rollback + storage object deletion on commit failure.
-    - When `commit=False`: acts as a caller-owned transaction under a savepoint, releasing savepoint on success, and rolling back savepoint + compensating storage on error without corrupting outer transaction.
+  - `ViduExistingJobRecoveryService.recover_existing_job` supports:
+    - `commit=True`: executes under a savepoint, executes durable DB commit on success, triggers DB rollback + storage compensation on commit failure.
+    - `commit=False`: acts as a caller-owned transaction under a savepoint, releasing savepoint on success, and rolling back savepoint + compensating storage on error without corrupting outer transaction.
 - **Runtime Readiness (BLOCKED)**:
-  - Repository search reveals zero operational entry points:
-    - No CLI runner script in `.github/scripts/` or `backend/scripts/`.
-    - No API router endpoint in `backend/app/api/`.
-    - No GitHub Actions workflow in `.github/workflows/`.
-  - Transaction ownership during actual runtime cannot be determined because no caller exists.
+  - No caller harness, CLI entrypoint, API route, or workflow exists in the repository to invoke this service.
+  - Runtime transaction ownership is unassigned.
 - **Status**: **BLOCKED**
 
 ---
 
 ### Topic 2: Exact Provider Job Bounding (`995880130565918720`)
-- **Source References**:
+- **Inspected Sources**:
   - `backend/app/services/vidu_recovery.py` (lines 46, 104–110, 240, 247–251)
   - `backend/tests/test_vidu_recovery.py` (lines 78–122, 915–943)
 - **Code Capability (PROVEN)**:
@@ -73,7 +101,7 @@ While the underlying service logic in `backend/app/services/vidu_recovery.py` ha
 ---
 
 ### Topic 3: Guardrails: GET ≤ 1, POST = 0, No Retry/Fallback, Pre-I/O Approval Gate
-- **Source References**:
+- **Inspected Sources**:
   - `backend/app/services/vidu_recovery.py` (lines 243–265)
   - `.github/workflows/wp020-live-r5-vidu2.yml` (historical reference for probe guardrail structure)
 - **Code Capability (PROVEN)**:
@@ -87,50 +115,63 @@ While the underlying service logic in `backend/app/services/vidu_recovery.py` ha
 
 ---
 
-### Topic 4: Durable Persistence (Database & Object Storage)
-- **Source References**:
-  - `backend/app/core/config.py` (lines 22–34, `POSTGRES_*`, `OBJECT_STORAGE_*`)
+### Topic 4: Persistence Architecture & Backing Storage
+- **Inspected Sources**:
+  - `docker-compose.yml` (lines 12–13, 30–31, 113–115)
+  - `backend/app/core/config.py` (lines 22–34)
   - `backend/app/services/storage/factory.py` (lines 15–26)
-  - `.github/workflows/wp020-live-r5-pre1.yml` (lines 20–33, 95–109)
-  - `project-docs/00_CONTROL/CURRENT_STATE.md` (line 192: ephemeral container limitation)
-- **Code Capability (PROVEN)**:
-  - Service creates and links `Project`, `Scene`, `Shot`, `GenerationJob`, `Asset`, and `UsageLedger`.
-  - Object storage upload uses `storage.upload_file_object()`.
-  - Atomic rollback: deletes newly uploaded storage object if DB commit fails.
-- **Runtime Readiness (BLOCKED)**:
-  - **The Ephemeral Runner Problem**:
-    - All past live executions (R1–R4, R5 PRE1) executed in GitHub-hosted Ubuntu runners (`ubuntu-latest`).
-    - PostgreSQL was executed as an ephemeral service container (`postgres:16`).
-    - MinIO was executed as an ephemeral Docker container (`docker run -d --rm minio/minio`).
-    - Once the runner completed, all database rows and uploaded files were permanently destroyed.
-    - This is the explicit reason why `CURRENT_STATE.md` and `CHAT_HANDOFF.md` document:
-      - `Retained recoverable URL: NOT PROVEN`
-      - `Durable VIDEO Asset: NOT PROVEN`
-  - In the current repository configuration:
-    - There is no persistent external PostgreSQL instance configured via secrets.
-    - There is no persistent external S3/MinIO bucket configured via secrets.
-    - If `REC1-RUN1` runs in a standard ephemeral GitHub Actions runner, the recovered video asset and DB records will disappear upon runner completion, failing the durability objective.
-- **Status**: **BLOCKED**
+  - `.github/workflows/wp020-live-r5-pre1.yml` (ephemeral container reference)
+  - `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_FINAL_GAP1.md` (historical gap review)
+- **Repository Capability (PROVEN)**:
+  - `docker-compose.yml` defines local container persistence:
+    - Service `db` mounts named volume `postgres_data:/var/lib/postgresql/data`
+    - Service `minio` mounts named volume `minio_data:/data`
+    - Volume definitions: `volumes: postgres_data: minio_data:`
+  - `S3CompatibleObjectStorageProvider` integrates with standard S3/MinIO APIs.
+- **Runtime Readiness & Durability (BLOCKED / UNKNOWN)**:
+  - **Distinction between Repository Capability and Deployed Runtime**:
+    - Repository source proves that Docker Compose is capable of local volume persistence.
+    - However, the repository source cannot establish whether an operational cloud database, external managed S3/MinIO bucket, or deployed server environment is active. Current deployed runtime infrastructure is **UNKNOWN / NOT VERIFIED**.
+    - No secret-value inspection was requested or performed.
+  - **Historical Actions UAT Distinction**:
+    - In historical CI and UAT workflows (`wp020-live-r5-pre1.yml`), runners used ephemeral service containers (`postgres:16`) and ephemeral Docker containers (`docker run -d --rm minio/minio`), which discarded state when the runner terminated.
+    - If `REC1-RUN1` were executed under an ephemeral runner configuration without persistent external backing storage or verified persistence attachment, recovery records would not be retained.
+- **Status**: **BLOCKED (Runtime Persistence Not Verified)**
 
 ---
 
-### Topic 5: Asset/Lineage, Historical Audit, Billing UNKNOWN & Sanitized Evidence
-- **Source References**:
+### Topic 5: Asset/Lineage, Historical Audit, Billing UNKNOWN & Evidence
+- **Inspected Sources**:
   - `backend/app/services/vidu_recovery.py` (lines 537–615)
-  - `backend/models/generation_job.py`
-  - `backend/models/usage_ledger.py`
+  - `backend/app/models/generation_job.py`
+  - `backend/app/models/usage_ledger.py`
+  - `backend/app/models/asset.py`
 - **Code Capability (PROVEN)**:
   - `GenerationJob` marked `imported_historical=True`, `execution_disabled=True`. Cannot be claimed or processed by background workers.
   - `UsageLedger` recorded with `cost_status="UNKNOWN"`, `actual_cost=None`, `estimated_cost=None`, `imported_historical=True`.
   - Provider credits reported (30.0) preserved as metadata without claiming confirmed consumption or USD $0.00 conversion.
   - Fails closed on conflicting durable records (`ViduConflictingLineageError`).
 - **Runtime Readiness (BLOCKED)**:
-  - No evidence capture/export script exists to extract `ViduRecoveryResult`, sanitize secrets/tokens/signed URLs, and publish evidence as an immutable artifact or Issue comment.
+  - No evidence extraction/export script exists to capture `ViduRecoveryResult`, sanitize secrets/tokens/signed URLs, and publish evidence as an immutable artifact or Issue comment.
 - **Status**: **READY (Code Level) / BLOCKED (Runtime Level)**
 
 ---
 
-## 3. Identified Gaps & Missing Runtime Components
+## 3. Analysis of Historical VIDU2 Non-Retention
+
+The non-retention of video media in historical run `LIVE-20260910-VIDU2-R5` (`Run 34569728383`) must be accurately attributed per accepted `P4-WP020-LIVE-R5-FINAL-GAP1` truth:
+1. **Primary Causes of VIDU2 Non-Retention**:
+   - The probe runner (`.github/scripts/wp020_live_r5_vidu2.py`) executed a single live generation POST and polled for completion (`success`, `video_url_present: true`).
+   - To prevent credential and private URL leakage, the probe sanitized output evidence, stripping the raw temporary download URL.
+   - The probe runner was designed solely to prove provider API generation capability; it did not implement video download, file storage, or asset creation.
+   - Consequently, no video binary was downloaded or retained, and no durable `Asset` or `GenerationJob` was materialized in a database.
+2. **Separation from Runner Teardown**:
+   - While runner container teardown affected state persistence in earlier multi-step UAT runs (such as R4 database state), for VIDU2 RUN1 the video was never downloaded in the first place.
+   - Container teardown represents a separate prospective durability risk for future recovery workflows if executed in ephemeral environments.
+
+---
+
+## 4. Identified Gaps & Prerequisites Before REC1-RUN1
 
 To achieve runtime readiness for `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1`, the following items must be designed, implemented, and reviewed under separate authorized gates:
 
@@ -142,16 +183,41 @@ To achieve runtime readiness for `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1`, the followi
      - Strict pre-dispatch check for explicit Owner authorization marker and unconsumed one-shot execution fence.
      - Consumption of the execution fence prior to provider network call.
      - Post-run sanitized evidence artifact upload.
-3. **Architectural Resolution for Persistence**:
-   - The Owner / Control Plane must decide how persistence is guaranteed:
-     - **Option A (External Backing Services)**: Provide credentials for an external persistent PostgreSQL and S3-compatible storage bucket.
-     - **Option B (Artifact-Backed Durability)**: If running in GitHub Actions with ephemeral containers, export the recovered video file and database snapshot as cryptographically verified workflow artifacts (`actions/upload-artifact@v4`) and/or release assets, accompanied by SHA-256 checksums in Issue comments.
+3. **Runtime Persistence Clarification**:
+   - Owner / Control Plane must specify and verify the operational execution target:
+     - **Path A (Local Compose Runtime)**: Execute recovery within an environment backed by `docker-compose.yml` named volumes (`postgres_data`, `minio_data`).
+     - **Path B (Managed / External Services)**: Execute recovery against verified persistent external PostgreSQL and S3/MinIO instances.
+     - **Path C (Workflow Artifact Backup with Bounded Retention)**: If executed in GitHub Actions, workflow artifacts (`actions/upload-artifact@v4`) provide bounded-retention backups (typically 90 days default). They serve as diagnostic/backup evidence and do NOT automatically constitute an operational durable Orbis Asset tier without a separately approved retention, security, and restoration design.
+   - Note: Release assets are excluded from this scope as Core V1 release remains NOT DECLARED and unauthorized.
 4. **Evidence Sanitization Contract**:
    - Ensure the runner never leaks `VIDU_API_KEY`, signed download URLs, or internal paths in workflow logs or Issue comments.
 
 ---
 
-## 4. Invariant Confirmation
+## 5. Scope of Checks Performed vs Not Performed
+
+```text
+CHECKS PERFORMED (Read-Only / Repository Truth):
+  - Fresh-fetch canonical main SHA: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c
+  - Scoped code inspection: backend/app/services/vidu_recovery.py
+  - Scoped model inspection: backend/app/models/generation_job.py, usage_ledger.py, asset.py
+  - Scoped tests inspection: backend/tests/test_vidu_recovery.py (27 unit tests)
+  - Scoped script search: .github/scripts/ (confirmed 0 recovery runners)
+  - Scoped workflow search: .github/workflows/ (confirmed 0 recovery workflows)
+  - Compose configuration inspection: docker-compose.yml (confirmed named volumes)
+  - Delivery history inspection: project-docs/40_DELIVERY/
+
+CHECKS NOT PERFORMED / UNAVAILABLE:
+  - External server or cloud runtime inspection (not accessible from repository truth)
+  - GitHub Actions secret value inspection (prohibited; secret values are protected)
+  - Database write or storage write probes (strictly prohibited by gate rules)
+  - Provider GET or POST calls (strictly prohibited; REAL VIDU GET = 0)
+  - Workflow dispatch or job triggering (strictly prohibited)
+```
+
+---
+
+## 6. Invariant Confirmation
 
 ```text
 REAL_VIDU_GET_CALLS: 0
