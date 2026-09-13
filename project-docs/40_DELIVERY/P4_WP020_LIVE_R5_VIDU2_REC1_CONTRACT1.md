@@ -12,8 +12,9 @@ CANONICAL_BASE_MAIN_SHA: 0326def88915b25fbb4e2b7019753c2b3fedc0f7
 AUTHORIZED_BRANCH: ai/p4-wp020-live-r5-vidu2-rec1-contract1
 OWNER_AUTHORIZATION: Direct chat session instruction (Gate A contract; no Issue #63 comment claimed)
 REVIEWS_ADDRESSED:
-  - Review 5190708464 (CHANGES REQUIRED) — All 5 initial findings resolved
-  - Review 5190804562 (CHANGES REQUIRED) — All 4 remaining blockers resolved
+  - Review 5190708464 (CHANGES REQUIRED) — Initial 5 findings resolved
+  - Review 5190804562 (CHANGES REQUIRED) — 4 follow-up blockers resolved
+  - Review 5190888006 (CHANGES REQUIRED) — All 3 authorization, compensation, and acceptance blockers resolved
 
 INVARIANTS HELD:
   REAL_VIDU_GET_CALLS: 0
@@ -35,13 +36,13 @@ INVARIANTS HELD:
 ## 1. Executive Summary & Purpose
 
 Following the readiness review in `P4_WP020_LIVE_R5_VIDU2_REC1_READY1.md` (PR #105, merge commit `0326def88915b25fbb4e2b7019753c2b3fedc0f7`) which established that the recovery service has proven code capability but lacks operational runtime readiness, this document establishes the **authoritative engineering and governance contract** for:
-1. **Persistent Cloud UAT Environment**: Decoupling persistence from ephemeral compute to guarantee data retention across worker restarts and runner teardowns, including isolated backup/restore and fence preservation proofs.
+1. **Persistent Cloud UAT Environment**: Decoupling persistence from ephemeral compute to guarantee data retention across worker restarts and runner teardowns, including restored-runtime fail-closed protections.
 2. **Bounded Recovery Harness**: A strictly single-purpose invocation harness reusing `ViduExistingJobRecoveryService` targeting historical job `995880130565918720`.
 3. **Atomic One-Shot Approval Fence**: A strict, consistent state machine backed by a dedicated standalone schema (`provider_execution_fences`) without foreign key dependencies on speculative recovery lineage, guaranteeing provider `GET <= 1`.
-4. **Authoritative Transaction Outcome & Safe Storage Compensation**: Preventing premature or unverified media deletion during ambiguous commits, defining explicit service transaction boundaries, and logging failure/orphan records in an autonomous audit table (`recovery_failure_audits`).
-5. **Trusted Cryptographic Authorization Verification**: Binding exact commit, task, job, runtime, and message anchor via HMAC-SHA256 / Ed25519 signatures and GitHub environment protections without raw secret persistence.
+4. **Authoritative Transaction Outcome & Safe Storage Compensation**: Preventing premature or unverified media deletion during ambiguous commits, verifying object ownership and absence of committed references, and logging sanitized failure/orphan records in an autonomous audit table (`recovery_failure_audits`).
+5. **Trusted Asymmetric Cryptographic Authorization Verification**: Verifying Owner authority via Ed25519 public-key cryptography (where the runner never possesses the signing key), actual runtime environment matching, explicit evidence anchors, and revocation registers.
 6. **Historical Audit & Billing Fence**: Idempotent tracking without claiming confirmed consumption or USD conversion, excluding historical recovery from live production ledgers, render workers, and `ProductionOrchestrator`.
-7. **Comprehensive Acceptance Matrix**: 15 distinct failure/edge scenarios mapped to existing source models, proposed contracts, verification tests, required evidence, and STOP conditions.
+7. **Comprehensive Acceptance Matrix**: Detailed failure/edge scenarios mapped to existing source models, proposed contracts, verification tests, required evidence, and STOP conditions.
 8. **Multi-Gate Roadmap**: A strict sequential gate model restoring all required downstream acceptance work (audio, subtitles, QC, human approval, render variants, `.orbis` portability, cost reconciliation) prior to WP020 closure or Core V1 release.
 
 **Scope of this Gate**: Strictly architectural specification and contract design. No code implementation, schema modification, cloud deployment, provider calls, or secret inspection are performed or authorized.
@@ -69,7 +70,7 @@ Following the readiness review in `P4_WP020_LIVE_R5_VIDU2_REC1_READY1.md` (PR #1
 - However, the existence, configuration, and connectivity of any external cloud PostgreSQL instance or external S3-compatible storage bucket remain **UNKNOWN / NOT VERIFIED**.
 - **Rule**: Neither Hermes, ChatGPT, nor Antigravity may assume external cloud infrastructure is provisioned without explicit verified read-only connection evidence provided in a future dedicated infrastructure gate (Gate C).
 
-### 2.4 Persistence, Backup/Restore & Worker-Replacement Retention Proofs
+### 2.4 Persistence, Restored-Runtime Fail-Closed & Worker-Replacement Retention Proofs
 To definitively prove data durability, compute statelessness, and fence preservation before any live probe is attempted:
 1. **Worker Replacement / Container Restart Test**:
    - Write a deterministic preflight probe record to PostgreSQL and upload a synthetic probe object to object storage.
@@ -77,13 +78,14 @@ To definitively prove data durability, compute statelessness, and fence preserva
    - Spawn a fresh, independent runner instance with clean local filesystem.
    - Execute a read-back query for the database record and an S3 GET request for the probe object.
    - Verify byte-for-byte SHA-256 checksum and metadata match.
-2. **Isolated Backup & Restore Proof (Database & Storage)**:
-   - Create a PostgreSQL database snapshot / PITR backup and an object storage snapshot.
-   - Restore the snapshot into an isolated scratch database instance and isolated storage location.
-   - Execute an automated verification suite against the restored database and storage:
-     - Confirm all existing table rows, relationships, and constraints are preserved bit-for-bit.
-     - Confirm object storage keys exist, file size matches, and streaming SHA-256 checksum matches recorded database `Asset.checksum_sha256`.
-     - **Fence Preservation & Anti-Rollback Proof**: Verify that consumed fence records (`provider_execution_fences`) cannot be reverted, rolled back, or deleted in a manner that would reset `network_get_attempts` or permit another provider GET call. If an older backup is restored, fence reconciliation rules must detect that the provider job was already consumed and immediately fail closed.
+2. **Restored-Runtime Fail-Closed & Anti-Rollback Fencing**:
+   - An older database snapshot or restored instance cannot itself contain fence records created after that snapshot was taken.
+   - **Enforceable Restored-Runtime Policy**:
+     - Any restored, newly provisioned, or unrecognized runtime instance is **provider-disabled by default** (`PROVIDER_EXECUTION_ENABLED = False`).
+     - The harness enforces an out-of-band reconciliation check against durable accepted execution evidence (e.g. Git repository commit history, merged PR closure docs, or immutable provider dashboard logs) before any network I/O is permitted.
+     - If out-of-band evidence indicates that provider job `995880130565918720` was already executed or consumed, the runtime **fails closed immediately**, refusing all provider GET calls.
+     - All prior authorization tokens are automatically invalidated upon runtime restoration.
+     - No deployment of an external microservice is implied; this is a strict operational configuration and harness preflight guard.
 3. **Infrastructure Cost Governance**:
    - Infrastructure hosting costs (PostgreSQL, storage egress/ingress) must be evaluated and approved under a separate infrastructure budget, distinct from the historical **USD $1.00 provider UAT budget**.
    - No account creation, subscription selection, credit card entry, or quota/billing adjustments are permitted in Gate A.
@@ -101,8 +103,8 @@ To definitively prove data durability, compute statelessness, and fence preserva
 
 ### 3.2 Provider Status Consumption & Method Alignment
 - **Normalized Status Consumption**:
-  - `ProviderJobResult` lives in `backend/app/providers/base.py` (not `backend/app/services/providers/base.py`).
-  - Its status is defined as `Literal["QUEUED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]` (it uses literal strings, not an enum or `PENDING` string).
+  - `ProviderJobResult` lives in `backend/app/providers/base.py`.
+  - Its status is defined as `Literal["QUEUED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]` (literal strings, not an enum or `PENDING`).
   - `ViduExistingJobRecoveryService.recover_existing_job` consumes `job_result: ProviderJobResult`.
   - The service verifies `job_result.status == "COMPLETED"`.
   - Raw provider responses (e.g. Vidu JSON payload `{"state": "success"}`) are mapped by `ViduProviderAdapter` into normalized `job_result.status = "COMPLETED"`.
@@ -149,37 +151,46 @@ To definitively prove data durability, compute statelessness, and fence preserva
 
 ## 4. Approval Fence & One-Shot Execution Contract
 
-### 4.1 Trusted Cryptographic Authorization Verification
-Before any live network request to Vidu is initiated, the execution harness must verify an authentic, unbroken, and cryptographically verifiable authorization binding:
-1. **Trusted Authority & Signer**:
-   - The sole authorized human authority is the Project Owner (`@rebootob`).
-   - Third-party callers, automated agents, or unsigned environment variables cannot grant authorization.
-2. **Verification Mechanism (No New Paid Auth Infrastructure)**:
-   - **Layer 1: GitHub Environment Protection**: The execution workflow runs inside a dedicated GitHub Actions environment (`uat-vidu-recovery`) configured with required human approval restricted exclusively to `@rebootob`.
-   - **Layer 2: Cryptographic Signature Verification**: The harness verifies an HMAC-SHA256 signature (or Ed25519 signature) against the repository secret `OWNER_AUTH_SIGNING_KEY`.
-3. **Structured Authorization Payload**:
+### 4.1 Trusted Asymmetric Owner Authorization Verification
+To guarantee that the runner or an automated agent cannot forge or self-sign authorization, the contract enforces an **Asymmetric Public-Key Verification** model:
+1. **Asymmetric Key Separation**:
+   - The Project Owner (`@rebootob`) holds the **Ed25519 Private Signing Key** exclusively on their secure personal device.
+   - The execution runner receives ONLY the trusted **Ed25519 Public Verification Key** (`OWNER_AUTH_PUBLIC_KEY`).
+   - The runner has zero capability to mint or forge new authorizations.
+   - No private key is ever committed, logged, or provisioned to runner environments.
+2. **Structured Canonical Authorization Payload**:
    ```json
    {
-     "authorized_commit_sha": "0ad13a25d1a4cacd472805f11c820b50801f156b",
+     "authorized_commit_sha": "e39537f298d437403f4428b0b8631230dd71a4ce",
      "task_id": "P4-WP020-LIVE-R5-VIDU2-REC1-RUN1",
      "provider_job_id": "995880130565918720",
      "runtime_target": "UAT-COMPOSE-PERSISTENT",
+     "owner_evidence_anchor": "telegram:msg:152428:5653543",
      "issued_at": "2026-09-13T14:00:00Z",
      "expires_at": "2026-09-13T16:00:00Z",
-     "nonce": "d290f1ee-6c54-4b01-90e6-d701748f0851"
+     "auth_nonce": "d290f1ee-6c54-4b01-90e6-d701748f0851"
    }
    ```
-4. **Verification Procedure**:
-   - **Signature Authenticity**: Recompute HMAC-SHA256 over canonicalized JSON payload; compare with provided signature using constant-time comparison.
-   - **Freshness**: Verify `issued_at <= current_utc_time <= expires_at` (validity window strictly <= 2 hours).
-   - **Exact SHA Binding**: Verify `authorized_commit_sha == git rev-parse HEAD`.
-   - **Exact Job & Task Binding**: Verify `provider_job_id == "995880130565918720"` and `task_id == "P4-WP020-LIVE-R5-VIDU2-REC1-RUN1"`.
-   - **Replay Protection**: Verify `nonce` does not exist in `provider_execution_fences.auth_nonce`.
-5. **Safe Persistence**:
-   - The raw secret and raw token are **never persisted**.
-   - Only `auth_digest` (SHA-256 hash of payload), `auth_issued_at`, and `auth_nonce` are persisted on the fence record.
-6. **Failure & Revocation**:
-   - Any verification failure (signature invalid, expired, nonce reused, SHA mismatch) causes the harness to **STOP** immediately with exit code `1` before connecting to database or network.
+   *(Note: The payload above is a **NON-AUTHORIZING PLACEHOLDER** for documentation illustration only. It cannot be used for execution).*
+3. **Two-Phase Verification Procedure**:
+   - **Phase 1: Local In-Memory Validation (Pre-DB Connection)**:
+     - Verify Ed25519 signature of the canonical JSON payload against `OWNER_AUTH_PUBLIC_KEY`.
+     - Verify freshness: `issued_at <= current_utc_time <= expires_at` (validity window strictly <= 2 hours).
+     - Verify exact commit binding: `authorized_commit_sha == git rev-parse HEAD`.
+     - Verify exact scope: `task_id == "P4-WP020-LIVE-R5-VIDU2-REC1-RUN1"` and `provider_job_id == "995880130565918720"`.
+     - Verify presence of explicit `owner_evidence_anchor`.
+     - *If Phase 1 fails*: Harness terminates immediately with exit code `1`. **Zero DB connections and zero network calls are initiated.**
+   - **Phase 2: Database & Runtime Target Validation (Pre-GET)**:
+     - Connect to database.
+     - **Actual Runtime Matching**: Query primary database and storage provider configuration to verify that actual runtime properties (database host, database name, storage bucket, storage endpoint) match the authorized `runtime_target`.
+     - **Revocation Check**: Check local revocation register / database to ensure `auth_nonce` or `owner_evidence_anchor` has not been revoked.
+     - **Replay Protection**: Verify `auth_nonce` does not already exist in `provider_execution_fences`.
+     - Insert and commit initial fence record.
+     - *If Phase 2 fails*: Harness terminates immediately. **Zero provider GET calls are issued.**
+4. **Safe Digest Persistence**:
+   - Only `auth_digest` (SHA-256 hash of payload), `auth_issued_at`, `auth_nonce`, and `owner_evidence_anchor` are persisted on the fence record. No raw signature or key material is stored.
+5. **Revocation Procedure**:
+   - The Owner may revoke an in-flight or unused authorization by publishing a revocation marker referencing the `auth_nonce` or `owner_evidence_anchor`. The harness checks the revocation register in Phase 2 and halts execution immediately.
 
 ### 4.2 Standalone Pre-GET Durable Fence Schema (`provider_execution_fences`)
 - **Resolution of Architectural Dependency**:
@@ -197,6 +208,7 @@ Before any live network request to Vidu is initiated, the execution harness must
         task_id VARCHAR(128) NOT NULL,
         authorized_commit_sha VARCHAR(64) NOT NULL,
         runtime_target VARCHAR(64) NOT NULL,
+        owner_evidence_anchor VARCHAR(256) NOT NULL,
         auth_digest VARCHAR(64) NOT NULL,
         auth_nonce VARCHAR(64) NOT NULL,
         auth_issued_at TIMESTAMPTZ NOT NULL,
@@ -206,7 +218,7 @@ Before any live network request to Vidu is initiated, the execution harness must
         storage_intent_key VARCHAR(512) NULL,
         storage_intent_sha256 VARCHAR(64) NULL,
         storage_intent_bytes BIGINT NULL,
-        storage_is_new_object BOOLEAN NULL,
+        storage_is_new_object VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN',
         target_asset_id UUID NULL,
         target_job_id UUID NULL,
         target_project_id UUID NULL,
@@ -233,11 +245,12 @@ If the runner process terminates abnormally, state must be safely reconcilable b
 
 | Failure Window | Point of Interruption | Fence State | Storage State | DB Lineage | Reconciliation Protocol on Next Run |
 |---|---|---|---|---|---|
-| **Window 1: Pre-GET** | Process dies after fence committed, before network call | `CLAIMED_PENDING_GET` (attempts = 0) | Clean | None | **STOP by default**. Provider call count is 0. Any reset or reconciliation requires separate explicit Owner authorization, never an automatic retry. |
+| **Window 1: Pre-GET** | Process dies after fence committed, before network call | `CLAIMED_PENDING_GET` (attempts = 0) | Clean | None | **STOP by default**. Provider call count is 0. Any reset requires separate explicit Owner authorization, never an automatic retry. |
 | **Window 2: Mid-GET** | Network timeout / process killed during GET call | `GET_IN_FLIGHT` (attempts = 1) | Clean | None | **STOP**. Provider call count is consumed. Never issue another GET. Mark fence `CONSUMED_CRASHED`. |
 | **Window 3: Post-GET, Pre-Storage** | Result received, process dies before S3 upload | `GET_IN_FLIGHT` (attempts = 1) | Clean (temp file wiped) | None | **STOP**. Result payload lost in ephemeral memory. Mark `CONSUMED_CRASHED`. Owner decision required. |
-| **Window 4: Mid-Storage PUT** | S3 upload partially completed or times out | `GET_IN_FLIGHT` (`storage_intent_key` recorded) | Partial / Orphan S3 object | None | Inspect S3 for `storage_intent_key`. Execute compensation `delete_object`. Mark `CONSUMED_TERMINAL_FAILURE`. |
-| **Window 5: Post-Storage, Pre-DB Commit** | File in S3, process dies before `db.commit()` | `GET_IN_FLIGHT` (`storage_intent_key` recorded) | Uploaded S3 object | Rolled back (none) | Authoritative primary DB outcome check. If rollback confirmed, compensate S3. If ambiguous, STOP and retain object! |
+| **Window 4: Mid-Storage PUT** | S3 upload partially completed or times out | `GET_IN_FLIGHT` (`storage_intent_key` recorded) | Partial / Orphan S3 object | None | Check ownership: if `storage_is_new_object == 'TRUE'` and 0 DB references, delete partial object. If ownership unknown, retain object and STOP. Mark `CONSUMED_TERMINAL_FAILURE`. |
+| **Window 5: Post-Storage, Pre-DB Commit** | File in S3, process dies before `db.commit()` | `GET_IN_FLIGHT` (`storage_intent_key` recorded) | Uploaded S3 object | Rolled back (none) | Authoritative primary DB outcome check. If rollback proven, `storage_is_new_object == 'TRUE'`, and 0 `Asset` references, compensate S3. If ambiguous or unknown, STOP and retain object! |
+| **Window 5.5: Post-DB Commit, Pre-Fence Update** | DB committed, process dies before updating fence | `GET_IN_FLIGHT` | Uploaded S3 object | Committed `Asset` | Independent query on primary DB detects committed `Asset` and complete lineage. Reconcile fence to `MATERIALIZED_UNVERIFIED` without re-GET. Do NOT delete storage! Proceed to read-back. |
 | **Window 6: Post-DB Commit, Pre-Read-Back** | Lineage committed, process dies before read-back | `MATERIALIZED_UNVERIFIED` | Uploaded S3 object | Committed `Asset` | Independent query detects committed `Asset` and `GenerationJob`. Proceed to read-back verification. Do NOT re-GET! |
 | **Window 7: Read-Back Verification Failure** | DB committed, but S3 read-back checksum fails | `MATERIALIZED_UNVERIFIED` | Uploaded S3 object | Committed `Asset` | Status set to `CONSUMED_TERMINAL_FAILURE` or remains `MATERIALIZED_UNVERIFIED` for diagnosis. DB and storage retained for analysis. |
 
@@ -277,21 +290,19 @@ If the runner process terminates abnormally, state must be safely reconcilable b
 ### 5.3 Authoritative Transaction Outcome, Safe Storage Compensation & Future Service Refactor
 Because object storage operations (S3 PUT) and relational database transactions (SQL COMMIT) cannot participate in a two-phase commit:
 1. **Durable Storage Intent Recording**:
-   - Before initiating S3 upload, the service records complete storage intent on the fence record and commits it:
-     `storage_intent_bucket`, `storage_intent_key`, `storage_intent_sha256`, `storage_intent_bytes`, `storage_is_new_object = True`, and target lineage UUIDs (`target_asset_id`, `target_job_id`, `target_project_id`).
-2. **Media Upload**:
-   - Video is downloaded to local temp file, verified, and uploaded to S3 via `storage.upload_file_object()`.
-3. **Necessary Service Refactor (Gate B Bounded Change)**:
+   - Before initiating S3 upload, the service records storage intent on the fence record:
+     `storage_intent_bucket`, `storage_intent_key`, `storage_intent_sha256`, `storage_intent_bytes`, `storage_is_new_object = 'UNKNOWN'`, and target lineage UUIDs (`target_asset_id`, `target_job_id`, `target_project_id`).
+   - Only after `storage.object_exists()` returns `False` and upload succeeds is `storage_is_new_object` updated to `'TRUE'`. If the object pre-existed, it is marked `'PRE_EXISTING'`.
+2. **Necessary Service Refactor (Gate B Bounded Change)**:
    - In the existing codebase, `recover_existing_job(commit=True)` (`backend/app/services/vidu_recovery.py` lines 621-645) catches exceptions and immediately attempts `storage.delete_object` inside its internal `except` block *before* the caller can inspect or reconcile.
    - **Required Gate B Change**: Introduce a bounded modification to `ViduExistingJobRecoveryService` allowing the caller/runner to manage compensation (`auto_compensate_storage: bool = False`) or encapsulating the transaction boundary so compensation only executes when rollback is affirmatively confirmed on the primary DB connection.
-4. **Authoritative Primary DB Transaction Outcome Resolution**:
-   - An absent `Asset` query alone does NOT prove rollback (it could be caused by an in-flight unacknowledged server commit, replica lag, or transient network drop).
-   - If `db.commit()` raises an exception:
-     - The service must query the **authoritative primary database connection**.
-     - It must check exact `(storage_bucket, storage_key)` AND validate complete deterministic lineage (`Project`, `Scene`, `Shot`, `GenerationJob`, `Asset`).
-     - **Rule of Uncertainty**: If the primary DB transaction outcome is unavailable, uncertain, or unproven: **STOP and retain the S3 object; DO NOT delete**.
-     - Only if the primary DB connection affirmatively confirms that the transaction rolled back and no `Asset` references the key, may compensation `storage.delete_object` proceed.
-5. **Dedicated Failure & Orphan Audit Table (`recovery_failure_audits`)**:
+3. **Strict Universal Storage Compensation Guard**:
+   - In EVERY compensation path (Window 4, Window 5, crash cleanup, exception handling), `storage.delete_object` is strictly forbidden unless ALL of the following criteria are affirmatively proven:
+     1. **Ownership**: This execution affirmatively created a NEW object (`storage_is_new_object == 'TRUE'`). If pre-existing or unknown, DO NOT delete.
+     2. **Affirmative DB Rollback**: Primary database connection definitively proves that the transaction rolled back.
+     3. **No Committed References**: Independent primary DB query confirms that zero `Asset` records reference exact `(storage_bucket, storage_key)`.
+     4. **No Unresolved Commit**: If the primary DB outcome is ambiguous, timed out, or unproven: **STOP and retain the S3 object; DO NOT delete**.
+4. **Dedicated Failure & Orphan Audit Table (`recovery_failure_audits`)**:
    - Gate B will introduce `recovery_failure_audits`:
      ```sql
      CREATE TABLE recovery_failure_audits (
@@ -300,7 +311,7 @@ Because object storage operations (S3 PUT) and relational database transactions 
          provider_job_id VARCHAR(128) NOT NULL,
          failure_stage VARCHAR(64) NOT NULL,
          error_class VARCHAR(128) NOT NULL,
-         error_message TEXT NOT NULL,
+         error_message VARCHAR(512) NOT NULL,
          orphan_storage_bucket VARCHAR(64) NULL,
          orphan_storage_key VARCHAR(512) NULL,
          db_transaction_state VARCHAR(64) NOT NULL,
@@ -308,7 +319,8 @@ Because object storage operations (S3 PUT) and relational database transactions 
          created_at TIMESTAMPTZ NOT NULL
      );
      ```
-   - Written and committed in an autonomous database transaction (`commit=True` on separate engine connection).
+   - **Sanitization & Allowlisting**: `error_message` must contain only sanitized, non-content strings (e.g. typed error class, HTTP status code, standard error code). Raw HTTP bodies, signed S3 URLs, authorization headers, tokens, and secrets are strictly excluded.
+   - **Audit Write Failure Rule**: If writing to `recovery_failure_audits` fails, the fence remains consumed, execution **STOPS**, and provider GET is never retried.
 
 ### 5.4 Post-Success Read-Back Verification & Completion Semantics
 To definitively prove durable retention:
@@ -365,27 +377,30 @@ To definitively prove durable retention:
 
 ---
 
-## 7. Comprehensive Acceptance Matrix (15 Scenarios)
+## 7. Comprehensive Acceptance Matrix (18 Detailed Scenarios)
 
 The following matrix defines the exact verification scenarios, existing/proposed source models, verification tests, required evidence, and STOP conditions:
 
 | # | Requirement Scenario | Existing / Proposed Model | Proposed Contract / Change | Verification Test | Required Evidence | STOP Condition |
 |---|---|---|---|---|---|---|
 | **1** | **Wrong Provider Job ID** | `backend/app/services/vidu_recovery.py` (`TARGET_HISTORICAL_PROVIDER_JOB_ID`) | Reject any ID other than `995880130565918720` before any I/O | Unit test calling `validate_authorized_job_id("111")` | `ViduUnauthorizedJobError` raised; 0 network/DB calls | Any non-matching job ID provided |
-| **2** | **Missing / Tampered / Stale Owner Auth** | HMAC-SHA256 / Ed25519 validator; GitHub env protection | Require cryptographically verifiable payload binding commit, task, job, runtime, and message anchor within 2h window | Preflight test with missing/stale/tampered auth payload | Harness exits with code 1; 0 DB/network calls | Auth payload missing, expired, or invalid |
-| **3** | **Already Consumed / Active Fence** | `provider_execution_fences` (Gate B proposed schema) | Unique constraint `(provider_name, provider_job_id)` rejects duplicate claim | Concurrency test attempting 2 claims | Second caller receives `IntegrityError`; 0 GET calls | Fence record already exists |
-| **4** | **Fence DB Insertion Failure** | `provider_execution_fences` / DB transaction | Fence commit fails (e.g. DB connection error); halt before GET | Simulated DB error on fence insert | Preflight raises DB exception; 0 GET calls issued | Fence cannot be durably committed |
-| **5** | **Provider Task Gone / Not Found** | `backend/app/providers/base.py` (`ProviderJobResult`), `vidu_recovery.py` | Handle provider 404 / `TASK_NOT_FOUND`; mark fence `CONSUMED_TERMINAL_FAILURE` | Mock provider returning 404 / `status = "FAILED"` | `ViduJobNotFoundError` raised; fence marked failed; 0 media written | Provider indicates task does not exist |
-| **6** | **Provider Task Incomplete / In Progress** | `backend/app/providers/base.py`, `vidu_recovery.py` | Consume normalized `job_result.status`; fail closed if not `"COMPLETED"` | Mock provider returning `"PROCESSING"` / `"QUEUED"` | `ViduJobNotCompletedError` raised; 0 polling retries | Task not in completed state |
-| **7** | **Missing / Unsafe / SSRF Media URL** | `VideoMaterializationService._validate_public_https_url` | Enforce HTTPS, DNS resolution, private/loopback IP block, redirect guard | Test with private IP (`10.0.0.1`), loopback, or non-HTTPS URL | `ViduRecoveryError` raised; DB savepoint rolled back; 0 download | URL invalid, private, insecure, or missing |
-| **8** | **Video Download Failure / Network Error** | `VideoMaterializationService._download_video_to_file` | Stream download with size limit and SHA-256; catch network drops | Mock network disconnect mid-stream | Exception caught; temp file purged; DB rolled back; fence `CONSUMED_TERMINAL_FAILURE` | Download fails or integrity check fails |
-| **9** | **S3 Storage Upload Failure** | `backend/app/services/storage/base.py` (`upload_file_object`) | Record `storage_intent_key`; if S3 PUT fails, rollback DB and purge temp file | Mock S3 PUT failure (500 / access denied) | Exception caught; DB rolled back; 0 orphan DB records | Storage upload fails |
-| **10** | **Ambiguous DB Commit Exception** | Service transaction boundary (`db.commit()`) | Authoritative primary DB query before compensating S3; if outcome uncertain, STOP and retain S3 object | Simulated DB commit exception with confirmed DB write | Primary DB query detects `Asset`; S3 object NOT deleted; marked for audit | Commit outcome ambiguous; halt for reconciliation |
-| **11** | **Storage Compensation Failure** | `ViduExistingJobRecoveryService`, `recovery_failure_audits` | If compensation `delete_object` fails, log critical orphan record to audit table | Mock S3 delete failure during DB rollback | Critical audit log recorded with bucket/key details; original error preserved | Compensation deletion fails (flagged for audit) |
-| **12** | **Hard Process Crash Recovery** | Crash window protocol (Section 4.3) | Any crash in Windows 2-7 consumes fence; automatic re-GET is forbidden | Crash simulation after GET issued | Fence in `GET_IN_FLIGHT` or `CONSUMED_CRASHED`; subsequent run refuses GET | Process terminates unexpectedly |
-| **13** | **Worker Replacement & Restore Persistence Proof** | Cloud PostgreSQL + S3 test suite | Teardown runner container; restore DB/S3 from snapshot; verify read-back & fence preservation | Container recreation & snapshot restoration test | Byte-for-byte SHA-256 and metadata match; fence cannot be rolled back | Data loss or fence reset upon restore/restart |
-| **14** | **Historical Production & Queue Fencing** | `backend/app/services/job_dispatch.py`, `render_worker.py`, `production_orchestrator.py` | Verify background workers and orchestrators ignore `execution_disabled=True` jobs | Queue dispatch & production orchestrator test | Job omitted from worker query results; 0 execution | Recovered job claimed by worker/orchestrator |
+| **2** | **Phase 1: Local Auth Validation Failure** | Ed25519 verifier & canonical JSON validator | Verify Ed25519 signature with `OWNER_AUTH_PUBLIC_KEY`, commit SHA, task, job, anchor, and 2h window | Preflight test with invalid signature, expired timestamp, or wrong commit SHA | Harness exits with code 1; 0 DB connections, 0 network calls | Phase 1 signature, expiration, scope, or anchor invalid |
+| **3** | **Phase 2: Actual Runtime Target Mismatch** | Database & S3 runtime configuration inspector | Compare authorized `runtime_target` to actual connected DB host/name and storage bucket/endpoint | Preflight test with mismatched runtime target string | Harness aborts before fence claim; 0 provider GET calls | Authorized runtime does not match actual runtime identity |
+| **4** | **Phase 2: Replay or Revoked Authorization** | `provider_execution_fences` (`auth_nonce`) & revocation register | Reject duplicate `auth_nonce` or revoked evidence anchor | Preflight test submitting identical nonce twice | `IntegrityError` raised; second run aborts; 0 provider GET calls | Nonce already exists or authorization revoked |
+| **5** | **Fence DB Insertion Failure** | `provider_execution_fences` / DB transaction | Fence commit fails (e.g. DB connection error); halt before GET | Simulated DB error on fence insert | Preflight raises DB exception; 0 GET calls issued | Fence cannot be durably committed |
+| **6** | **Provider Task Gone / Not Found** | `backend/app/providers/base.py` (`ProviderJobResult`), `vidu_recovery.py` | Handle provider 404 / `TASK_NOT_FOUND`; mark fence `CONSUMED_TERMINAL_FAILURE` | Mock provider returning 404 / `status = "FAILED"` | `ViduJobNotFoundError` raised; fence marked failed; 0 media written | Provider indicates task does not exist |
+| **7** | **Provider Task Incomplete / In Progress** | `backend/app/providers/base.py`, `vidu_recovery.py` | Consume normalized `job_result.status`; fail closed if not `"COMPLETED"` | Mock provider returning `"PROCESSING"` / `"QUEUED"` | `ViduJobNotCompletedError` raised; 0 polling retries | Task not in completed state |
+| **8** | **Missing / Expired / Unsafe Media URL** | `VideoMaterializationService._validate_public_https_url` | Enforce HTTPS, DNS resolution, private/loopback IP block; handle expired URL (403/404) | Test with private IP (`10.0.0.1`), non-HTTPS, or expired 404 URL | `ViduRecoveryError` / `ViduMissingOutputUrlError` raised; fence marked terminal; 0 media stored; 0 generation retry | URL missing, invalid, private, insecure, or expired |
+| **9** | **Video Download Failure / Network Error** | `VideoMaterializationService._download_video_to_file` | Stream download with size limit and SHA-256; catch network drops | Mock network disconnect mid-stream | Exception caught; temp file purged; DB rolled back; fence `CONSUMED_TERMINAL_FAILURE` | Download fails or integrity check fails |
+| **10** | **S3 Storage Upload Failure** | `backend/app/services/storage/base.py` (`upload_file_object`) | Record `storage_intent_key`; if S3 PUT fails, rollback DB and purge temp file | Mock S3 PUT failure (500 / access denied) | Exception caught; DB rolled back; 0 orphan DB records | Storage upload fails |
+| **11** | **Ambiguous DB Commit Exception** | Service transaction boundary (`db.commit()`) | Authoritative primary DB query before compensating S3; if outcome uncertain, STOP and retain S3 object | Simulated DB commit exception with confirmed DB write | Primary DB query detects `Asset`; S3 object NOT deleted; marked for audit | Commit outcome ambiguous; halt for reconciliation |
+| **12** | **Storage Compensation Safety Guard** | `ViduExistingJobRecoveryService`, `recovery_failure_audits` | S3 `delete_object` allowed ONLY if `storage_is_new_object == 'TRUE'`, DB rolled back, and 0 `Asset` references | Mock failure where S3 object pre-existed or DB rollback unproven | S3 object preserved; critical audit logged; 0 unintended deletions | Object pre-existed, DB unconfirmed, or compensation fails |
+| **13** | **Hard Process Crash Recovery** | Crash window protocol (Section 4.3) | Any crash in Windows 2-7 consumes fence; automatic re-GET is forbidden | Crash simulation after GET issued | Fence in `GET_IN_FLIGHT` or `CONSUMED_CRASHED`; subsequent run refuses GET | Process terminates unexpectedly |
+| **14** | **Post-DB Commit, Pre-Fence Update Crash (Window 5.5)** | Crash window protocol (Section 4.3) | DB committed, but process dies before fence update; reconcile lineage on primary DB | Crash simulation after `db.commit()` | Next inspection finds committed `Asset`; reconciles fence; 0 re-GET; 0 storage delete | Process dies between DB commit and fence update |
 | **15** | **Post-Commit S3 Read-Back Failure** | Post-recovery read-back verification | Read back S3 object, compute SHA-256; transition to SUCCESS only upon match | Mock S3 read-back corruption or 404 | Status remains `MATERIALIZED_UNVERIFIED` / marked terminal; DB preserved; STOP | Read-back checksum mismatch |
+| **16** | **Idempotent Historical Recovery (Zero Second GET)** | `ViduExistingJobRecoveryService.recover_existing_job` | Calling recovery on already-materialized lineage verifies DB and S3 integrity without re-GET | Repeated execution test against existing lineage | Returns existing `Asset` and `GenerationJob`; provider GET calls = 0; duplicate ledger rows = 0 | Re-recovery attempts outbound GET or creates duplicates |
+| **17** | **Live Spend & Production Ledger Exclusion** | `backend/app/models/usage_ledger.py`, `production_orchestrator.py` | Query live production ledgers and orchestrators; verify recovered historical jobs excluded | Live spend aggregation query & orchestrator dispatch test | Live ledger total spend addition = $0.00; recovered job omitted from orchestrator dispatch | Recovered job included in live spend or active queue |
+| **18** | **Restored Runtime Fail-Closed Fencing** | Preflight runtime guard & out-of-band evidence checker | Restored database without fence record fails closed due to disabled provider flag and out-of-band evidence check | Preflight test on restored database instance | Harness detects restored/unrecognized state; refuses provider GET; exits with code 1 | Restored database permits unverified provider GET |
 
 ---
 
@@ -406,7 +421,7 @@ Progress toward live recovery, downstream validation, and WP020 closure is stric
 [ Gate C: Infrastructure & Persistence Verification ]
      - Verify persistent PostgreSQL and S3 connectivity
      - Worker replacement / container restart read-back proof
-     - Isolated snapshot backup & restore verification
+     - Restored-runtime fail-closed preflight proof
      - Zero provider calls (NO-PROVIDER)
                │
                ▼  (Requires Owner Explicit Live Execution Authorization)
