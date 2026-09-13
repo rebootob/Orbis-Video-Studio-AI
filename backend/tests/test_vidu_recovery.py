@@ -645,6 +645,8 @@ def test_conflicting_asset_project_id_fails_closed(clean_db, mock_storage):
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         output_asset_id=asset_id,
         status="COMPLETED",
+        imported_historical=True,
+        execution_disabled=True,
     )
     asset = Asset(
         id=asset_id,
@@ -668,6 +670,31 @@ def test_conflicting_asset_project_id_fails_closed(clean_db, mock_storage):
         video_url="https://video.example.invalid/out.mp4",
     )
     adapter = MockViduAdapter(job_result)
+
+    with pytest.raises(ViduConflictingLineageError, match="conflicts with expected"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db_session,
+                TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=adapter,
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=False,
+            )
+        )
+
+    # Assert conflicting Asset/project evidence remains unchanged
+    refreshed_asset = db_session.get(Asset, asset_id)
+    assert refreshed_asset.project_id == other_project_id
+    refreshed_job = db_session.get(GenerationJob, job_id)
+    assert refreshed_job.output_asset_id == asset_id
+
+    # Assert no recovery lineage mutation or storage upload occurs
+    expected_recovery_project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    assert db_session.get(Project, expected_recovery_project_id) is None
+    assert db_session.query(UsageLedger).count() == 0
+    assert len(mock_storage._store) == 0
+
 
 def test_returned_provider_job_id_mismatch_fails_closed(clean_db, mock_storage):
     """If provider returns mismatched provider_job_id, recovery fails closed."""
