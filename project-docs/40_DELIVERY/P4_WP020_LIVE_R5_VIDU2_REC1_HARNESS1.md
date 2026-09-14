@@ -7,7 +7,7 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **IN REVIEW / CORRECTIVE APPLIED (ADDRESSING REVIEWS 5197304334, 5197787810, & 5197967171)**
+- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE APPLIED (ADDRESSING REVIEWS 5197304334, 5197787810, 5197967171, & 5198347460: CHANGES REQUIRED)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -79,7 +79,7 @@ Release = NOT DECLARED
    - Post-materialization read-back verification: uses an independent fresh database session to bypass identity map cache, combined with bounded streaming storage SHA-256 verification.
    - Durable out-of-band consumption marker persisted to storage on successful execution (`fences/consumed/{provider_job_id}.json`).
 7. **Automated Test Suite (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-   - 36 tests covering all 26 acceptance scenarios plus adversarial runtime mismatches, restored-DB zero-second-GET checks, empty revocation freshness attestations, storage streaming bounds and version consistency, exercising real injected failure paths through mocks and isolated SQLite DB.
+   - 38 tests covering all 26 acceptance scenarios plus adversarial runtime mismatches, restored-DB zero-second-GET checks, empty revocation freshness attestations, storage streaming bounds and version consistency, delayed read timeouts, and Gate A Phase-1 pre-DB isolation invariants, exercising real injected failure paths through mocks and isolated SQLite DB.
 
 ---
 
@@ -111,24 +111,26 @@ Release = NOT DECLARED
 | 22 | GenerationJob Historical Exclusion | **VERIFIED (PASSED)** | Validated directly via production consumer `JobDispatchService.claim_next_job`: `imported_historical=True` jobs cannot be claimed by workers. |
 | 23 | GenerationJob Execution Disabled Exclusion | **VERIFIED (PASSED)** | Validated directly via production consumer `JobDispatchService.claim_next_job`: `execution_disabled=True` jobs cannot be claimed by workers. |
 | 24 | Canonical GenerationJob Both-True Exclusion | **VERIFIED (PASSED)** | Validated directly via `JobDispatchService.claim_next_job`: Dual-fenced canonical recovered jobs are never claimable by workers. |
-| 25 | Isolated DB & S3 Backup/Restore Proof | **DEFERRED TO GATE C** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification is explicitly deferred to Gate C**. |
+| 25 | Isolated DB & S3 Backup/Restore Proof | **NOT PROVEN / DEFERRED TO GATE C** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification is explicitly not proven in Gate B and deferred to Gate C**. |
 | 26 | Restored-Runtime Fail-Closed Fencing | **VERIFIED (PASSED)** | Restored DB without fence records fails closed when live provider flag is disabled (`VIDU_GENERATION_ENABLED=False`), anchor format is validated, or runtime target mismatches. |
-| 27 | Adversarial Changed Resource Profile | **VERIFIED (PASSED)** | Label matches `UAT-COMPOSE-PERSISTENT` but storage bucket points to unauthorized target: fails closed with `AuthRuntimeMismatchError`. |
-| 28 | Restored DB Lacking Both Rows Fencing | **VERIFIED (PASSED)** | Restored DB snapshot lacking both `ProviderExecutionFence` and `GenerationJob` detects out-of-band durable storage consumption marker and raises `AuthReplayError` with ZERO second GET. |
+| 27 | Adversarial Changed Resource Profile | **VERIFIED (PASSED)** | Label matches `UAT-COMPOSE-PERSISTENT` but storage bucket, endpoint, or DB host/name points to unauthorized target: fails closed with `AuthRuntimeMismatchError`. |
+| 28 | Restored DB Lacking Both Rows Fencing | **VERIFIED (PASSED)** | Restored DB snapshot lacking both `ProviderExecutionFence` and `GenerationJob` detects out-of-band durable storage consumption marker (successful, failed, crashed) and raises `AuthReplayError` with ZERO second GET; missing marker access fails closed. |
 | 29 | Revocation Freshness Attestation Gate | **VERIFIED (PASSED)** | Empty `OWNER_AUTH_REVOCATIONS` without `OWNER_AUTH_REVOCATIONS_ATTESTED="true"` fails closed with `AuthRevokedError`. |
 | 30 | Storage Metadata Failure Fail-Closed | **VERIFIED (PASSED)** | Failure during storage `head_object` raises `ViduRecoveryError` fail-closed immediately. |
 | 31 | Storage Object Mutated After HEAD | **VERIFIED (PASSED)** | Object size/ETag changed between initial HEAD and response stream raises `ViduRecoveryError` fail-closed. |
 | 32 | Streaming Oversize Transfer Abort | **VERIFIED (PASSED)** | Response stream exceeding byte budget aborts transfer during streaming and raises `ViduRecoveryError`. |
 | 33 | Audit Write Failure Fail-Closed Stop | **VERIFIED (PASSED)** | Failure during autonomous audit persistence propagates `AuditWriteFailureError` fail-closed across all stages. |
+| 34 | Gate A Pre-DB Isolation Invariant | **VERIFIED (PASSED)** | Invalid Phase 1 authorization input fails closed with zero DB connections or queries opened. |
+| 35 | Streaming Delayed Read Timeout Abort | **VERIFIED (PASSED)** | Storage stream read delay exceeding maximum per-operation deadline aborts transfer fail-closed. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `36 passed in 1.54s` (including RFC 8032 vectors, adversarial degenerate key tests, restored-DB zero-second-GET checks, and streaming bounds)
+  - `38 passed in 1.60s` (including RFC 8032 vectors, adversarial degenerate key tests, restored-DB zero-second-GET checks, streaming bounds, and pre-DB invariant)
 - **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `74 passed in 21.79s`
+  - `76 passed in 21.85s`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`

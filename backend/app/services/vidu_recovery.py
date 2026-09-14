@@ -848,27 +848,41 @@ class ViduExistingJobRecoveryService:
             except Exception as get_err:
                 raise ViduRecoveryError(f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}") from get_err
 
-            # Version consistency check against initial HEAD
-            curr_etag = response.get("ETag")
-            curr_len = response.get("ContentLength")
-            if head_etag is not None and curr_etag != head_etag:
-                raise ViduRecoveryError(
-                    f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')"
-                )
-            if head_len is not None and curr_len != head_len:
-                raise ViduRecoveryError(
-                    f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})"
-                )
-
-            body = response["Body"]
-            chunk_size = 64 * 1024
+            body = response.get("Body") if isinstance(response, dict) else getattr(response, "Body", None)
             try:
+                # Version consistency check against initial HEAD (Guaranteed body cleanup on mismatch)
+                curr_etag = response.get("ETag") if isinstance(response, dict) else getattr(response, "ETag", None)
+                curr_len = response.get("ContentLength") if isinstance(response, dict) else getattr(response, "ContentLength", None)
+                if head_etag is not None and curr_etag != head_etag:
+                    raise ViduRecoveryError(
+                        f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')"
+                    )
+                if head_len is not None and curr_len != head_len:
+                    raise ViduRecoveryError(
+                        f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})"
+                    )
+
+                if body is None:
+                    raise ViduRecoveryError(f"Storage get_object response missing Body stream for '{bucket}/{key}'")
+
+                chunk_size = 64 * 1024
+                deadline = start_time + max_duration_seconds
+
                 while True:
-                    if time.monotonic() - start_time > max_duration_seconds:
+                    if time.monotonic() > deadline:
                         raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
-                    chunk = body.read(chunk_size)
+                    try:
+                        chunk = body.read(chunk_size)
+                    except Exception as read_err:
+                        raise ViduRecoveryError(f"Storage stream read failure: {read_err}") from read_err
+
+                    # Verify deadline again after read completes (prevents slow EOF / blocking read overrun)
+                    if time.monotonic() > deadline:
+                        raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
+
                     if not chunk:
                         break
+
                     bytes_transferred += len(chunk)
                     if bytes_transferred > max_size_bytes:
                         raise ViduRecoveryError(
@@ -876,10 +890,11 @@ class ViduExistingJobRecoveryService:
                         )
                     hasher.update(chunk)
             finally:
-                try:
-                    body.close()
-                except Exception:
-                    pass
+                if body is not None:
+                    try:
+                        body.close()
+                    except Exception:
+                        pass
 
         elif hasattr(storage, "_store"):
             item_now = storage._store.get((bucket, key))

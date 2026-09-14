@@ -68,6 +68,7 @@ def setup_auth_env(monkeypatch):
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
     monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
+    monkeypatch.setenv("VIDU_RECOVERY_GET_ENABLED", "true")
 
 
 @pytest.fixture
@@ -1042,13 +1043,12 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
 # Scenario 27: Adversarial Same-Label Changed Storage/DB Config Fails Closed
 # ==============================================================================
 def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(test_db, mock_storage, auth_keys):
-    """Adversarial check: label is UAT-COMPOSE-PERSISTENT, but storage bucket is unauthorized -> fails closed."""
+    """Adversarial check: label is UAT-COMPOSE-PERSISTENT, but actual DB or storage identity is foreign -> fails closed."""
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
-    # Point storage provider to an unauthorized foreign bucket
+    # 1. Changed storage bucket under valid label -> fails closed
     mock_storage.bucket_name = "unauthorized-exfiltration-bucket"
-
     with pytest.raises(AuthRuntimeMismatchError, match="Actual resource configuration does not match authorized runtime target profile"):
         execute_recovery_harness(
             db=test_db,
@@ -1061,6 +1061,71 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
             storage_provider=mock_storage,
         )
 
+    # 2. Changed storage endpoint under valid label -> fails closed
+    mock_storage.bucket_name = "orbis-media-assets"
+    mock_storage.endpoint_url = "http://rogue-exfiltration-minio:9000"
+    with pytest.raises(AuthRuntimeMismatchError, match="Actual resource configuration does not match authorized runtime target profile"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            storage_provider=mock_storage,
+        )
+    mock_storage.endpoint_url = None
+
+    # 3. Unknown runtime profile label -> fails closed immediately
+    unauthorized_payload = CanonicalAuthPayload(
+        authorized_commit_sha=payload.authorized_commit_sha,
+        task_id=payload.task_id,
+        provider_job_id=payload.provider_job_id,
+        runtime_target="UNKNOWN-ROGUE-PROFILE",
+        owner_evidence_anchor=payload.owner_evidence_anchor,
+        issued_at=payload.issued_at,
+        expires_at=payload.expires_at,
+        auth_nonce=str(uuid.uuid4()),
+    )
+    unauthorized_sig = ed25519_sign(unauthorized_payload.to_canonical_json(), seed)
+    with pytest.raises(AuthRuntimeMismatchError, match="Unknown or unauthorized runtime target profile"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=unauthorized_payload,
+            signature_bytes=unauthorized_sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UNKNOWN-ROGUE-PROFILE",
+            mock_mode=True,
+            storage_provider=mock_storage,
+        )
+
+    # 4. Changed DB host/database under valid label -> fails closed
+    foreign_engine = create_engine("sqlite:///unauthorized_foreign.db")
+    Base.metadata.create_all(bind=foreign_engine)
+    ForeignSession = sessionmaker(bind=foreign_engine)
+    foreign_db = ForeignSession()
+    try:
+        with pytest.raises(AuthRuntimeMismatchError, match="Actual resource configuration does not match authorized runtime target profile"):
+            execute_recovery_harness(
+                db=foreign_db,
+                auth_payload=payload,
+                signature_bytes=sig,
+                public_key_bytes=pk,
+                expected_commit_sha=payload.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                storage_provider=mock_storage,
+            )
+    finally:
+        foreign_db.close()
+        Base.metadata.drop_all(bind=foreign_engine)
+        foreign_engine.dispose()
+        import os
+        if os.path.exists("unauthorized_foreign.db"):
+            os.remove("unauthorized_foreign.db")
+
 
 # ==============================================================================
 # Scenario 28: Restored Snapshot Lacking BOTH Rows Prevents Second GET
@@ -1068,27 +1133,26 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
 def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(test_db, mock_storage, auth_keys):
     """Restored DB lacking both ProviderExecutionFence and GenerationJob detects out-of-band artifact and prevents 2nd GET."""
     seed, pk = auth_keys
-    payload, sig = make_valid_auth(seed, nonce="nonce-run-1")
 
-    mock_adapter = MockProviderAdapter()
+    # Subcase A: Successful execution followed by DB restore (loss of both rows)
+    payload_a, sig_a = make_valid_auth(seed, nonce="nonce-subcase-a")
+    mock_adapter_a = MockProviderAdapter()
 
-    # Run 1: successful execution
-    result = execute_recovery_harness(
+    result_a = execute_recovery_harness(
         db=test_db,
-        auth_payload=payload,
-        signature_bytes=sig,
+        auth_payload=payload_a,
+        signature_bytes=sig_a,
         public_key_bytes=pk,
-        expected_commit_sha=payload.authorized_commit_sha,
+        expected_commit_sha=payload_a.authorized_commit_sha,
         actual_runtime_target="UAT-COMPOSE-PERSISTENT",
         mock_mode=True,
-        adapter=mock_adapter,
+        adapter=mock_adapter_a,
         storage_provider=mock_storage,
     )
-    assert result["status"] == "CONSUMED_SUCCESS"
-    assert mock_adapter.get_calls_attempted == 1
+    assert result_a["status"] == "CONSUMED_SUCCESS"
+    assert mock_adapter_a.get_calls_attempted == 1
 
     # SIMULATE RESTORED DATABASE:
-    # A restored snapshot taken before the run has 0 fences, jobs, or assets in DB!
     test_db.query(RecoveryFailureAudit).delete()
     test_db.query(ProviderExecutionFence).delete()
     test_db.query(GenerationJob).delete()
@@ -1099,40 +1163,80 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     test_db.query(Project).delete()
     test_db.commit()
 
-    # Verify rows are completely gone from DB
     assert test_db.query(ProviderExecutionFence).count() == 0
     assert test_db.query(GenerationJob).count() == 0
-    assert test_db.query(Asset).count() == 0
 
-    # Run 2: Operator or attacker tries to run recovery again against restored DB
-    payload2, sig2 = make_valid_auth(seed, nonce="nonce-run-2")
-    second_mock_adapter = MockProviderAdapter()
+    # Re-attempt: storage marker fences/consumed/{provider_job_id}.json exists -> reject second GET!
+    payload_a2, sig_a2 = make_valid_auth(seed, nonce="nonce-subcase-a2")
+    second_adapter = MockProviderAdapter()
 
-    with pytest.raises(AuthReplayError, match="Out-of-band storage evidence detected: durable artifact exists"):
+    with pytest.raises(AuthReplayError, match="Authoritative external execution fence detected"):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload2,
-            signature_bytes=sig2,
+            auth_payload=payload_a2,
+            signature_bytes=sig_a2,
             public_key_bytes=pk,
-            expected_commit_sha=payload2.authorized_commit_sha,
+            expected_commit_sha=payload_a2.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
-            adapter=second_mock_adapter,
+            adapter=second_adapter,
             storage_provider=mock_storage,
         )
+    assert second_adapter.get_calls_attempted == 0
 
-    # CRITICAL INVARIANT: ZERO SECOND GET CALL!
-    assert second_mock_adapter.get_calls_attempted == 0
+    # Subcase B: Failed/crashed execution where pre-GET external fence was persisted, followed by DB restore (loss of both rows)
+    import json
+    mock_storage._store.clear()
+    pre_get_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
+    mock_storage.put_object("orbis-media-assets", pre_get_key, json.dumps({"status": "DISPATCHED_BEFORE_GET"}).encode("utf-8"))
+
+    payload_b, sig_b = make_valid_auth(seed, nonce="nonce-subcase-b")
+    crashed_adapter = MockProviderAdapter()
+
+    with pytest.raises(AuthReplayError, match="Authoritative external execution fence detected"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_b,
+            signature_bytes=sig_b,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_b.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=crashed_adapter,
+            storage_provider=mock_storage,
+        )
+    # ZERO second GET even after crashed/failed pre-GET dispatch!
+    assert crashed_adapter.get_calls_attempted == 0
+
+    # Subcase C: Inaccessible storage during external fence check fails closed with RecoveryAuthError (not swallowed)
+    class InaccessibleStorage:
+        bucket_name = "orbis-media-assets"
+        def object_exists(self, b, k):
+            raise RuntimeError("Storage unreachable / connection timed out")
+
+    with pytest.raises(RecoveryAuthError, match="Storage accessibility failure while inspecting external execution fence"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_b,
+            signature_bytes=sig_b,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_b.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=crashed_adapter,
+            storage_provider=InaccessibleStorage(),
+        )
 
 
 # ==============================================================================
 # Scenario 29: Empty Revocation Registry Without Freshness Attestation Fails Closed
 # ==============================================================================
 def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed(test_db, auth_keys, monkeypatch):
-    """Empty OWNER_AUTH_REVOCATIONS without explicit freshness attestation must fail closed."""
+    """Empty OWNER_AUTH_REVOCATIONS and unattested OUT_OF_BAND_CONSUMED_EVIDENCE must fail closed."""
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
+    # 1. Empty OWNER_AUTH_REVOCATIONS without freshness attestation
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
     monkeypatch.delenv("OWNER_AUTH_REVOCATIONS_ATTESTED", raising=False)
 
@@ -1142,6 +1246,34 @@ def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-rev-test",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        )
+
+    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
+
+    # 2. OUT_OF_BAND_CONSUMED_EVIDENCE provided without mandatory freshness attestation
+    monkeypatch.setenv("OUT_OF_BAND_CONSUMED_EVIDENCE", "some-historical-job-id")
+    monkeypatch.delenv("OUT_OF_BAND_CONSUMED_ATTESTED", raising=False)
+
+    with pytest.raises(AuthRevokedError, match="External consumed registry lacks mandatory freshness attestation"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest=payload.digest(),
+            execution_id="exec-rev-test-2",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        )
+
+    # 3. Attested registry contains target job ID -> rejects with AuthReplayError
+    monkeypatch.setenv("OUT_OF_BAND_CONSUMED_ATTESTED", "true")
+    monkeypatch.setenv("OUT_OF_BAND_CONSUMED_EVIDENCE", f"{TARGET_HISTORICAL_PROVIDER_JOB_ID},other-job")
+
+    with pytest.raises(AuthReplayError, match="Out-of-band consumption evidence confirms"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest=payload.digest(),
+            execution_id="exec-rev-test-3",
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
         )
 
@@ -1171,70 +1303,205 @@ def test_scenario_30_storage_streaming_metadata_failure_fails_closed(mock_storag
 # ==============================================================================
 # Scenario 31: Storage Streaming Object Mutated After HEAD Fails Closed
 # ==============================================================================
-def test_scenario_31_storage_streaming_object_mutated_after_head_fails_closed(mock_storage):
-    """Object size/hash mutated between HEAD and GET must fail closed."""
-    mock_storage.put_object("orbis-media-assets", "assets/test.mp4", b"INITIAL_DATA")
+def test_scenario_31_storage_streaming_object_mutated_after_head_fails_closed():
+    """Object mutated between HEAD and GET must be detected and response Body closed."""
+    class StreamClientWithMutation:
+        def __init__(self):
+            self.body_closed = False
 
-    # Call with expected size matching initial data, but mutate underlying store during read
-    class MutatingStorage:
-        def __init__(self, inner):
-            self._store = inner._store
-        def head_object(self, **kwargs):
-            return {"ContentLength": len(b"INITIAL_DATA"), "ETag": "etag-1"}
+        def head_object(self, Bucket, Key):
+            return {"ContentLength": 100, "ETag": '"etag-head-initial"'}
 
-    # Mutate data length after initial HEAD length check
-    mock_storage._store[("orbis-media-assets", "assets/test.mp4")] = (b"MUTATED_DIFFERENT_DATA", {})
-    with pytest.raises(ViduRecoveryError, match="Storage size mismatch"):
+        def get_object(self, Bucket, Key):
+            client_self = self
+            class MockBody:
+                def read(self, amt=64*1024):
+                    return b"X" * 100
+                def close(self):
+                    client_self.body_closed = True
+
+            # Mutate ETag between HEAD and GET!
+            return {
+                "Body": MockBody(),
+                "ContentLength": 100,
+                "ETag": '"etag-mutated-after-head"',
+            }
+
+    class MockStorageWrapper:
+        def __init__(self):
+            self.client = StreamClientWithMutation()
+
+    wrapper = MockStorageWrapper()
+    with pytest.raises(ViduRecoveryError, match="Storage object modified between HEAD and stream retrieval.*ETag mismatch"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=mock_storage,
+            storage=wrapper,
             bucket="orbis-media-assets",
             key="assets/test.mp4",
-            expected_size=len(b"INITIAL_DATA"),
-            expected_sha256="abc",
+            expected_size=100,
+            expected_sha256="any-hash",
         )
+
+    # Body must be closed cleanly despite the exception!
+    assert wrapper.client.body_closed is True
 
 
 # ==============================================================================
 # Scenario 32: Storage Streaming Oversize Stream Aborts During Transfer
 # ==============================================================================
-def test_scenario_32_storage_streaming_oversize_stream_aborts_during_transfer(mock_storage):
-    """Stream transfer exceeding byte bound is aborted during streaming without full memory consumption."""
-    oversize_bytes = b"X" * (1024 * 1024 + 10)  # 1MB + 10 bytes
-    mock_storage.put_object("orbis-media-assets", "assets/oversize.mp4", oversize_bytes)
+def test_scenario_32_storage_streaming_oversize_stream_aborts_during_transfer():
+    """Stream transfer exceeding byte bound is aborted during streaming with guaranteed Body cleanup."""
+    class LyingHeadStreamClient:
+        def __init__(self, total_bytes_to_stream):
+            self.total_bytes = total_bytes_to_stream
+            self.body_closed = False
 
-    with pytest.raises(ViduRecoveryError, match="exceeds maximum allowed size|exceeded maximum budget"):
+        def head_object(self, Bucket, Key):
+            # Lying acceptable HEAD! Passes metadata check!
+            return {"ContentLength": 1000, "ETag": '"etag-lying"'}
+
+        def get_object(self, Bucket, Key):
+            client_self = self
+            class StreamingBody:
+                def __init__(self):
+                    self.yielded = 0
+                def read(self, amt=64*1024):
+                    if self.yielded >= client_self.total_bytes:
+                        return b""
+                    to_send = min(amt, client_self.total_bytes - self.yielded)
+                    self.yielded += to_send
+                    return b"A" * to_send
+                def close(self):
+                    client_self.body_closed = True
+
+            return {"Body": StreamingBody(), "ContentLength": 1000, "ETag": '"etag-lying"'}
+
+    class MockStorageWrapper:
+        def __init__(self, total_bytes):
+            self.client = LyingHeadStreamClient(total_bytes)
+
+    # Stream yields 2MB, but budget is 1MB -> aborts in chunk reading loop!
+    wrapper = MockStorageWrapper(total_bytes=2 * 1024 * 1024)
+    with pytest.raises(ViduRecoveryError, match="Storage stream transfer exceeded maximum budget"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=mock_storage,
+            storage=wrapper,
             bucket="orbis-media-assets",
             key="assets/oversize.mp4",
-            expected_size=len(oversize_bytes),
-            expected_sha256="abc",
-            max_size_bytes=1024 * 1024,  # Budget = 1MB
+            expected_size=1000,
+            expected_sha256="any-hash",
+            max_size_bytes=1024 * 1024,  # 1MB limit
         )
 
+    # Guaranteed Body cleanup!
+    assert wrapper.client.body_closed is True
+
 
 # ==============================================================================
-# Scenario 33: Audit Write Failure Stops Fail-Closed Across All Stages
+# Scenario 33: Audit Write Failure Stops Fail-Closed on DB Stage
 # ==============================================================================
-def test_scenario_33_audit_write_failure_stops_fail_closed(test_db, mock_storage, auth_keys, monkeypatch):
-    """When autonomous failure audit writing fails, AuditWriteFailureError is raised fail-closed."""
+def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, mock_storage, auth_keys, monkeypatch):
+    """When autonomous failure audit writing fails during a DB stage, AuditWriteFailureError is raised fail-closed with sanitized message."""
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
     def failing_record_failure_audit(*args, **kwargs):
-        raise AuditWriteFailureError("Simulated autonomous DB connection failure during audit write")
+        raise AuditWriteFailureError("Failed to record autonomous failure audit: [REDACTED_DB_ERROR]")
 
     monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", failing_record_failure_audit)
 
-    # Force a post-commit readback error to trigger audit write
-    with pytest.raises(AuditWriteFailureError, match="Simulated autonomous DB connection failure"):
+    # Trigger a Phase 2 failure (e.g. revoked nonce) which triggers record_failure_audit
+    revocation_list = [payload.auth_nonce]
+
+    with pytest.raises(AuditWriteFailureError, match="Failed to record autonomous failure audit"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=payload,
             signature_bytes=sig,
             public_key_bytes=pk,
-            expected_commit_sha="WRONG_COMMIT_SHA",  # Triggers phase 1 error -> audit write
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            revocation_list=revocation_list,
+            mock_mode=True,
+            storage_provider=mock_storage,
+        )
+
+
+# ==============================================================================
+# Scenario 34: Gate A Pre-DB Contract Preservation (Strictly Zero DB I/O on Phase 1)
+# ==============================================================================
+def test_scenario_34_phase1_failure_strictly_zero_db_io(test_db, mock_storage, auth_keys):
+    """Gate A pre-DB contract verification: Phase 1 failure must produce strictly 0 DB queries / I/O and 0 audit rows."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    # Initial state
+    initial_audits = test_db.query(RecoveryFailureAudit).count()
+    initial_fences = test_db.query(ProviderExecutionFence).count()
+
+    # Tamper with signature to force Phase 1 failure
+    bad_sig = b"\x00" * len(sig)
+
+    with pytest.raises(RecoveryAuthError, match="Ed25519 authorization signature verification failed"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=bad_sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
             storage_provider=mock_storage,
         )
+
+    # Verify zero DB rows were written
+    assert test_db.query(RecoveryFailureAudit).count() == initial_audits
+    assert test_db.query(ProviderExecutionFence).count() == initial_fences
+
+
+# ==============================================================================
+# Scenario 35: SDK Stream Timeout and Slow EOF Transfer Bounds
+# ==============================================================================
+def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
+    """Streaming transfer exceeding deadline or suffering slow EOF must be aborted and Body closed."""
+    import time
+
+    class SlowBodyStreamClient:
+        def __init__(self):
+            self.body_closed = False
+
+        def head_object(self, Bucket, Key):
+            return {"ContentLength": 1000, "ETag": '"etag-slow"'}
+
+        def get_object(self, Bucket, Key):
+            client_self = self
+            class SlowBody:
+                def __init__(self):
+                    self.call_count = 0
+                def read(self, amt=64*1024):
+                    self.call_count += 1
+                    if self.call_count == 1:
+                        return b"A" * 100
+                    # Simulate hanging / slow EOF
+                    time.sleep(0.05)
+                    return b""
+                def close(self):
+                    client_self.body_closed = True
+
+            return {"Body": SlowBody(), "ContentLength": 1000, "ETag": '"etag-slow"'}
+
+    class MockStorageWrapper:
+        def __init__(self):
+            self.client = SlowBodyStreamClient()
+
+    wrapper = MockStorageWrapper()
+    # Set max_duration_seconds to very small value (0.01s)
+    with pytest.raises(ViduRecoveryError, match="Storage stream transfer exceeded timeout"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=wrapper,
+            bucket="orbis-media-assets",
+            key="assets/slow.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+            max_duration_seconds=0.01,
+        )
+
+    assert wrapper.client.body_closed is True

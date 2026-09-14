@@ -141,29 +141,17 @@ def execute_recovery_harness(
             )
             raise
 
-    # 3. Phase 1: Local In-Memory Authorization Validation (Pre-DB)
+    # 3. Phase 1: Local In-Memory Authorization Validation (Pre-DB: strictly 0 DB connections/I/O)
     if not auth_payload or not signature_bytes or not public_key_bytes or not expected_commit_sha:
         raise RecoveryAuthError("Phase 1 verification requires auth_payload, signature, public_key, and expected_commit_sha")
 
-    try:
-        auth_digest = RecoveryAuthService.verify_phase_1_in_memory(
-            payload=auth_payload,
-            signature_bytes=signature_bytes,
-            public_key_bytes=public_key_bytes,
-            expected_commit_sha=expected_commit_sha,
-            current_time=now,
-        )
-    except Exception as p1_err:
-        RecoveryAuthService.record_failure_audit(
-            db=db,
-            provider_job_id=auth_payload.provider_job_id if auth_payload else TARGET_HISTORICAL_PROVIDER_JOB_ID,
-            failure_stage="AUTH_PHASE_1",
-            error_class=p1_err.__class__.__name__,
-            error_message=str(p1_err),
-            db_transaction_state="PRE_DB",
-            compensation_status="NOT_APPLICABLE",
-        )
-        raise
+    auth_digest = RecoveryAuthService.verify_phase_1_in_memory(
+        payload=auth_payload,
+        signature_bytes=signature_bytes,
+        public_key_bytes=public_key_bytes,
+        expected_commit_sha=expected_commit_sha,
+        current_time=now,
+    )
     logger.info("Phase 1 authorization verified successfully (digest=%s)", auth_digest)
 
     # 4. Phase 2: Database & Runtime Target Validation pre-GET
@@ -194,10 +182,42 @@ def execute_recovery_harness(
         raise
     logger.info("Phase 2 fence claimed successfully (fence_id=%s, status=%s)", fence.fence_id, fence.status)
 
-    # 5. Pre-GET Atomic State Transition: GET_IN_FLIGHT
+    # 5. Pre-GET Atomic State Transition: External dispatch fence + GET_IN_FLIGHT
     job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
     asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+
+    # Write authoritative external pre-GET dispatch fence to storage BEFORE issuing any provider GET
+    pre_get_marker_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
+    marker_data = json.dumps({
+        "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        "auth_nonce": auth_payload.auth_nonce,
+        "dispatched_at": utc_now().isoformat(),
+        "status": "DISPATCHED_BEFORE_GET",
+        "task_id": TARGET_TASK_ID,
+        "execution_id": exec_id,
+    }).encode("utf-8")
+
+    try:
+        if hasattr(storage, "put_object"):
+            storage.put_object(bucket_name, pre_get_marker_key, marker_data)
+        elif hasattr(storage, "client") and hasattr(storage.client, "put_object"):
+            storage.client.put_object(Bucket=bucket_name, Key=pre_get_marker_key, Body=marker_data)
+        else:
+            raise RecoveryAuthError("Storage provider does not support external fence persistence")
+    except Exception as marker_err:
+        sanitized_err = sanitize_error_message(str(marker_err))
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="EXTERNAL_FENCE_DISPATCH",
+            error_class=marker_err.__class__.__name__,
+            error_message=sanitized_err,
+            db_transaction_state="FAILED",
+            compensation_status="NOT_APPLICABLE",
+            fence_id=fence.fence_id if fence else None,
+        )
+        raise RecoveryAuthError(f"Failed to persist external pre-GET dispatch fence: {sanitized_err}") from marker_err
 
     try:
         fence.status = "GET_IN_FLIGHT"
@@ -211,7 +231,10 @@ def execute_recovery_harness(
         db.commit()
         db.refresh(fence)
     except Exception as get_inflight_err:
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception as rb_err:
+            logger.warning("Rollback failed during pre-GET fence transition: %s", sanitize_error_message(str(rb_err)))
         RecoveryAuthService.record_failure_audit(
             db=db,
             provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -284,53 +307,22 @@ def execute_recovery_harness(
             db.rollback()
         raise
 
-    # 7. Post-Materialization Read-Back Verification
+    # 7. Post-Materialization Read-Back Verification (Entire block audited)
     logger.info("Executing post-materialization read-back verification")
-    # Independent fresh session to bypass identity-map cache
-    from sqlalchemy.orm import sessionmaker
-    engine = db.get_bind()
-    independent_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        from sqlalchemy.orm import sessionmaker
+        engine = db.get_bind()
+        independent_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-    with independent_session_factory() as readback_db:
-        db_asset = readback_db.get(Asset, asset_uuid)
-        db_job = readback_db.get(GenerationJob, job_uuid)
-        if not db_asset or not db_job:
-            fence.status = "CONSUMED_TERMINAL_FAILURE"
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-            RecoveryAuthService.record_failure_audit(
-                db=db,
-                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                failure_stage="POST_COMMIT_READBACK",
-                error_class="ViduRecoveryError",
-                error_message="Read-back verification failed: DB Asset or GenerationJob missing",
-                db_transaction_state="COMMITTED",
-                compensation_status="NOT_APPLICABLE",
-                fence_id=fence.fence_id,
-            )
-            raise ViduRecoveryError("Read-back verification failed: DB Asset or GenerationJob missing")
+        with independent_session_factory() as readback_db:
+            db_asset = readback_db.get(Asset, asset_uuid)
+            db_job = readback_db.get(GenerationJob, job_uuid)
+            if not db_asset or not db_job:
+                raise ViduRecoveryError("Read-back verification failed: DB Asset or GenerationJob missing")
 
-        if not storage.object_exists(db_asset.storage_bucket, db_asset.storage_key):
-            fence.status = "CONSUMED_TERMINAL_FAILURE"
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-            RecoveryAuthService.record_failure_audit(
-                db=db,
-                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                failure_stage="POST_COMMIT_READBACK",
-                error_class="ViduRecoveryError",
-                error_message="Read-back verification failed: Storage object missing",
-                db_transaction_state="COMMITTED",
-                compensation_status="NOT_APPLICABLE",
-                fence_id=fence.fence_id,
-            )
-            raise ViduRecoveryError("Read-back verification failed: Storage object missing")
+            if not storage.object_exists(db_asset.storage_bucket, db_asset.storage_key):
+                raise ViduRecoveryError("Read-back verification failed: Storage object missing")
 
-        try:
             ViduExistingJobRecoveryService.stream_verify_storage_object(
                 storage=storage,
                 bucket=db_asset.storage_bucket,
@@ -339,23 +331,23 @@ def execute_recovery_harness(
                 expected_sha256=db_asset.checksum_sha256,
                 max_size_bytes=50 * 1024 * 1024,
             )
-        except Exception as stream_err:
-            fence.status = "CONSUMED_TERMINAL_FAILURE"
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-            RecoveryAuthService.record_failure_audit(
-                db=db,
-                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                failure_stage="POST_COMMIT_READBACK",
-                error_class=stream_err.__class__.__name__,
-                error_message=str(stream_err),
-                db_transaction_state="COMMITTED",
-                compensation_status="NOT_APPLICABLE",
-                fence_id=fence.fence_id,
-            )
-            raise
+    except Exception as readback_err:
+        fence.status = "CONSUMED_TERMINAL_FAILURE"
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="POST_COMMIT_READBACK",
+            error_class=readback_err.__class__.__name__,
+            error_message=str(readback_err),
+            db_transaction_state="COMMITTED_PRIMARY_PRESERVED",
+            compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
+            fence_id=fence.fence_id,
+        )
+        raise
 
     # 8. All verifications passed: persist out-of-band marker and CONSUMED_SUCCESS
     try:
@@ -364,6 +356,7 @@ def execute_recovery_harness(
             "consumed_at": utc_now().isoformat(),
             "nonce": auth_payload.auth_nonce if auth_payload else "UNKNOWN",
             "fence_id": str(fence.fence_id),
+            "status": "CONSUMED_SUCCESS",
         }).encode("utf-8")
         marker_key = f"fences/consumed/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
         if hasattr(storage, "put_object"):
@@ -371,7 +364,18 @@ def execute_recovery_harness(
         elif hasattr(storage, "client") and hasattr(storage.client, "put_object"):
             storage.client.put_object(Bucket=bucket_name, Key=marker_key, Body=marker_bytes)
     except Exception as marker_err:
-        logger.warning("Failed to persist storage consumption marker: %s", marker_err)
+        sanitized_err = sanitize_error_message(str(marker_err))
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="EXTERNAL_FENCE_CONSUME",
+            error_class=marker_err.__class__.__name__,
+            error_message=sanitized_err,
+            db_transaction_state="COMMITTED_PRIMARY_PRESERVED",
+            compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
+            fence_id=fence.fence_id if fence else None,
+        )
+        raise RecoveryAuthError(f"Failed to persist terminal storage consumption marker: {sanitized_err}") from marker_err
 
     try:
         fence.status = "CONSUMED_SUCCESS"

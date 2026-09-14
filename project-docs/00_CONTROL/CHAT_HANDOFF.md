@@ -47,7 +47,7 @@ PREV6_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56
 PREV7_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
 PREV7_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 
-GATE_B_STATUS = IMPLEMENTED / VERIFIED / IN REVIEW
+GATE_B_STATUS = IN PROGRESS / CORRECTIVE / IN REVIEW (REVIEW 5198347460: CHANGES REQUIRED)
 GATE_C_STATUS = PROPOSED / NOT AUTHORIZED / NOT STARTED
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
 
@@ -77,18 +77,17 @@ CORE_V1_PROGRESS = 19 / 20 = 95%
 CORE_V1_RELEASE = NOT DECLARED
 R4 = STOPPED / CONSUMED / NEVER RERUN
 
-REC1_PREP_CLOSE_PROVIDER_GENERATION_CALLS = 0
-REC1_PREP_CLOSE_PAID_PROVIDER_CALLS = 0
-REC1_PREP_CLOSE_VIDU_GENERATION_POSTS = 0
-REC1_PREP_CLOSE_VIDU_GET_CALLS = 0
-REC1_PREP_CLOSE_PROVIDER_CREDIT_ACTIVITY = 0
-REC1_PREP_CLOSE_PAID_FENCE_WRITTEN = false
-REC1_PREP_CLOSE_PAID_LIVE_DISPATCH = false
+GATE_B_PROVIDER_STATUS_GET_CALLS = 0
+GATE_B_PROVIDER_GENERATION_POSTS = 0
+GATE_B_PAID_PROVIDER_CALLS = 0
+GATE_B_NEW_PROVIDER_JOBS = 0
+GATE_B_MANUAL_WORKFLOW_DISPATCH = 0
 ```
 
 Next Gate Direction:
-- Current in-flight gate: `P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE` (DOCS-ONLY / PR #104 OPEN / IN REVIEW / NOT MERGED).
-- Last merged gate: `P4-WP020-LIVE-R5-VIDU2-REC1-PREP` (PASS / MERGED / COMPLETE, PR #103, commit 7ff516f317f84278f6143f15cc58b91fd3fa34d5).
+- Current in-flight gate: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1` (Gate B NO-PROVIDER Corrective on PR #108 / IN REVIEW / NOT MERGED).
+- Review status: Review 5198347460 = CHANGES REQUIRED.
+- Last merged gate: `P4-WP020-LIVE-R5-VIDU2-REC1-CONTRACT1-CLOSE` (PASS / MERGED / COMPLETE, PR #107, commit ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7).
 - Executed gate: `P4-WP020-LIVE-R5-VIDU2-RUN1` (PASS / CONSUMED / NEVER RERUN, Run 34569728383).
 - Consumed live runs:
   - `LIVE-20260910-VIDU2-R5` (Run 34569728383): PASS / CONSUMED / NEVER RERUN (1 POST, video present, credits reported 30.0, actual credits consumed UNKNOWN / NOT CONFIRMED).
@@ -101,21 +100,22 @@ Next Gate Direction:
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE review/merge gate only.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1 (Gate B) review/merge gate only.
 
 ```text
-GATE = P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE
-TYPE = DOCS-ONLY Post-Merge Control Closure Sync
-PR = #104 (https://github.com/rebootob/Orbis-Video-Studio-AI/pull/104)
-BRANCH = ai/p4-wp020-live-r5-vidu2-rec1-prep-close
-AUTHORIZED_BASE_MAIN = 7ff516f317f84278f6143f15cc58b91fd3fa34d5
+GATE = P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1
+TYPE = Gate B Execution Harness, Standalone Schema & Failure Matrix (NO-PROVIDER)
+PR = #108 (https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
+BRANCH = ai/p4-wp020-live-r5-vidu2-rec1-harness1
+AUTHORIZED_BASE_MAIN = ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7
 STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OWNER NEXT-GATE DECISION)
+REVIEW_5198347460 = CHANGES REQUIRED (ADDRESSING BLOCKERS ON PR #108)
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-rec1-prep-close`.
-- Verify exact-head CI success on PR #104.
-- Confirm DOCS-ONLY scope (zero application code/workflow/test changes, zero provider calls and zero provider/credit activity).
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-rec1-harness1`.
+- Verify exact-head CI success on PR #108.
+- Confirm NO-PROVIDER scope (zero real provider GET/POST calls, zero paid calls, zero new generation).
 - Present for ChatGPT independent review on GitHub.
 - STOP for explicit Owner decision. DO NOT merge without Owner approval.
 

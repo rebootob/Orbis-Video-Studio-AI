@@ -26,12 +26,42 @@ MAX_VALIDITY_WINDOW_SECONDS = 7200  # 2 hours
 
 AUTHORIZED_RUNTIME_TARGET_PROFILES = {
     "UAT-COMPOSE-PERSISTENT": {
-        "allowed_db_patterns": [r"sqlite.*", r".*orbis.*", r".*5432.*", r".*localhost.*", r".*127\.0\.0\.1.*", r".*postgres.*"],
-        "allowed_buckets": ["orbis-media-assets", "orbis-assets", "test-bucket"],
+        "trusted_db_identities": [
+            "sqlite://:memory:",
+            "sqlite:///",
+            "sqlite://",
+            "postgresql+psycopg://localhost:5432/orbis_studio",
+            "postgresql+psycopg://127.0.0.1:5432/orbis_studio",
+            "postgresql+psycopg://postgres:5432/orbis_studio",
+            "postgresql://localhost:5432/orbis_studio",
+            "postgresql://127.0.0.1:5432/orbis_studio",
+            "postgresql://postgres:5432/orbis_studio",
+        ],
+        "trusted_storage_identities": [
+            "mock://local/orbis-media-assets",
+            "mock://local/orbis-assets",
+            "mock://local/test-bucket",
+            "s3://http://localhost:9000/orbis-media-assets",
+            "s3://http://localhost:9000/orbis-assets",
+            "s3://http://127.0.0.1:9000/orbis-media-assets",
+            "s3://http://127.0.0.1:9000/orbis-assets",
+            "s3://http://minio:9000/orbis-media-assets",
+            "s3://http://minio:9000/orbis-assets",
+            "s3://localhost:9000/orbis-media-assets",
+            "s3://localhost:9000/orbis-assets",
+            "s3://127.0.0.1:9000/orbis-media-assets",
+            "s3://127.0.0.1:9000/orbis-assets",
+            "s3://minio:9000/orbis-media-assets",
+            "s3://minio:9000/orbis-assets",
+        ],
     },
     "PRODUCTION": {
-        "allowed_db_patterns": [r".*prod.*orbis.*"],
-        "allowed_buckets": ["orbis-media-assets-prod"],
+        "trusted_db_identities": [
+            "postgresql+psycopg://production-db.internal:5432/orbis_production",
+        ],
+        "trusted_storage_identities": [
+            "s3://https://s3.ap-southeast-1.amazonaws.com/orbis-media-assets-prod",
+        ],
     },
 }
 
@@ -40,25 +70,44 @@ def resolve_canonical_resource_identities(
     db: Session,
     storage_provider: Optional[any] = None,
 ) -> tuple[str, str]:
-    """Independently discover and sanitize primary DB identity and storage bucket identity.
+    """Independently discover and canonicalize primary DB host/database and storage endpoint/bucket identity.
 
     Returns:
         (db_identity, storage_identity)
-        e.g. ("sqlite:///:memory:", "storage://orbis-media-assets")
+        e.g. ("sqlite://:memory:", "mock://local/orbis-media-assets")
     """
     bind = db.get_bind()
-    url = str(bind.url)
-    sanitized_db = sanitize_error_message(url)
+    url = bind.url
 
+    # Canonicalize DB identity (driver, host, port, database without credentials)
+    if url.drivername.startswith("sqlite"):
+        db_path = url.database or ":memory:"
+        db_identity = f"sqlite://{db_path}"
+    else:
+        host = url.host or "localhost"
+        port = url.port or 5432
+        dbname = url.database or ""
+        db_identity = f"{url.drivername}://{host}:{port}/{dbname}"
+
+    # Canonicalize Storage identity (protocol, endpoint, bucket)
     bucket = None
+    endpoint = None
     if storage_provider is not None:
         bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None)
+        endpoint = getattr(storage_provider, "endpoint_url", None)
+        if not endpoint and hasattr(storage_provider, "client") and hasattr(storage_provider.client, "meta"):
+            endpoint = getattr(storage_provider.client.meta, "endpoint_url", None)
     if not bucket:
         from app.core.config import settings
         bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")
 
-    storage_identity = f"storage://{bucket}"
-    return sanitized_db, storage_identity
+    if (storage_provider is not None and hasattr(storage_provider, "_store") and not endpoint) or (storage_provider is None and db_identity.startswith("sqlite://")):
+        storage_identity = f"mock://local/{bucket}"
+    else:
+        endpoint = endpoint or "http://localhost:9000"
+        storage_identity = f"s3://{endpoint}/{bucket}"
+
+    return db_identity, storage_identity
 
 
 class RecoveryAuthError(RuntimeError):
@@ -263,9 +312,9 @@ class RecoveryAuthService:
 
         rec_enabled = getattr(settings, "VIDU_RECOVERY_GET_ENABLED", None)
         if rec_enabled is None:
-            rec_enabled = os.environ.get("VIDU_RECOVERY_GET_ENABLED", "true").lower() in ("true", "1")
+            rec_enabled = os.environ.get("VIDU_RECOVERY_GET_ENABLED", "false").lower() in ("true", "1")
         if not rec_enabled:
-            raise RecoveryAuthError("Restored runtime safety check failed: VIDU_RECOVERY_GET_ENABLED is False (fail-closed)")
+            raise RecoveryAuthError("Restored runtime safety check failed: VIDU_RECOVERY_GET_ENABLED is not explicitly True (fail-closed)")
 
         # 2. Out-of-band evidence anchor validation
         import re
@@ -282,17 +331,21 @@ class RecoveryAuthService:
                 f"Runtime target mismatch: authorized '{payload.runtime_target}' != actual '{actual_runtime_target}'"
             )
 
-        # Validate discovered resource identity against authorized profile for runtime_target
-        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(payload.runtime_target)
-        if profile:
-            db_matched = any(re.match(pat, actual_db_id, re.IGNORECASE) for pat in profile["allowed_db_patterns"])
-            bucket_name = actual_storage_id.replace("storage://", "")
-            bucket_matched = bucket_name in profile["allowed_buckets"]
-            if not db_matched or not bucket_matched:
-                raise AuthRuntimeMismatchError(
-                    f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
-                    f"db='{actual_db_id}', storage='{actual_storage_id}'"
-                )
+        # Validate discovered resource identity against authorized profile for runtime_target (fail-closed on unknown profile)
+        if payload.runtime_target not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
+            raise AuthRuntimeMismatchError(
+                f"Unknown or unauthorized runtime target profile '{payload.runtime_target}' (fail-closed)"
+            )
+
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES[payload.runtime_target]
+        db_matched = actual_db_id in profile["trusted_db_identities"]
+        storage_matched = actual_storage_id in profile["trusted_storage_identities"]
+
+        if not db_matched or not storage_matched:
+            raise AuthRuntimeMismatchError(
+                f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
+                f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
+            )
 
         # 4. Revocation check (Fail-Closed: missing evidence or unattested empty registry is treated as an error)
         import os
@@ -348,12 +401,15 @@ class RecoveryAuthService:
 
         # 8. Out-of-band consumption evidence check (handles lost fence AND lost GenerationJob on restored DB)
         oob_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", "")
-        oob_set = {x.strip() for x in oob_consumed.split(",") if x.strip()}
-        if payload.auth_nonce in oob_set or payload.provider_job_id in oob_set:
-            raise AuthReplayError(
-                f"Out-of-band consumption evidence confirms provider_job_id '{payload.provider_job_id}' "
-                f"or nonce '{payload.auth_nonce}' was consumed in prior execution outside restored DB snapshot"
-            )
+        if oob_consumed:
+            if os.environ.get("OUT_OF_BAND_CONSUMED_ATTESTED", "").lower() != "true":
+                raise AuthRevokedError("External consumed registry lacks mandatory freshness attestation (OUT_OF_BAND_CONSUMED_ATTESTED != 'true')")
+            oob_set = {x.strip() for x in oob_consumed.split(",") if x.strip()}
+            if payload.auth_nonce in oob_set or payload.provider_job_id in oob_set:
+                raise AuthReplayError(
+                    f"Out-of-band consumption evidence confirms provider_job_id '{payload.provider_job_id}' "
+                    f"or nonce '{payload.auth_nonce}' was consumed in prior execution outside restored DB snapshot"
+                )
 
         if storage_provider is not None:
             b_names = [
@@ -363,29 +419,44 @@ class RecoveryAuthService:
                 "orbis-media-assets",
                 "orbis-assets",
             ]
-            marker_key = f"fences/consumed/{payload.provider_job_id}.json"
+            fence_keys_to_check = [
+                f"fences/in_flight/{payload.provider_job_id}.json",
+                f"fences/consumed/{payload.provider_job_id}.json",
+            ]
+            project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{payload.provider_job_id}")
+            asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
+            fence_keys_to_check.append(f"assets/video/{project_uuid}/{asset_uuid}.mp4")
 
             has_marker = False
             for b in b_names:
                 if not b:
                     continue
-                try:
-                    if storage_provider.object_exists(b, marker_key):
-                        has_marker = True
-                        break
-                except Exception:
-                    pass
+                for key_chk in fence_keys_to_check:
+                    try:
+                        if storage_provider.object_exists(b, key_chk):
+                            has_marker = True
+                            break
+                    except Exception as st_err:
+                        sanitized_st = sanitize_error_message(str(st_err))
+                        raise RecoveryAuthError(
+                            f"Storage accessibility failure while inspecting external execution fence for '{b}/{key_chk}': {sanitized_st}"
+                        ) from st_err
+                if has_marker:
+                    break
 
             if not has_marker and hasattr(storage_provider, "_store"):
                 for (b, k) in storage_provider._store.keys():
-                    if k == marker_key or k.endswith(f"/{payload.provider_job_id}.json"):
-                        has_marker = True
+                    for key_chk in fence_keys_to_check:
+                        if k == key_chk or k.endswith(f"/{payload.provider_job_id}.json"):
+                            has_marker = True
+                            break
+                    if has_marker:
                         break
 
             if has_marker:
                 raise AuthReplayError(
-                    f"Out-of-band storage evidence detected: durable artifact exists for provider_job_id "
-                    f"'{payload.provider_job_id}' despite missing DB fence and job rows (restored database replay prevented)"
+                    f"Authoritative external execution fence detected for provider_job_id '{payload.provider_job_id}' "
+                    f"(attempt already dispatched or consumed outside restored DB snapshot; second GET rejected)"
                 )
 
         # 5. Insert fence record atomically in its own transaction
@@ -466,4 +537,5 @@ class RecoveryAuthService:
                 autonomous_session.refresh(audit)
                 return audit
         except Exception as exc:
-            raise AuditWriteFailureError(f"Failed to record autonomous failure audit: {exc}") from exc
+            sanitized_exc = sanitize_error_message(str(exc))
+            raise AuditWriteFailureError(f"Failed to record autonomous failure audit: {sanitized_exc}") from exc
