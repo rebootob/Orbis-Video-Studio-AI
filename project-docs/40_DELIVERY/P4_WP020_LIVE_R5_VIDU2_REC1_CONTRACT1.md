@@ -16,6 +16,7 @@ REVIEWS_ADDRESSED:
   - Review 5190804562 (CHANGES REQUIRED) — 4 follow-up blockers resolved
   - Review 5190888006 (CHANGES REQUIRED) — 3 authorization, compensation, and acceptance blockers resolved
   - Review 5190978314 (CHANGES REQUIRED) — Restore acceptance, offline reconciliation, and evidence-path blockers resolved
+  - Review 5192860222 (CHANGES REQUIRED) — Proposed offline reconciliation & GenerationJob flag exclusion resolved
 
 INVARIANTS HELD:
   REAL_VIDU_GET_CALLS: 0
@@ -43,7 +44,7 @@ Following the readiness review in `P4_WP020_LIVE_R5_VIDU2_REC1_READY1.md` (PR #1
 4. **Authoritative Transaction Outcome & Safe Universal Storage Compensation**: Enforcing universal compensation guards requiring proof of object ownership, affirmative DB rollback, zero committed references, and absence of unresolved commits; defining Window 5.5 reconciliation without re-GET; and logging sanitized failure/orphan records in an autonomous audit table (`recovery_failure_audits`).
 5. **Trusted Asymmetric Cryptographic Authorization Verification**: Verifying Owner authority via Ed25519 public-key cryptography (where the runner never possesses the private signing key), actual runtime environment matching, explicit evidence anchors, and revocation registers.
 6. **Historical Audit & Billing Fence**: Idempotent tracking without claiming confirmed consumption or USD conversion, excluding historical recovery from live production ledgers, render workers, and `ProductionOrchestrator`.
-7. **Comprehensive Acceptance Matrix**: 23 detailed failure/edge scenarios mapped to existing source models, proposed contracts, verification tests, required evidence, and STOP conditions.
+7. **Comprehensive Acceptance Matrix**: 26 detailed failure/edge scenarios mapped to existing source models, proposed contracts, verification tests, required evidence, and STOP conditions.
 8. **Multi-Gate Roadmap**: A strict sequential gate model restoring all required downstream acceptance work (audio, subtitles, QC, human approval, render variants, `.orbis` portability, cost reconciliation) prior to WP020 closure or Core V1 release.
 
 **Scope of this Gate**: Strictly architectural specification and contract design. No code implementation, schema modification, cloud deployment, provider calls, or secret inspection are performed or authorized.
@@ -133,10 +134,15 @@ To definitively prove data durability, compute statelessness, and fence preserva
 - **Existing Capability**:
   - In the canonical codebase (`backend/app/services/vidu_recovery.py` lines 242-244), calling `recover_existing_job()` initiates `await vidu_adapter.check_job_status(provider_job_id)` (an outbound network HTTP GET) **before** inspecting whether `GenerationJob` or `Asset` already exists in the database.
 - **Proposed Gate B Offline DB/S3 Reconciliation Path**:
-  - To achieve true idempotency and prevent duplicate provider GET calls on already-recovered jobs, Gate B must introduce a dedicated offline reconciliation method or an early-idempotency guard in `ViduExistingJobRecoveryService`:
-    - Before calling `vidu_adapter.check_job_status()`, query the database for deterministic `GenerationJob` (`orbis://vidu-recovery/job/{provider_job_id}`) and `Asset` (`orbis://video-generation/{job_id}`).
-    - If complete deterministic lineage exists and object storage confirms the file exists with matching SHA-256 checksum: return `ViduRecoveryResult` with `idempotent_reused = True` and **`get_calls_attempted = 0`**.
-    - This path issues **zero network calls**, prevents duplicate GET spend, and retains the single unique historical ledger and evidence identity.
+  - To achieve true idempotency and prevent duplicate provider GET calls on already-recovered jobs, Gate B must introduce a dedicated offline reconciliation entrypoint (e.g. `reconcile_offline_historical_job()`, which does **not** call the existing GET-first `recover_existing_job()`) or a precisely defined pre-GET early guard in `ViduExistingJobRecoveryService`:
+    - **Call Budget**: Strictly **ZERO PROVIDER STATUS GET / ZERO GENERATION POST**. Bounded read-only I/O against the local/cloud PostgreSQL database and private S3-compatible media storage (`head_object`, streaming SHA-256 read-back) is permitted under an explicitly authorized future gate.
+    - **Verification of Durable Historical Identity**: Prior to returning or confirming reuse, the entrypoint must verify the existing durable historical result and ledger identity (`GenerationJob.imported_historical = True`, `UsageLedger.imported_historical = True`, exact `job_id`, `provider_job_id = "995880130565918720"`, deterministic URIs), not merely the presence of a file on S3. It must create zero duplicate evidence, zero duplicate ledger rows, and zero duplicate assets.
+    - **Fail-Closed & No Fall-Through Rule**: If existing deterministic lineage is incomplete or conflicting (e.g., missing `Asset`, mismatched UUIDs, conflicting metadata), if object storage is absent or corrupted (checksum mismatch), or if database/S3 connectivity is unavailable:
+      - Execution must immediately **STOP**.
+      - It must issue **0 additional provider status GET calls**.
+      - It must create no new lineage or ghost records.
+      - It must perform no unsafe storage deletions.
+      - It must **NEVER** fall through to the current GET-first `recover_existing_job()` service once the fence has been claimed or consumed.
 
 ### 3.4 Media Validation & Download Pipeline Alignment
 - URL safety validation and streaming download do not reside on `ViduExistingJobRecoveryService` directly. They are delegated to `VideoMaterializationService` (`backend/app/services/video_materialization.py`):
@@ -369,6 +375,11 @@ To definitively prove durable retention:
   - `UsageLedger.cost_status = "UNKNOWN"`
   - `UsageLedger.actual_cost = None`
   - `UsageLedger.estimated_cost = None`
+- **Distinction Between Model Flags & Source Boundaries**:
+  - `UsageLedger.imported_historical`: Governs cost ledger queries and spend aggregations. It excludes historical rows from live production spend calculations. It is distinct from `GenerationJob` flags and does not control worker queueing.
+  - `GenerationJob.imported_historical`: Marks the generation entity as historically imported. Excluded by `job_dispatch.py` (line 517: `job.imported_historical or job.execution_disabled`), `render_worker.py` (line 63: `getattr(job, "imported_historical", False)`), and `production_orchestrator.py` regardless of `execution_disabled`.
+  - `GenerationJob.execution_disabled`: Hard execution disablement flag. Excluded by `generation_worker.py` (line 22: `GenerationJob.execution_disabled.isnot(True)`), `job_dispatch.py` (line 318: `Job.execution_disabled.isnot(True)`), `render_job.py` (lines 243, 942), and `subtitle_control.py` (line 59) regardless of `imported_historical`.
+  - **Canonical Recovered State (Both True)**: Both `imported_historical = True` AND `execution_disabled = True` are set on the canonical recovered job, ensuring multi-layered exclusion across all dispatch, polling, worker, and orchestration paths simultaneously (no claim, no submit, no retry, no live-active production inclusion).
 - **Worker, Queue & Production Orchestrator Exclusions** (verified against repository source):
   - `backend/app/services/job_dispatch.py`: Filters `Job.execution_disabled.isnot(True)` (line 318) and excludes `job.imported_historical or job.execution_disabled` (line 517).
   - `backend/app/services/generation_worker.py`: Filters `GenerationJob.execution_disabled.isnot(True)` (line 22).
@@ -399,7 +410,7 @@ To definitively prove durable retention:
 
 ---
 
-## 7. Comprehensive Acceptance Matrix (23 Detailed Scenarios)
+## 7. Comprehensive Acceptance Matrix (26 Detailed Scenarios)
 
 The following matrix defines the exact verification scenarios, existing/proposed source models, verification tests, required evidence, and STOP conditions:
 
@@ -423,11 +434,14 @@ The following matrix defines the exact verification scenarios, existing/proposed
 | **16** | **Fence Update Failure After Materialization** | `provider_execution_fences` / DB transaction | If fence update from `GET_IN_FLIGHT` fails, retain lineage and mark consumed | Simulated DB error on fence update post-materialization | Lineage preserved; fence remains in consumed state; 0 additional GET calls | Fence update post-materialization fails |
 | **17** | **Autonomous Failure Audit Write Failure** | `recovery_failure_audits` / DB transaction | If writing to failure audit table fails, retain consumed fence and halt | Simulated DB failure on audit write | Exception logged; fence retains consumed state; 0 additional provider GET | Audit write fails |
 | **18** | **Post-Commit S3 Read-Back Failure** | Post-recovery read-back verification | Read back S3 object, compute SHA-256; transition to SUCCESS only upon match | Mock S3 read-back corruption or 404 | Status remains `MATERIALIZED_UNVERIFIED` / marked terminal; DB preserved; STOP | Read-back checksum mismatch |
-| **19** | **Proposed Offline DB/S3 Reconciliation (Zero Second GET)** | Proposed Gate B offline reconciliation path | Inspect existing DB lineage and S3 object; return existing record WITHOUT outbound GET | Repeated execution test against existing lineage | Returns existing `Asset` and `GenerationJob`; provider GET calls = 0; duplicate ledger rows = 0 | Re-recovery attempts outbound GET or creates duplicates |
-| **20** | **Historical Flag: Imported Historical Spend Exclusion** | `backend/app/models/usage_ledger.py` | Query live production spend; verify `imported_historical=True` excluded | Production spend aggregation query | Live ledger total spend addition = $0.00; historical recovery rows excluded | Recovered job included in live spend aggregation |
-| **21** | **Historical Flag: Worker Queue Exclusion** | `backend/app/services/job_dispatch.py`, `render_worker.py`, `production_orchestrator.py` | Verify `execution_disabled=True` jobs excluded from workers and orchestrator | Worker queue claim and orchestrator dispatch test | Recovered job omitted from worker queries; 0 execution | Recovered job claimed by worker/orchestrator |
-| **22** | **Isolated DB & S3 Backup/Restore Proof** | Cloud PostgreSQL + S3 test suite | Restore DB snapshot and S3 snapshot to scratch environment; verify checksum & lineage | Database & storage snapshot restoration test | Byte-for-byte SHA-256 and lineage preservation confirmed | Data loss or checksum mismatch upon restore |
-| **23** | **Restored-Runtime Fail-Closed Fencing** | Preflight runtime guard & out-of-band evidence checker | Restored database without fence record fails closed due to disabled provider flag and out-of-band evidence check | Preflight test on restored database instance | Harness detects restored/unrecognized state; refuses provider GET; exits with code 1 | Restored database permits unverified provider GET |
+| **19** | **Proposed Offline DB/S3 Reconciliation (Zero Provider GET / Zero POST)** | Proposed Gate B offline reconciliation path (`reconcile_offline_historical_job`) | Inspect existing primary DB lineage and S3 object with bounded read I/O; return existing record with 0 provider GET / 0 POST; verify durable historical result & ledger identity | Repeated execution test against existing complete lineage | Returns existing `Asset` and `GenerationJob`; provider GET calls = 0; provider POST calls = 0; duplicate ledger rows = 0; duplicate evidence = 0 | Outbound provider call attempted, or duplicate evidence created |
+| **20** | **Offline Reconciliation Negative Case: Missing, Conflicting, or Corrupt Data After Claim/Consumed Fence** | Proposed Gate B offline reconciliation path (`reconcile_offline_historical_job`) | If lineage incomplete/conflicting, S3 object absent/corrupt, or DB/S3 unavailable: STOP immediately. 0 provider GET, 0 fall-through to GET-first service, 0 unsafe deletion, 0 duplicate lineage | Negative test with missing `Asset`, corrupted S3 checksum, or unreachable DB | Exception raised and execution STOPS; provider GET calls = 0; storage retained; 0 fall-through to `recover_existing_job` | Incomplete lineage, corrupt storage, or DB/S3 failure during offline reconciliation |
+| **21** | **Historical Flag: UsageLedger Spend Exclusion (`imported_historical=True`)** | `backend/app/models/usage_ledger.py` | Query live production spend; verify `UsageLedger.imported_historical=True` excluded from live production aggregates. Live spend addition = $0.00 (does not prove provider GET cost = $0.00) | Production spend aggregation query | Live ledger total spend addition = $0.00; historical recovery rows excluded; provider-side cost remains `UNKNOWN / NOT CONVERTED` | Recovered job included in live spend aggregation |
+| **22** | **Historical Flag: GenerationJob `imported_historical=True / execution_disabled=False` Production Exclusion** | `backend/app/services/job_dispatch.py` (line 517), `render_worker.py` (line 63), `production_orchestrator.py` | Verify jobs with `imported_historical = True` (even if `execution_disabled = False`) are excluded from dispatch queues, render worker polling, and production orchestration | Dispatch and production orchestrator exclusion test | Job omitted from dispatch queue and production orchestrator; 0 live execution initiated | Job with `imported_historical=True` claimed for dispatch or orchestration |
+| **23** | **Historical Flag: GenerationJob `imported_historical=False / execution_disabled=True` Worker Exclusion** | `backend/app/services/generation_worker.py` (line 22), `job_dispatch.py` (line 318), `render_job.py`, `subtitle_control.py` | Verify jobs with `execution_disabled = True` (even if `imported_historical = False`) are excluded from worker polling queries (`.isnot(True)`) | Worker claim and polling query test | Job filtered out at DB query level (`.execution_disabled.isnot(True)`); 0 claim, 0 submit, 0 retry | Worker queries claim `execution_disabled=True` job |
+| **24** | **Historical Flag: Canonical GenerationJob Both-True (`imported_historical=True` AND `execution_disabled=True`)** | All worker, orchestrator, and dispatch services | Canonical recovered historical record has BOTH flags True; verified completely excluded from all workers, queues, retry loops, and live production pipelines simultaneously | Full suite exclusion test for canonical recovered `GenerationJob` | Zero claim, zero submit, zero retry, zero inclusion in active live production pipelines | Any worker or orchestrator claims, submits, or retries canonical recovered job |
+| **25** | **Isolated DB & S3 Backup/Restore Proof** | Cloud PostgreSQL + S3 test suite | Restore DB snapshot and S3 snapshot to scratch environment; verify checksum & lineage | Database & storage snapshot restoration test | Byte-for-byte SHA-256 and lineage preservation confirmed | Data loss or checksum mismatch upon restore |
+| **26** | **Restored-Runtime Fail-Closed Fencing** | Preflight runtime guard & out-of-band evidence checker | Restored database without fence record fails closed due to disabled provider flag and out-of-band evidence check | Preflight test on restored database instance | Harness detects restored/unrecognized state; refuses provider GET; exits with code 1 | Restored database permits unverified provider GET |
 
 ---
 
@@ -442,7 +456,7 @@ Progress toward live recovery, downstream validation, and WP020 closure is stric
 [ Gate B: Harness & Standalone Schema Implementation ]
      - Migration revision 011: `provider_execution_fences` & `recovery_failure_audits`
      - Bounded CLI runner script (reusing ViduExistingJobRecoveryService with auto_compensate_storage option)
-     - Proposed Gate B offline reconciliation path (zero second GET)
+     - Proposed Gate B offline reconciliation path (`reconcile_offline_historical_job`: zero provider status GET, zero generation POST, bounded DB/S3 reads)
      - Mocked unit & failure matrix tests (NO-PROVIDER, zero network calls)
                │
                ▼  (Requires Owner Approval + Merge of Gate B PR)
