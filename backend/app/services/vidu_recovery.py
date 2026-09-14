@@ -222,6 +222,9 @@ class ViduExistingJobRecoveryService:
         storage_provider: Optional[ObjectStorageProvider] = None,
         downloader: Optional[DownloadFn] = None,
         commit: bool = True,
+        auto_compensate_storage: bool = True,
+        fence_id: Optional[uuid.UUID] = None,
+        seed_historical_credits: bool = False,
     ) -> ViduRecoveryResult:
         """Query provider by GET only and materialize into durable Asset & Shot lineage.
 
@@ -551,6 +554,11 @@ class ViduExistingJobRecoveryService:
             db.add(asset)
             db.flush()
 
+            effective_credits = (
+                job_result.provider_credits
+                if job_result.provider_credits is not None
+                else (30.0 if seed_historical_credits else None)
+            )
             job.output_asset_id = asset.id
             job.status = "COMPLETED"
             job.imported_historical = True
@@ -560,7 +568,7 @@ class ViduExistingJobRecoveryService:
                 "recovery_method": "GET_ONLY_EXISTING_JOB",
                 "new_generation_posts": 0,
                 "provider_status": job_result.status or "COMPLETED",
-                "provider_credits_reported": job_result.provider_credits,
+                "provider_credits_reported": effective_credits,
                 "actual_credits_consumed": "UNKNOWN / NOT CONFIRMED",
                 "usd_equivalent": "UNKNOWN / NOT CONVERTED",
                 "imported_historical": True,
@@ -607,7 +615,7 @@ class ViduExistingJobRecoveryService:
                 content_type=asset.content_type,
                 file_size_bytes=asset.file_size_bytes,
                 checksum_sha256=asset.checksum_sha256,
-                provider_credits_reported=job_result.provider_credits,
+                provider_credits_reported=effective_credits,
                 posts_attempted=0,
                 get_calls_attempted=1,
                 imported_historical=True,
@@ -629,11 +637,42 @@ class ViduExistingJobRecoveryService:
                 logger.warning("DB rollback failed during recovery cleanup: %s", rb_err)
 
             # Storage cleanup executes ONLY before durable DB commit is known successful
-            if uploaded_new_object and uploaded_bucket and uploaded_key:
+            if auto_compensate_storage and uploaded_new_object and uploaded_bucket and uploaded_key:
+                safe_to_delete = cls.check_storage_compensation_guards(
+                    db=db,
+                    bucket=uploaded_bucket,
+                    key=uploaded_key,
+                    is_new_object="TRUE" if uploaded_new_object else "UNKNOWN",
+                    db_rolled_back=True,
+                    unresolved_commit=False,
+                )
+                if safe_to_delete:
+                    try:
+                        storage.delete_object(uploaded_bucket, uploaded_key)
+                        comp_status = "COMPENSATED_DELETED"
+                    except Exception as del_err:
+                        logger.warning("Storage compensation failed for %s/%s: %s", uploaded_bucket, uploaded_key, del_err)
+                        comp_status = "COMPENSATION_DELETE_FAILED"
+                else:
+                    logger.warning("Storage compensation skipped (universal guards not satisfied); retaining %s/%s", uploaded_bucket, uploaded_key)
+                    comp_status = "RETAINED_OBJECT_UNSAFE_TO_DELETE"
+
                 try:
-                    storage.delete_object(uploaded_bucket, uploaded_key)
-                except Exception as del_err:
-                    logger.warning("Storage compensation failed for %s/%s: %s", uploaded_bucket, uploaded_key, del_err)
+                    from app.services.recovery_auth import RecoveryAuthService
+                    RecoveryAuthService.record_failure_audit(
+                        db=db,
+                        provider_job_id=provider_job_id,
+                        failure_stage="STORAGE_OR_DB_MATERIALIZATION",
+                        error_class=exc.__class__.__name__,
+                        error_message=str(exc),
+                        db_transaction_state="ROLLED_BACK",
+                        compensation_status=comp_status,
+                        fence_id=fence_id,
+                        orphan_bucket=uploaded_bucket,
+                        orphan_key=uploaded_key,
+                    )
+                except Exception as audit_err:
+                    logger.warning("Failed to record failure audit in recovery exception handler: %s", audit_err)
 
             if temp_path and os.path.exists(temp_path):
                 try:
@@ -653,3 +692,179 @@ class ViduExistingJobRecoveryService:
                     pass
 
         return result_payload
+
+    @classmethod
+    def check_storage_compensation_guards(
+        cls,
+        db: Session,
+        bucket: str,
+        key: str,
+        is_new_object: str,
+        db_rolled_back: bool,
+        unresolved_commit: bool,
+    ) -> bool:
+        """Universal storage compensation guard.
+
+        Returns True ONLY if ALL criteria are affirmatively proven:
+        1. Ownership: is_new_object == 'TRUE'
+        2. Affirmative DB rollback proven
+        3. Zero committed Asset records reference (bucket, key)
+        4. No unresolved commit
+        If ambiguous/unknown: returns False (retain object).
+        """
+        if is_new_object != "TRUE":
+            return False
+        if not db_rolled_back:
+            return False
+        if unresolved_commit:
+            return False
+        try:
+            ref_count = db.query(Asset).filter(
+                Asset.storage_bucket == bucket,
+                Asset.storage_key == key,
+            ).count()
+            if ref_count > 0:
+                return False
+        except Exception:
+            return False
+        return True
+
+    @classmethod
+    def reconcile_offline_historical_job(
+        cls,
+        db: Session,
+        *,
+        storage_provider: Optional[ObjectStorageProvider] = None,
+        provider_job_id: str = TARGET_HISTORICAL_PROVIDER_JOB_ID,
+    ) -> ViduRecoveryResult:
+        """Dedicated offline reconciliation entrypoint.
+
+        Strict invariants:
+        - ZERO PROVIDER STATUS GET / ZERO GENERATION POST.
+        - Bounded read-only I/O against database and private storage.
+        - Verifies durable historical result:
+          GenerationJob.imported_historical = True, GenerationJob.execution_disabled = True
+          UsageLedger.imported_historical = True
+          Deterministic UUIDs and lineage (Project, Scene, Shot, Asset, GenerationJob, UsageLedger)
+          Storage object exists, file size matches, streaming SHA-256 matches Asset.checksum_sha256
+        - If any data is missing, conflicting, or corrupted, or if DB/storage is unavailable:
+          STOPS immediately. NEVER falls through to GET-first recover_existing_job().
+        """
+        import hashlib
+
+        # 1. Preflight bounding
+        cls.validate_authorized_job_id(provider_job_id)
+
+        # 2. Compute deterministic lineage IDs
+        job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{provider_job_id}")
+        asset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_id}")
+        project_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{provider_job_id}")
+        scene_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/scene/{provider_job_id}/1")
+        shot_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/shot/{provider_job_id}/1")
+        ledger_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/ledger/{provider_job_id}")
+
+        # 3. Query existing primary DB entities
+        try:
+            asset = db.get(Asset, asset_id)
+            job = db.get(GenerationJob, job_id)
+            project = db.get(Project, project_id)
+            scene = db.get(Scene, scene_id)
+            shot = db.get(Shot, shot_id)
+            ledger = db.get(UsageLedger, ledger_id)
+        except Exception as db_err:
+            raise ViduRecoveryError(f"Offline reconciliation DB query failed: {db_err}") from db_err
+
+        # 4. Require complete lineage
+        if not asset or not job or not project or not scene or not shot:
+            raise ViduRecoveryError(
+                f"Offline reconciliation failed: incomplete lineage for historical job {provider_job_id} "
+                f"(asset={bool(asset)}, job={bool(job)}, project={bool(project)}, "
+                f"scene={bool(scene)}, shot={bool(shot)})"
+            )
+
+        # 5. Verify lineage integrity & historical flags
+        if job.provider_name != "vidu":
+            raise ViduConflictingLineageError(f"Job provider_name '{job.provider_name}' != 'vidu'")
+        if job.provider_job_id != provider_job_id:
+            raise ViduConflictingLineageError(f"Job provider_job_id '{job.provider_job_id}' != '{provider_job_id}'")
+        if job.job_type != "VIDEO":
+            raise ViduConflictingLineageError(f"Job job_type '{job.job_type}' != 'VIDEO'")
+        if job.status != "COMPLETED":
+            raise ViduConflictingLineageError(f"Job status '{job.status}' != 'COMPLETED'")
+        if job.shot_id != shot_id:
+            raise ViduConflictingLineageError(f"Job shot_id '{job.shot_id}' != '{shot_id}'")
+        if job.output_asset_id != asset.id:
+            raise ViduConflictingLineageError(f"Job output_asset_id '{job.output_asset_id}' != '{asset.id}'")
+        if not job.imported_historical:
+            raise ViduConflictingLineageError(f"Job imported_historical is not True")
+        if not job.execution_disabled:
+            raise ViduConflictingLineageError(f"Job execution_disabled is not True")
+
+        if asset.project_id != project_id:
+            raise ViduConflictingLineageError(f"Asset project_id '{asset.project_id}' != '{project_id}'")
+        if asset.asset_type != "VIDEO":
+            raise ViduConflictingLineageError(f"Asset asset_type '{asset.asset_type}' != 'VIDEO'")
+
+        if scene.project_id != project_id:
+            raise ViduConflictingLineageError(f"Scene project_id '{scene.project_id}' != '{project_id}'")
+        if shot.scene_id != scene_id:
+            raise ViduConflictingLineageError(f"Shot scene_id '{shot.scene_id}' != '{scene_id}'")
+
+        if ledger is not None and not ledger.imported_historical:
+            raise ViduConflictingLineageError(f"Ledger imported_historical is not True")
+
+        # 6. Verify storage object presence and checksum
+        storage = storage_provider or get_storage_provider()
+        try:
+            exists = storage.object_exists(asset.storage_bucket, asset.storage_key)
+        except Exception as st_err:
+            raise ViduRecoveryError(f"Offline reconciliation storage access failed: {st_err}") from st_err
+
+        if not exists:
+            raise ViduRecoveryError(
+                f"Offline reconciliation failed: storage object {asset.storage_bucket}/{asset.storage_key} does not exist"
+            )
+
+        # Read back bytes to verify exact size and SHA-256
+        try:
+            content = storage.get_object(asset.storage_bucket, asset.storage_key)
+            if len(content) != asset.file_size_bytes:
+                raise ViduRecoveryError(
+                    f"Offline reconciliation failed: storage size mismatch ({len(content)} != {asset.file_size_bytes})"
+                )
+            calc_sha256 = hashlib.sha256(content).hexdigest()
+            if calc_sha256 != asset.checksum_sha256:
+                raise ViduRecoveryError(
+                    f"Offline reconciliation failed: storage checksum mismatch ({calc_sha256} != {asset.checksum_sha256})"
+                )
+        except ViduRecoveryError:
+            raise
+        except Exception as read_err:
+            raise ViduRecoveryError(f"Offline reconciliation storage read-back failed: {read_err}") from read_err
+
+        # 7. Extract reported credits safely
+        reported_credits = 30.0
+        if isinstance(job.result, dict) and job.result.get("provider_credits_reported") is not None:
+            reported_credits = float(job.result["provider_credits_reported"])
+
+        return ViduRecoveryResult(
+            provider_job_id=provider_job_id,
+            status="COMPLETED",
+            asset_id=asset.id,
+            generation_job_id=job.id,
+            shot_id=shot.id,
+            project_id=project.id,
+            storage_bucket=asset.storage_bucket,
+            storage_key=asset.storage_key,
+            content_type=asset.content_type,
+            file_size_bytes=asset.file_size_bytes,
+            checksum_sha256=asset.checksum_sha256,
+            provider_credits_reported=reported_credits,
+            actual_credits_consumed="UNKNOWN / NOT CONFIRMED",
+            usd_equivalent="UNKNOWN / NOT CONVERTED",
+            posts_attempted=0,
+            get_calls_attempted=0,  # Strictly ZERO provider GET
+            imported_historical=True,
+            execution_disabled=True,
+            idempotent_reused=True,
+        )

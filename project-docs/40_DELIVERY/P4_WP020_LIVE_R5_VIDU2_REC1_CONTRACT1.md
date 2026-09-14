@@ -225,8 +225,9 @@ To guarantee that the runner or an automated agent cannot forge or self-sign aut
   - Existing models `OrchestrationAudit` and `UsageLedger` enforce a non-null foreign key `project_id` pointing to `projects`. `UsageLedger.job_id`, when present, points to `generation_jobs`.
   - In a pre-GET state, no recovery `Project` or `GenerationJob` exists or is proven. Creating speculative recovery rows before issuing the provider GET would violate Section 5.2 and create "ghost recovery lineage" if the GET fails, task is not found, or media URL is missing.
   - Furthermore, `UsageLedger`'s partial unique index cannot fence `job_id = NULL`, and the deterministic ledger UUID (`orbis://vidu-recovery/ledger/...`) belongs to post-success historical billing evidence, not dispatch fencing.
-- **Proposed Standalone Schema (Gate B Migration Revision `011`)**:
-  - Gate B will introduce dedicated standalone table: `provider_execution_fences`:
+- **Stand-alone Schema Alignment (Gate B Migration Revision `022_provider_execution_fences_and_audits`)**:
+  - *Provenance Note*: Proposed in Gate A as revision 011, aligned to sequential revision `022` (down_revision = `"021_core_v1_subtitles"`) per Owner Authorization on 2026-09-14 (Issue #63 comment 5663031820) because revision 011 is already occupied by `011_batch_resume_runs_and_indexes.py` and canonical HEAD prior to Gate B is revision 021 across 21 migration files. All schema invariants, constraints, and tables remain identical.
+  - Gate B introduces dedicated standalone table: `provider_execution_fences`:
     ```sql
     CREATE TABLE provider_execution_fences (
         fence_id UUID PRIMARY KEY,
@@ -454,7 +455,7 @@ Progress toward live recovery, downstream validation, and WP020 closure is stric
                │
                ▼  (Requires Owner Approval + Merge of Gate A PR)
 [ Gate B: Harness & Standalone Schema Implementation ]
-     - Migration revision 011: `provider_execution_fences` & `recovery_failure_audits`
+     - Migration revision 022 (`022_provider_execution_fences_and_audits`): `provider_execution_fences` & `recovery_failure_audits` (aligned from proposed 011 per Owner authorization)
      - Bounded CLI runner script (reusing ViduExistingJobRecoveryService with auto_compensate_storage option)
      - Proposed Gate B offline reconciliation path (`reconcile_offline_historical_job`: zero provider status GET, zero generation POST, bounded DB/S3 reads)
      - Mocked unit & failure matrix tests (NO-PROVIDER, zero network calls)

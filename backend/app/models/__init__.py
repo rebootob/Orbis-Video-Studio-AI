@@ -44,6 +44,7 @@ from app.models.qc import (
 )
 from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.render_batch import RenderBatch
+from app.models.recovery_fence import ProviderExecutionFence, RecoveryFailureAudit
 
 __all__ = [
     "Base",
@@ -88,5 +89,7 @@ __all__ = [
     "RenderJob",
     "RenderJobStatus",
     "RenderBatch",
+    "ProviderExecutionFence",
+    "RecoveryFailureAudit",
 ]
 
