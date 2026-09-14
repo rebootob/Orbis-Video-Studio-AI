@@ -1,130 +1,134 @@
-"""Pure Python Ed25519 (RFC 8032) signing and verification.
-Zero external dependencies, standard library hashlib only.
+"""Pure Python RFC 8032 Ed25519 signature verifier with strict curve and subgroup validation.
+
+Production facility: VERIFICATION ONLY.
+Zero signing or private-key operations are hosted in this production module.
+Adversarial protections:
+- Canonical coordinate decoding (y < 2^255 - 19, strict sign bit check)
+- Strict scalar check (0 < S < L)
+- Small subgroup and identity rejection (orders 1, 2, 4, 8 are rejected)
+- Full cofactor equation check: [8][S]B == [8](R + [h]A)
 """
 from __future__ import annotations
 
 import hashlib
-from typing import Tuple
+from typing import Optional, Tuple
 
-# Curve parameters
-_b = 256
-_q = 2**255 - 19
-_l = 2**252 + 27742317777372353535851937790883648493
-
-
-def _inv(z: int) -> int:
-    return pow(z, _q - 2, _q)
+# Field and Curve constants (RFC 8032)
+_p: int = 2**255 - 19
+_q: int = 2**252 + 27742317777372353535851937790883648493
 
 
-_d = -121665 * _inv(121666) % _q
-_I = pow(2, (_q - 1) // 4, _q)
+def _modp_inv(x: int) -> int:
+    return pow(x, _p - 2, _p)
 
 
-def _xrecover(y: int) -> int:
-    xx = (y * y - 1) * _inv(_d * y * y + 1)
-    x = pow(xx, (_q + 3) // 8, _q)
-    if (x * x - xx) % _q != 0:
-        x = (x * _I) % _q
-    if x % 2 != 0:
-        x = _q - x
+_d: int = -121665 * _modp_inv(121666) % _p
+_I: int = pow(2, (_p - 1) // 4, _p)
+
+
+def _sha512_modq(s: bytes) -> int:
+    return int.from_bytes(hashlib.sha512(s).digest(), "little") % _q
+
+
+def _recover_x(y: int, sign: int) -> Optional[int]:
+    if y >= _p:
+        return None
+    x2 = (y * y - 1) * _modp_inv(_d * y * y + 1) % _p
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_p + 3) // 8, _p)
+    if (x * x - x2) % _p != 0:
+        x = x * _I % _p
+    if (x * x - x2) % _p != 0:
+        return None
+    if (x & 1) != sign:
+        x = _p - x
     return x
 
 
-_By = 4 * _inv(5) % _q
-_Bx = _xrecover(_By)
-_B = (_Bx % _q, _By % _q, 1, (_Bx * _By) % _q)
+_g_y: int = 4 * _modp_inv(5) % _p
+_g_x: Optional[int] = _recover_x(_g_y, 0)
+assert _g_x is not None
+_G: Tuple[int, int, int, int] = (_g_x, _g_y, 1, _g_x * _g_y % _p)
 
 
-def _edwards_add(P: Tuple[int, int, int, int], Q: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
-    # Extended coordinates addition
-    x1, y1, z1, t1 = P
-    x2, y2, z2, t2 = Q
-    A = (y1 - x1) * (y2 - x2) % _q
-    B = (y1 + x1) * (y2 + x2) % _q
-    C = t1 * 2 * _d * t2 % _q
-    D = z1 * 2 * z2 % _q
-    E = (B - A) % _q
-    F = (D - C) % _q
-    G = (D + C) % _q
-    H = (B + A) % _q
-    return (E * F % _q, G * H % _q, F * G % _q, E * H % _q)
+def _point_add(P: Tuple[int, int, int, int], Q: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+    A = (P[1] - P[0]) * (Q[1] - Q[0]) % _p
+    B = (P[1] + P[0]) * (Q[1] + Q[0]) % _p
+    C = 2 * P[3] * Q[3] * _d % _p
+    D = 2 * P[2] * Q[2] % _p
+    E = (B - A) % _p
+    F = (D - C) % _p
+    G = (D + C) % _p
+    H = (B + A) % _p
+    return (E * F % _p, G * H % _p, F * G % _p, E * H % _p)
 
 
-def _scalarmult(P: Tuple[int, int, int, int], e: int) -> Tuple[int, int, int, int]:
-    if e == 0:
-        return (0, 1, 1, 0)
-    Q = _scalarmult(P, e // 2)
-    Q = _edwards_add(Q, Q)
-    if e & 1:
-        Q = _edwards_add(Q, P)
+def _point_mul(s: int, P: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+    Q = (0, 1, 1, 0)  # Neutral element (0, 1)
+    while s > 0:
+        if s & 1:
+            Q = _point_add(Q, P)
+        P = _point_add(P, P)
+        s >>= 1
     return Q
 
 
-def _encode_point(P: Tuple[int, int, int, int]) -> bytes:
-    x, y, z, _ = P
-    inv_z = _inv(z)
-    x_aff = x * inv_z % _q
-    y_aff = y * inv_z % _q
-    s = bytearray(y_aff.to_bytes(32, "little"))
-    if x_aff & 1:
-        s[31] |= 0x80
-    return bytes(s)
+def _point_equal(P: Tuple[int, int, int, int], Q: Tuple[int, int, int, int]) -> bool:
+    return (P[0] * Q[2] - Q[0] * P[2]) % _p == 0 and (P[1] * Q[2] - Q[1] * P[2]) % _p == 0
 
 
-def _decode_point(s: bytes) -> Tuple[int, int, int, int]:
+def _point_decompress(s: bytes) -> Optional[Tuple[int, int, int, int]]:
     if len(s) != 32:
-        raise ValueError("Invalid point length")
-    y = int.from_bytes(s, "little") & ((1 << 255) - 1)
-    x = _xrecover(y)
-    if bool(x & 1) != bool(s[31] & 0x80):
-        x = _q - x
-    return (x, y, 1, x * y % _q)
-
-
-def public_key_from_seed(seed_32: bytes) -> bytes:
-    """Derive 32-byte Ed25519 public key from 32-byte private seed."""
-    h = hashlib.sha512(seed_32).digest()
-    a = int.from_bytes(h[:32], "little")
-    a &= (1 << 254) - 8
-    a |= 1 << 254
-    A = _scalarmult(_B, a)
-    return _encode_point(A)
-
-
-def ed25519_sign(message: bytes, seed_32: bytes) -> bytes:
-    """Sign message with 32-byte private seed; returns 64-byte signature."""
-    h = hashlib.sha512(seed_32).digest()
-    a = int.from_bytes(h[:32], "little")
-    a &= (1 << 254) - 8
-    a |= 1 << 254
-    A_bytes = _encode_point(_scalarmult(_B, a))
-    prefix = h[32:]
-    r = int.from_bytes(hashlib.sha512(prefix + message).digest(), "little") % _l
-    R = _scalarmult(_B, r)
-    R_bytes = _encode_point(R)
-    k = int.from_bytes(hashlib.sha512(R_bytes + A_bytes + message).digest(), "little") % _l
-    S = (r + k * a) % _l
-    return R_bytes + S.to_bytes(32, "little")
+        return None
+    y = int.from_bytes(s, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _p)
 
 
 def ed25519_verify(message: bytes, signature: bytes, public_key: bytes) -> bool:
-    """Verify 64-byte signature against 32-byte public key and message."""
-    if len(signature) != 64 or len(public_key) != 32:
+    """Verify an RFC 8032 Ed25519 signature with strict subgroup validation.
+
+    Accepts:
+    - message: arbitrary bytes
+    - signature: 64 bytes (R || S)
+    - public_key: 32 bytes (A)
+
+    Returns:
+    - True if signature is valid and public key is non-degenerate.
+    - False if any check fails or exception is raised.
+    """
+    if len(public_key) != 32 or len(signature) != 64:
         return False
     try:
-        R_bytes = signature[:32]
-        S_bytes = signature[32:]
-        S = int.from_bytes(S_bytes, "little")
-        if S >= _l:
+        A = _point_decompress(public_key)
+        if not A:
             return False
-        A = _decode_point(public_key)
-        k = int.from_bytes(hashlib.sha512(R_bytes + public_key + message).digest(), "little") % _l
-        SB = _scalarmult(_B, S)
-        R = _decode_point(R_bytes)
-        kA = _scalarmult(A, k)
-        R_plus_kA = _edwards_add(R, kA)
-        # Check affine equality
-        return (SB[0] * R_plus_kA[2] - R_plus_kA[0] * SB[2]) % _q == 0 and \
-               (SB[1] * R_plus_kA[2] - R_plus_kA[1] * SB[2]) % _q == 0
+        Rs = signature[:32]
+        R = _point_decompress(Rs)
+        if not R:
+            return False
+        s = int.from_bytes(signature[32:], "little")
+        if s <= 0 or s >= _q:
+            return False
+
+        neutral = (0, 1, 1, 0)
+        # Reject identity points
+        if _point_equal(A, neutral) or _point_equal(R, neutral):
+            return False
+        # Reject small-order points (order dividing 8)
+        if _point_equal(_point_mul(8, A), neutral) or _point_equal(_point_mul(8, R), neutral):
+            return False
+
+        h = _sha512_modq(Rs + public_key + message)
+        sB = _point_mul(s, _G)
+        hA = _point_mul(h, A)
+        R_plus_hA = _point_add(R, hA)
+        # Check [8][s]B == [8](R + [h]A)
+        return _point_equal(_point_mul(8, sB), _point_mul(8, R_plus_hA))
     except Exception:
         return False

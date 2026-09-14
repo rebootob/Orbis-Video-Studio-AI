@@ -219,29 +219,67 @@ def execute_recovery_harness(
 
     # 7. Post-Materialization Read-Back Verification
     logger.info("Executing post-materialization read-back verification")
-    db_asset = db.get(Asset, asset_uuid)
-    db_job = db.get(GenerationJob, job_uuid)
-    if not db_asset or not db_job:
-        fence.status = "CONSUMED_TERMINAL_FAILURE"
-        db.commit()
-        raise ViduRecoveryError("Read-back verification failed: DB Asset or GenerationJob missing")
+    # Independent fresh session to bypass identity-map cache
+    from sqlalchemy.orm import sessionmaker
+    engine = db.get_bind()
+    independent_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-    if not storage.object_exists(db_asset.storage_bucket, db_asset.storage_key):
-        fence.status = "CONSUMED_TERMINAL_FAILURE"
-        db.commit()
-        raise ViduRecoveryError("Read-back verification failed: Storage object missing")
+    with independent_session_factory() as readback_db:
+        db_asset = readback_db.get(Asset, asset_uuid)
+        db_job = readback_db.get(GenerationJob, job_uuid)
+        if not db_asset or not db_job:
+            fence.status = "CONSUMED_TERMINAL_FAILURE"
+            db.commit()
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="POST_COMMIT_READBACK",
+                error_class="ViduRecoveryError",
+                error_message="Read-back verification failed: DB Asset or GenerationJob missing",
+                db_transaction_state="COMMITTED",
+                compensation_status="NOT_APPLICABLE",
+                fence_id=fence.fence_id,
+            )
+            raise ViduRecoveryError("Read-back verification failed: DB Asset or GenerationJob missing")
 
-    stored_bytes = storage.get_object(db_asset.storage_bucket, db_asset.storage_key)
-    if len(stored_bytes) != db_asset.file_size_bytes:
-        fence.status = "CONSUMED_TERMINAL_FAILURE"
-        db.commit()
-        raise ViduRecoveryError("Read-back verification failed: Storage byte length mismatch")
+        if not storage.object_exists(db_asset.storage_bucket, db_asset.storage_key):
+            fence.status = "CONSUMED_TERMINAL_FAILURE"
+            db.commit()
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="POST_COMMIT_READBACK",
+                error_class="ViduRecoveryError",
+                error_message="Read-back verification failed: Storage object missing",
+                db_transaction_state="COMMITTED",
+                compensation_status="NOT_APPLICABLE",
+                fence_id=fence.fence_id,
+            )
+            raise ViduRecoveryError("Read-back verification failed: Storage object missing")
 
-    stored_sha256 = hashlib.sha256(stored_bytes).hexdigest()
-    if stored_sha256 != db_asset.checksum_sha256:
-        fence.status = "CONSUMED_TERMINAL_FAILURE"
-        db.commit()
-        raise ViduRecoveryError("Read-back verification failed: Storage checksum mismatch")
+        try:
+            ViduExistingJobRecoveryService.stream_verify_storage_object(
+                storage=storage,
+                bucket=db_asset.storage_bucket,
+                key=db_asset.storage_key,
+                expected_size=db_asset.file_size_bytes,
+                expected_sha256=db_asset.checksum_sha256,
+                max_size_bytes=50 * 1024 * 1024,
+            )
+        except Exception as stream_err:
+            fence.status = "CONSUMED_TERMINAL_FAILURE"
+            db.commit()
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="POST_COMMIT_READBACK",
+                error_class=stream_err.__class__.__name__,
+                error_message=str(stream_err),
+                db_transaction_state="COMMITTED",
+                compensation_status="NOT_APPLICABLE",
+                fence_id=fence.fence_id,
+            )
+            raise
 
     # 8. All verifications passed: CONSUMED_SUCCESS
     fence.status = "CONSUMED_SUCCESS"
@@ -268,11 +306,12 @@ def main():
     parser = argparse.ArgumentParser(description="Bounded Vidu Recovery Harness CLI")
     parser.add_argument("--auth-payload", help="JSON string or path to auth payload file")
     parser.add_argument("--signature", help="Hex encoded Ed25519 signature")
-    parser.add_argument("--public-key", help="Hex encoded Ed25519 public key")
-    parser.add_argument("--expected-commit", help="Authorized commit SHA")
+    parser.add_argument("--public-key", help="Hex encoded Ed25519 public key (test/mock only)")
+    parser.add_argument("--expected-commit", help="Authorized commit SHA (must match executing artifact)")
     parser.add_argument("--runtime-target", default="UAT-COMPOSE-PERSISTENT", help="Runtime target identifier")
     parser.add_argument("--offline-reconcile", action="store_true", help="Run dedicated offline reconciliation")
     parser.add_argument("--mock", action="store_true", help="Run with mock provider (no outbound network)")
+    parser.add_argument("--allow-test-keys", action="store_true", help="Explicitly permit test public keys")
 
     args = parser.parse_args()
 
@@ -299,18 +338,41 @@ def main():
         payload = CanonicalAuthPayload(**payload_dict)
 
         sig_bytes = bytes.fromhex(args.signature)
-        pk_hex = args.public_key or os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
-        if not pk_hex:
-            print("Error: --public-key or OWNER_AUTH_PUBLIC_KEY environment variable required", file=sys.stderr)
-            sys.exit(1)
+
+        # 1. Trusted Public Key Resolution (no caller override in production)
+        if not args.mock and not args.allow_test_keys:
+            pk_hex = os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
+            if not pk_hex:
+                print("Error: Production recovery requires trusted OWNER_AUTH_PUBLIC_KEY environment variable", file=sys.stderr)
+                sys.exit(1)
+        else:
+            pk_hex = args.public_key or os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
+            if not pk_hex:
+                print("Error: --public-key or OWNER_AUTH_PUBLIC_KEY required", file=sys.stderr)
+                sys.exit(1)
         pk_bytes = bytes.fromhex(pk_hex)
+
+        # 2. Independent Executing Artifact Commit Resolution
+        executing_commit = os.environ.get("EXECUTING_COMMIT_SHA", "")
+        if not executing_commit:
+            import subprocess
+            try:
+                git_proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True)
+                executing_commit = git_proc.stdout.strip()
+            except Exception:
+                from app.core.config import settings
+                executing_commit = getattr(settings, "GIT_COMMIT_SHA", None) or payload.authorized_commit_sha
+
+        if args.expected_commit and args.expected_commit != executing_commit:
+            print(f"Error: Specified commit {args.expected_commit} does not match executing artifact SHA {executing_commit}", file=sys.stderr)
+            sys.exit(1)
 
         result = execute_recovery_harness(
             db=db,
             auth_payload=payload,
             signature_bytes=sig_bytes,
             public_key_bytes=pk_bytes,
-            expected_commit_sha=args.expected_commit or payload.authorized_commit_sha,
+            expected_commit_sha=executing_commit,
             actual_runtime_target=args.runtime_target,
             mock_mode=args.mock,
         )

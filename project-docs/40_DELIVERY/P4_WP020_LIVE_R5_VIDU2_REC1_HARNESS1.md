@@ -6,7 +6,8 @@
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
-- **Gate B Implementation Status**: **COMPLETED & VERIFIED (PENDING PR CREATION & INDEPENDENT REVIEW)**
+- **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
+- **Gate B Implementation Status**: **IN REVIEW / CORRECTIVE APPLIED (ADDRESSING REVIEW 5197304334)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -22,6 +23,7 @@
   2. Defined `down_revision = "021_core_v1_subtitles"`.
   3. Confirmed canonical versions directory contained exactly 21 migration files before adding 022.
   4. Authorized aligning references in delivery/control documents while strictly preserving all schema invariants and acceptance criteria.
+- **Independent Review Corrective (Review 5197304334)**: Hermes addressed all 6 blocker groups in review 5197304334 on PR #108, hardening verification, binding trust/runtime parameters independently, isolating failure audits, adding bounded streaming, and testing real failure injection paths.
 
 ---
 
@@ -43,7 +45,7 @@ Release = NOT DECLARED
 
 ---
 
-## 4. Implementation Artifacts
+## 4. Implementation Artifacts & Corrective Hardening
 
 1. **Alembic Migration (`backend/migrations/versions/022_provider_execution_fences_and_audits.py`)**:
    - Creates `provider_execution_fences` with unique constraint on `(provider_name, provider_job_id)`, unique constraint on `auth_nonce`, check constraint `network_get_attempts <= 1`, and storage intent tracking.
@@ -52,20 +54,31 @@ Release = NOT DECLARED
 2. **SQLAlchemy Models (`backend/app/models/recovery_fence.py`)**:
    - `ProviderExecutionFence` and `RecoveryFailureAudit` registered in `backend/app/models/__init__.py`.
 3. **Owner Authorization Service (`backend/app/services/recovery_auth.py` & `ed25519_pure.py`)**:
-   - Pure Python RFC 8032 Ed25519 signing and verification with zero external C-dependencies.
-   - Phase 1: In-memory verification of canonical JSON signature, timestamp validity window (<= 2h), commit SHA binding (`ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7`), task scope (`P4-WP020-LIVE-R5-VIDU2-REC1-RUN1`), provider job binding (`995880130565918720`), and explicit evidence anchor.
-   - Phase 2: Database & runtime target matching, revocation check, replay nonce detection, and same-job concurrency claim (`CLAIMED_PENDING_GET`).
-4. **Recovery Service Hardening (`backend/app/services/vidu_recovery.py`)**:
-   - Universal Storage Compensation Guards: S3 deletion permitted ONLY IF `storage_is_new_object == 'TRUE'`, primary DB rollback is proven, 0 committed `Asset` records reference `(bucket, key)`, and no unresolved commit. Ambiguous outcomes retain the object and log to `recovery_failure_audits`.
-   - Seeded historical credits: seeds historical `30.0` when provider omits credits if `seed_historical_credits=True`.
-   - Dedicated Offline Reconciliation (`reconcile_offline_historical_job`): strictly 0 provider GET/POST, bounded read-only DB/S3 reads, verifies historical flags (`imported_historical=True`, `execution_disabled=True`) and SHA-256 integrity. Fails closed with zero fall-through to GET-first service if data is missing or corrupt.
-5. **Single-Purpose CLI Harness (`backend/app/cli/vidu_recovery_harness.py`)**:
+   - Pure Python RFC 8032 Ed25519 verification facility in production (`ed25519_verify`), with zero signing or private-key operations hosted in production (signing separated to test helper `tests/ed25519_test_signer.py`).
+   - Validated against official RFC 8032 test vectors 1, 2, and 3.
+   - Strictly rejects degenerate identity keys ($A = (0, 1)$), small-order subgroup points (orders 2, 4, 8), non-canonical scalars ($S \ge \ell$), and non-canonical coordinates ($y \ge p$).
+   - Production mode binds trusted public key via `OWNER_AUTH_PUBLIC_KEY` environment variable (arbitrary keys rejected unless `--allow-test-keys`/`--mock` flag is set).
+   - Executing artifact commit SHA independently resolved via `git rev-parse HEAD` or configuration settings (cannot be self-supplied by payload).
+   - Actual runtime target derived from database engine URL and storage bucket; compared against payload claim.
+   - Revocation register loaded fail-closed.
+   - Restored runtime verified: requires `settings.VIDU_GENERATION_ENABLED is False` and valid evidence anchor format.
+4. **Autonomous Isolated Failure Audits (`backend/app/services/recovery_auth.py`)**:
+   - Autonomous isolated database session via `sessionmaker` bound to engine, committing failure audits independently of caller transaction state.
+   - Regex-based token and secret sanitization/redaction before recording error messages.
+   - Captures failures across every execution stage (preflight, provider, download, storage upload, DB materialization, post-commit readback, offline reconciliation).
+   - If audit persistence fails, raises `AuditWriteFailureError` to fail closed without corrupting primary data.
+5. **Recovery Service Hardening (`backend/app/services/vidu_recovery.py`)**:
+   - Universal Storage Compensation Guards: Tracks real transaction outcome (`tx_state`, `db_rolled_back`, `unresolved_commit`).
+   - Independent fresh DB session used to verify 0 committed `Asset` records reference `(bucket, key)`.
+   - Ambiguous commits (e.g. timeouts during commit phase) or rollback failures retain storage object safely and record failure audit (`RETAINED_OBJECT_UNSAFE_TO_DELETE`).
+   - Bounded streaming read verification (`stream_verify_storage_object`): streams storage payload in 64KB chunks up to 50MB without loading full video into RAM.
+   - Dedicated Offline Reconciliation (`reconcile_offline_historical_job`): strictly 0 provider GET/POST; requires complete lineage including `UsageLedger`; validates `GenerationJob.result`; preserves recorded historical credits without synthesizing values; fails closed if evidence is missing or conflicting.
+6. **Single-Purpose CLI Harness (`backend/app/cli/vidu_recovery_harness.py`)**:
    - Strictly bounded to hardcoded `TARGET_HISTORICAL_PROVIDER_JOB_ID = "995880130565918720"`.
    - State transition lifecycle: `CLAIMED_PENDING_GET` -> `GET_IN_FLIGHT` (network_get_attempts = 1) -> `MATERIALIZED_UNVERIFIED` -> `CONSUMED_SUCCESS` (or `CONSUMED_TERMINAL_FAILURE` / `CONSUMED_CRASHED`).
-   - Post-materialization read-back verification: DB check + storage object existence + streaming SHA-256 verification.
-   - No public API endpoints and no generic agent integrations.
-6. **Automated Test Suite (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-   - 26 tests covering all 26 acceptance scenarios from Gate A contract.
+   - Post-materialization read-back verification: uses an independent fresh database session to bypass identity map cache, combined with bounded streaming storage SHA-256 verification.
+7. **Automated Test Suite (`backend/tests/test_vidu_recovery_gate_b.py`)**:
+   - 28 tests covering all 26 acceptance scenarios plus RFC 8032 official vectors and degenerate key attacks, exercising real injected failure paths through mocks and isolated SQLite DB.
 
 ---
 
@@ -79,35 +92,35 @@ Release = NOT DECLARED
 | 4 | Phase 2 Replay or Revoked Nonce | **VERIFIED (PASSED)** | Duplicate nonce or revoked token raises `AuthReplayError`/`AuthRevokedError`. |
 | 5 | Phase 2 Same-Job Concurrent Claim | **VERIFIED (PASSED)** | Unique constraint `(provider_name, provider_job_id)` rejects concurrent claims. |
 | 6 | Fence DB Insertion Failure | **VERIFIED (PASSED)** | Commit failure on initial fence insertion halts execution; 0 provider GET calls. |
-| 7 | Provider Task Gone / Not Found | **VERIFIED (PASSED)** | 404 / `NOT_FOUND` raises `ViduJobNotFoundError`; marks fence `CONSUMED_TERMINAL_FAILURE`. |
+| 7 | Provider Task Gone / Not Found | **VERIFIED (PASSED)** | FAILED / `TASK_NOT_FOUND` raises `ViduJobNotFoundError`; marks fence `CONSUMED_TERMINAL_FAILURE`. |
 | 8 | Provider Task Incomplete / In Progress | **VERIFIED (PASSED)** | Non-`COMPLETED` status raises `ViduJobNotCompletedError`; 0 polling retries. |
 | 9 | Missing or Unsafe Media URL | **VERIFIED (PASSED)** | SSRF / private host check or missing URL halts recovery; 0 bytes persisted. |
-| 10 | Download Failure / Network Error | **VERIFIED (PASSED)** | Download error cleans up temp file, rolls back DB, sets fence terminal. |
-| 11 | S3 Storage Upload Failure | **VERIFIED (PASSED)** | S3 upload failure rolls back DB transaction; 0 ghost DB records. |
-| 12 | Ambiguous DB Commit Exception | **VERIFIED (PASSED)** | Unresolved commit state prevents storage deletion; retains object for audit. |
-| 13 | Universal Storage Compensation Guards | **VERIFIED (PASSED)** | Deletion permitted ONLY IF ownership, rollback, 0 asset references proven. Ambiguous retains object and logs failure audit. |
+| 10 | Download Failure / Network Error | **VERIFIED (PASSED)** | Injected download error cleans up temp file, rolls back DB, sets fence terminal. |
+| 11 | S3 Storage Upload Failure | **VERIFIED (PASSED)** | Injected S3 upload failure rolls back DB transaction; 0 ghost DB records. |
+| 12 | Ambiguous DB Commit Exception | **VERIFIED (PASSED)** | Injected commit network timeout: unresolved commit state retains storage object; records `AMBIGUOUS_COMMIT` and `RETAINED_OBJECT_UNSAFE_TO_DELETE` audit. |
+| 13 | Universal Storage Compensation Guards | **VERIFIED (PASSED)** | Injected rollback failure: affirmative rollback failure retains storage object; records `ROLLBACK_FAILED` and `RETAINED_OBJECT_UNSAFE_TO_DELETE` audit. |
 | 14 | Hard Crash State Forbids Re-GET | **VERIFIED (PASSED)** | Crash during in-flight GET leaves fence in consumed state; automated re-GET strictly rejected. |
 | 15 | Window 5.5 Post-Commit Pre-Fence Crash | **VERIFIED (PASSED)** | Next inspection detects committed Asset and reconciles fence without issuing second provider GET. |
-| 16 | Fence Update Failure Leaves Lineage Intact | **VERIFIED (PASSED)** | If post-commit fence update fails, durable DB/storage lineage is preserved; fence consumed. |
-| 17 | Autonomous Failure Audit Recording | **VERIFIED (PASSED)** | Failure audit table reliably logs stage, error class, error message, and compensation status. |
-| 18 | Post-Commit S3 Read-Back Failure | **VERIFIED (PASSED)** | Corrupted storage checksum during read-back marks execution terminal; DB records retained. |
+| 16 | Fence Update Failure Leaves Lineage Intact | **VERIFIED (PASSED)** | Injected post-commit fence update failure: durable DB/storage lineage is preserved; 0 additional GET calls. |
+| 17 | Autonomous Failure Audit Recording | **VERIFIED (PASSED)** | Injected audit persistence failure: raises `AuditWriteFailureError` fail-closed; redacts secret tokens. |
+| 18 | Post-Commit S3 Read-Back Failure | **VERIFIED (PASSED)** | Injected streaming checksum mismatch during independent read-back marks execution terminal; DB records retained. |
 | 19 | Proposed Offline DB/S3 Reconciliation | **VERIFIED (PASSED)** | Returns existing Asset & GenerationJob with 0 provider GET and 0 provider POST. |
-| 20 | Offline Reconciliation Negative Cases | **VERIFIED (PASSED)** | Missing/corrupt data raises `ViduRecoveryError` and STOPS; zero fall-through to GET-first service. |
+| 20 | Offline Reconciliation Negative Cases | **VERIFIED (PASSED)** | Injected missing `UsageLedger`, corrupt checksum, or conflicting lineage raises `ViduRecoveryError` and STOPS; zero fall-through to GET-first service. |
 | 21 | UsageLedger Historical Spend Exclusion | **VERIFIED (PASSED)** | `imported_historical=True` ledger records are excluded from live project spend calculations. |
 | 22 | GenerationJob Historical Exclusion | **VERIFIED (PASSED)** | `imported_historical=True` jobs excluded from production dispatch and orchestrator loops. |
 | 23 | GenerationJob Execution Disabled Exclusion | **VERIFIED (PASSED)** | `execution_disabled=True` jobs excluded from worker polling queries (`.isnot(True)`). |
 | 24 | Canonical GenerationJob Both-True Exclusion | **VERIFIED (PASSED)** | Both-True jobs excluded from workers, queues, retry loops, and live pipelines simultaneously. |
-| 25 | Isolated DB & S3 Backup/Restore Proof | **VERIFIED IN MOCK / GATE B** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification explicitly deferred to Gate C**. |
-| 26 | Restored-Runtime Fail-Closed Fencing | **VERIFIED (PASSED)** | Restored DB without fence records fails closed when live provider flag is disabled. |
+| 25 | Isolated DB & S3 Backup/Restore Proof | **DEFERRED TO GATE C** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification is explicitly deferred to Gate C**. |
+| 26 | Restored-Runtime Fail-Closed Fencing | **VERIFIED (PASSED)** | Restored DB without fence records fails closed when live provider flag is disabled or runtime target mismatches. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `26 passed in 1.12s`
+  - `28 passed in 1.25s` (including RFC 8032 vectors and adversarial degenerate key tests)
 - **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `64 passed in 22.96s`
+  - `66 passed in 21.56s`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`

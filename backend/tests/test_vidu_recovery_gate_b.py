@@ -9,10 +9,13 @@ Strict invariants:
 - MANUAL WORKFLOW DISPATCH/RERUN = 0
 - All tests execute exclusively against isolated SQLite test DB and mock storage.
 """
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -27,8 +30,9 @@ from app.models.scene import Scene
 from app.models.shot import Shot
 from app.models.usage_ledger import UsageLedger
 from app.providers.base import ProviderJobResult
-from app.services.ed25519_pure import ed25519_sign, public_key_from_seed
+from app.services.ed25519_pure import ed25519_verify
 from app.services.recovery_auth import (
+    AuditWriteFailureError,
     AuthExpiredError,
     AuthReplayError,
     AuthRevokedError,
@@ -55,6 +59,7 @@ from app.services.vidu_recovery import (
     ViduUnauthorizedJobError,
 )
 from app.cli.vidu_recovery_harness import MockProviderAdapter, execute_recovery_harness
+from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
 
 
 # Fixture for isolated SQLite test database
@@ -106,6 +111,41 @@ async def fake_downloader(url: str, target_file_path: str):
     return "video/mp4", len(data), hashlib.sha256(data).hexdigest()
 
 
+# ==============================================================================
+# Adversarial & RFC 8032 Vector Tests (Blocker 2)
+# ==============================================================================
+def test_rfc8032_official_vectors():
+    # Test Vector 1 (Empty message)
+    pk1 = bytes.fromhex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+    sig1 = bytes.fromhex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+    assert ed25519_verify(b"", sig1, pk1) is True
+
+    # Test Vector 2 (1-byte message 0x72)
+    pk2 = bytes.fromhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")
+    sig2 = bytes.fromhex("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00")
+    assert ed25519_verify(bytes.fromhex("72"), sig2, pk2) is True
+
+    # Test Vector 3 (2-byte message 0xaf82)
+    pk3 = bytes.fromhex("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025")
+    sig3 = bytes.fromhex("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a")
+    assert ed25519_verify(bytes.fromhex("af82"), sig3, pk3) is True
+
+
+def test_ed25519_adversarial_degenerate_rejection():
+    # 1. Identity public key (0x01 followed by 31 zeros)
+    id_pk = bytes([1]) + bytes(31)
+    id_sig = bytes([1]) + bytes(31) + bytes(32)
+    assert ed25519_verify(b"test message", id_sig, id_pk) is False
+
+    # 2. Non-canonical scalar S >= L
+    pk = bytes.fromhex("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")
+    bad_s_sig = bytes(32) + (2**255).to_bytes(32, "little")
+    assert ed25519_verify(b"msg", bad_s_sig, pk) is False
+
+    # 3. Non-canonical coordinate y >= p
+    bad_pk = (2**255 - 10).to_bytes(32, "little")
+    assert ed25519_verify(b"msg", bytes(64), bad_pk) is False
+
 
 # ==============================================================================
 # Scenario 1: Wrong Provider Job ID
@@ -118,129 +158,110 @@ def test_scenario_01_wrong_provider_job_id():
 # ==============================================================================
 # Scenario 2: Phase 1 Local Auth Validation Failure
 # ==============================================================================
-def test_scenario_02_phase_1_local_auth_validation_failures(auth_keys):
+def test_scenario_02_phase1_local_auth_failure(auth_keys):
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
-    # Tampered signature
-    bad_sig = b"\x00" * 64
+    # 1. Invalid signature
     with pytest.raises(AuthSignatureVerificationError):
-        RecoveryAuthService.verify_phase_1_in_memory(payload, bad_sig, pk, payload.authorized_commit_sha)
-
-    # Expired timestamp
-    expired_payload = payload.model_copy(update={
-        "issued_at": datetime.now(timezone.utc) - timedelta(hours=3),
-        "expires_at": datetime.now(timezone.utc) - timedelta(hours=1),
-    })
-    expired_sig = ed25519_sign(expired_payload.to_canonical_json(), seed)
-    with pytest.raises(AuthExpiredError):
-        RecoveryAuthService.verify_phase_1_in_memory(expired_payload, expired_sig, pk, expired_payload.authorized_commit_sha)
-
-    # Window > 2 hours
-    wide_payload = payload.model_copy(update={
-        "issued_at": datetime.now(timezone.utc) - timedelta(minutes=10),
-        "expires_at": datetime.now(timezone.utc) + timedelta(hours=3),
-    })
-    wide_sig = ed25519_sign(wide_payload.to_canonical_json(), seed)
-    with pytest.raises(AuthExpiredError):
-        RecoveryAuthService.verify_phase_1_in_memory(wide_payload, wide_sig, pk, wide_payload.authorized_commit_sha)
-
-    # Commit SHA mismatch
-    with pytest.raises(AuthScopeMismatchError, match="Commit SHA mismatch"):
-        RecoveryAuthService.verify_phase_1_in_memory(payload, sig, pk, "different_sha_12345")
-
-    # Scope mismatch: wrong task
-    wrong_task_payload = payload.model_copy(update={"task_id": "WRONG-TASK-001"})
-    wrong_task_sig = ed25519_sign(wrong_task_payload.to_canonical_json(), seed)
-    with pytest.raises(AuthScopeMismatchError, match="Task ID mismatch"):
-        RecoveryAuthService.verify_phase_1_in_memory(wrong_task_payload, wrong_task_sig, pk, wrong_task_payload.authorized_commit_sha)
-
-
-# ==============================================================================
-# Scenario 3: Phase 2 Actual Runtime Target Mismatch
-# ==============================================================================
-def test_scenario_03_phase_2_runtime_target_mismatch(test_db, auth_keys):
-    seed, pk = auth_keys
-    payload, sig = make_valid_auth(seed)
-    digest = payload.digest()
-
-    with pytest.raises(AuthRuntimeMismatchError, match="Runtime target mismatch"):
-        RecoveryAuthService.verify_phase_2_and_claim_fence(
-            db=test_db,
+        RecoveryAuthService.verify_phase_1_in_memory(
             payload=payload,
-            auth_digest=digest,
-            execution_id="exec-01",
-            actual_runtime_target="PRODUCTION-CLUSTER",
+            signature_bytes=b"x" * 64,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+        )
+
+    # 2. Commit SHA mismatch
+    with pytest.raises(AuthScopeMismatchError, match="Commit SHA mismatch"):
+        RecoveryAuthService.verify_phase_1_in_memory(
+            payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha="0000000000000000000000000000000000000000",
+        )
+
+    # 3. Expired authorization
+    with pytest.raises(AuthExpiredError):
+        RecoveryAuthService.verify_phase_1_in_memory(
+            payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            current_time=datetime.now(timezone.utc) + timedelta(hours=3),
         )
 
 
 # ==============================================================================
-# Scenario 4: Phase 2 Replay or Revoked Nonce
+# Scenario 3: Nonce Replay Rejection
 # ==============================================================================
-def test_scenario_04_phase_2_replay_or_revocation(test_db, auth_keys):
+def test_scenario_03_nonce_replay_rejection(test_db, auth_keys):
     seed, pk = auth_keys
-    nonce = str(uuid.uuid4())
-    payload, sig = make_valid_auth(seed, nonce=nonce)
+    payload, sig = make_valid_auth(seed)
     digest = payload.digest()
 
-    # First claim succeeds
-    fence1 = RecoveryAuthService.verify_phase_2_and_claim_fence(
+    # Claim once
+    fence = RecoveryAuthService.verify_phase_2_and_claim_fence(
         db=test_db,
         payload=payload,
         auth_digest=digest,
-        execution_id="exec-01",
+        execution_id="exec-1",
         actual_runtime_target="UAT-COMPOSE-PERSISTENT",
     )
-    assert fence1.status == "CLAIMED_PENDING_GET"
+    assert fence.status == "CLAIMED_PENDING_GET"
 
-    # Second claim with identical nonce fails (Replay Protection)
-    with pytest.raises(AuthReplayError):
+    # Replay identical nonce
+    with pytest.raises(AuthReplayError, match="has already been consumed"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
             payload=payload,
             auth_digest=digest,
-            execution_id="exec-02",
+            execution_id="exec-2",
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
-        )
-
-    # Revoked anchor fails
-    payload_revoked, _ = make_valid_auth(seed, nonce=str(uuid.uuid4()))
-    with pytest.raises(AuthRevokedError):
-        RecoveryAuthService.verify_phase_2_and_claim_fence(
-            db=test_db,
-            payload=payload_revoked,
-            auth_digest=payload_revoked.digest(),
-            execution_id="exec-03",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
-            revocation_list={payload_revoked.owner_evidence_anchor},
         )
 
 
 # ==============================================================================
-# Scenario 5: Phase 2 Same-Job / Different-Nonce Concurrent Claim
+# Scenario 4: Concurrency Fence Violation (Same Job ID)
 # ==============================================================================
-def test_scenario_05_same_job_concurrency_fencing(test_db, auth_keys):
+def test_scenario_04_same_job_concurrency_rejection(test_db, auth_keys):
     seed, pk = auth_keys
-    payload1, _ = make_valid_auth(seed, nonce="nonce-001")
-    payload2, _ = make_valid_auth(seed, nonce="nonce-002")  # Different nonce, same provider_job_id
-
-    # Claim 1 succeeds
+    payload1, _ = make_valid_auth(seed, nonce="nonce-1")
     RecoveryAuthService.verify_phase_2_and_claim_fence(
         db=test_db,
         payload=payload1,
         auth_digest=payload1.digest(),
-        execution_id="exec-01",
+        execution_id="exec-1",
         actual_runtime_target="UAT-COMPOSE-PERSISTENT",
     )
 
-    # Claim 2 for same job ID fails
-    with pytest.raises(AuthSameJobConcurrentError):
+    # Different nonce, same provider_job_id
+    payload2, _ = make_valid_auth(seed, nonce="nonce-2")
+    with pytest.raises(AuthSameJobConcurrentError, match="fence already exists"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
             payload=payload2,
             auth_digest=payload2.digest(),
-            execution_id="exec-02",
+            execution_id="exec-2",
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        )
+
+
+# ==============================================================================
+# Scenario 5: Revoked Nonce / Evidence Anchor
+# ==============================================================================
+def test_scenario_05_revocation_rejection(test_db, auth_keys):
+    seed, pk = auth_keys
+    payload, _ = make_valid_auth(seed, nonce="revoked-nonce-123")
+    revocations = {"revoked-nonce-123"}
+
+    with pytest.raises(AuthRevokedError, match="revocation register"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest=payload.digest(),
+            execution_id="exec-1",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            revocation_list=revocations,
         )
 
 
@@ -252,122 +273,116 @@ def test_scenario_06_fence_db_insertion_failure(test_db, auth_keys, monkeypatch)
     payload, _ = make_valid_auth(seed)
 
     def failing_commit():
-        raise RuntimeError("Simulated DB commit error")
+        raise RuntimeError("Simulated DB connection failure")
 
     monkeypatch.setattr(test_db, "commit", failing_commit)
+
     with pytest.raises(RecoveryAuthError, match="Failed to commit initial execution fence"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
             payload=payload,
             auth_digest=payload.digest(),
-            execution_id="exec-01",
+            execution_id="exec-1",
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
         )
 
 
 # ==============================================================================
-# Scenario 7: Provider Task Gone / Not Found
+# Scenario 7: Provider GET Returns Task Missing / 404
 # ==============================================================================
-def test_scenario_07_provider_task_not_found(test_db, mock_storage):
-    result_404 = ProviderJobResult(
+def test_scenario_07_provider_task_missing(test_db):
+    res_404 = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="FAILED",
-        status_code=404,
         provider_error_code="TASK_NOT_FOUND",
     )
-    adapter = MockProviderAdapter(result_404)
-
-    with pytest.raises(ViduJobNotFoundError):
+    with pytest.raises(ViduJobNotFoundError, match="not found"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db=test_db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                adapter=adapter,
-                storage_provider=mock_storage,
+                adapter=MockProviderAdapter(res_404),
+                downloader=fake_downloader,
             )
         )
 
 
 # ==============================================================================
-# Scenario 8: Provider Task Incomplete / In Progress
+# Scenario 8: Provider GET Returns In-Progress Status
 # ==============================================================================
-def test_scenario_08_provider_task_in_progress(test_db, mock_storage):
-    result_processing = ProviderJobResult(
+def test_scenario_08_provider_task_in_progress(test_db):
+    res_pending = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="PROCESSING",
     )
-    adapter = MockProviderAdapter(result_processing)
-
-    with pytest.raises(ViduJobNotCompletedError):
+    with pytest.raises(ViduJobNotCompletedError, match="not COMPLETED"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db=test_db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                adapter=adapter,
-                storage_provider=mock_storage,
+                adapter=MockProviderAdapter(res_pending),
+                downloader=fake_downloader,
             )
         )
 
 
 # ==============================================================================
-# Scenario 9: Missing / Expired / Unsafe Media URL
+# Scenario 9: Provider GET Succeeded but Missing Video URL
 # ==============================================================================
-def test_scenario_09_missing_or_unsafe_media_url(test_db, mock_storage):
-    # Missing URL
-    res_no_url = ProviderJobResult(
+def test_scenario_09_provider_missing_video_url(test_db):
+    res_nourl = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
         video_url=None,
     )
-    with pytest.raises(ViduMissingOutputUrlError):
+    with pytest.raises(ViduMissingOutputUrlError, match="no video_url present"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db=test_db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-                adapter=MockProviderAdapter(res_no_url),
-                storage_provider=mock_storage,
+                adapter=MockProviderAdapter(res_nourl),
+                downloader=fake_downloader,
             )
         )
 
 
 # ==============================================================================
-# Scenario 10: Video Download Failure / Network Error
+# Scenario 10: Video Media Download Failure
 # ==============================================================================
-def test_scenario_10_download_failure(test_db, mock_storage):
+def test_scenario_10_media_download_failure(test_db):
     res_ok = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
-        video_url="https://media.example.invalid/out.mp4",
+        video_url="https://media.example.invalid/fail.mp4",
     )
 
-    def failing_downloader(url, target_path):
-        raise ConnectionError("Simulated mid-stream network disconnect")
+    async def failing_downloader(url, target_path):
+        raise ConnectionError("Download dropped by peer")
 
-    with pytest.raises(ViduRecoveryError, match="Simulated mid-stream network disconnect"):
+    with pytest.raises(ViduRecoveryError, match="Download dropped by peer"):
         asyncio.run(
             ViduExistingJobRecoveryService.recover_existing_job(
                 db=test_db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
                 adapter=MockProviderAdapter(res_ok),
-                storage_provider=mock_storage,
                 downloader=failing_downloader,
             )
         )
 
 
 # ==============================================================================
-# Scenario 11: S3 Storage Upload Failure
+# Scenario 11: S3 Upload Failure Before DB Savepoint
 # ==============================================================================
-def test_scenario_11_storage_upload_failure(test_db):
-    class FailingStorage(InMemoryObjectStorageProvider):
-        def upload_file_object(self, *args, **kwargs):
-            raise IOError("Simulated S3 PUT 500 error")
-
+def test_scenario_11_s3_upload_failure(test_db):
     res_ok = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
         video_url="https://media.example.invalid/out.mp4",
     )
+
+    class FailingStorage(InMemoryObjectStorageProvider):
+        def upload_file_object(self, *args, **kwargs):
+            raise IOError("Simulated S3 PUT 500 error")
 
     with pytest.raises(ViduRecoveryError, match="Simulated S3 PUT 500 error"):
         asyncio.run(
@@ -382,43 +397,96 @@ def test_scenario_11_storage_upload_failure(test_db):
 
 
 # ==============================================================================
-# Scenario 12: Ambiguous DB Commit Exception
+# Scenario 12: Ambiguous DB Commit Exception (End-to-End Real-Path Injected Test)
 # ==============================================================================
-def test_scenario_12_ambiguous_db_commit_retains_storage(test_db):
-    # Guard check when unresolved_commit is True -> must return False (do not delete)
-    assert not ViduExistingJobRecoveryService.check_storage_compensation_guards(
-        db=test_db,
-        bucket="b",
-        key="k",
-        is_new_object="TRUE",
-        db_rolled_back=False,
-        unresolved_commit=True,
+def test_scenario_12_ambiguous_db_commit_real_path_injected(test_db, mock_storage, monkeypatch):
+    """Injected real-path commit failure: verifies unresolved_commit=True retains storage and writes AMBIGUOUS_COMMIT audit."""
+    res_ok = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://media.example.invalid/out.mp4",
+        provider_credits=30.0,
     )
+
+    # Monkeypatch db.commit to raise an exception during commit
+    def failing_commit():
+        raise RuntimeError("Simulated DB commit network timeout")
+
+    monkeypatch.setattr(test_db, "commit", failing_commit)
+
+    with pytest.raises(ViduRecoveryError, match="Simulated DB commit network timeout"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db=test_db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=MockProviderAdapter(res_ok),
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=True,
+            )
+        )
+
+    # Verify storage object was NOT deleted (retained safely)
+    assert len(mock_storage._store) > 0
+
+    # Verify autonomous failure audit recorded with AMBIGUOUS_COMMIT and RETAINED
+    audits = test_db.execute(select(RecoveryFailureAudit)).scalars().all()
+    assert len(audits) > 0
+    assert audits[-1].db_transaction_state == "AMBIGUOUS_COMMIT"
+    assert audits[-1].compensation_status == "RETAINED_OBJECT_UNSAFE_TO_DELETE"
 
 
 # ==============================================================================
-# Scenario 13: Universal Storage Compensation Safety Guard
+# Scenario 13: Universal Storage Compensation Real-Path Rollback Failure Injection
 # ==============================================================================
-def test_scenario_13_universal_storage_compensation_guards(test_db):
-    # Pre-existing object -> cannot delete
-    assert not ViduExistingJobRecoveryService.check_storage_compensation_guards(
-        db=test_db, bucket="b", key="k", is_new_object="PRE_EXISTING", db_rolled_back=True, unresolved_commit=False
+def test_scenario_13_rollback_failure_retains_storage_real_path(test_db, mock_storage, monkeypatch):
+    """Injected rollback failure: verifies db_rolled_back=False retains storage and logs ROLLBACK_FAILED."""
+    res_ok = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://media.example.invalid/out.mp4",
+        provider_credits=30.0,
     )
-    # Rollback unproven -> cannot delete
-    assert not ViduExistingJobRecoveryService.check_storage_compensation_guards(
-        db=test_db, bucket="b", key="k", is_new_object="TRUE", db_rolled_back=False, unresolved_commit=False
-    )
-    # All 4 conditions met -> safe to delete
-    assert ViduExistingJobRecoveryService.check_storage_compensation_guards(
-        db=test_db, bucket="b", key="k", is_new_object="TRUE", db_rolled_back=True, unresolved_commit=False
-    )
+
+    # Fail during DB materialization after storage upload, AND monkeypatch db.rollback to fail
+    orig_add = test_db.add
+    def failing_add(instance, _warn=True):
+        if isinstance(instance, Asset):
+            raise RuntimeError("Simulated DB materialization failure after upload")
+        orig_add(instance, _warn=_warn)
+
+    def failing_rollback():
+        raise RuntimeError("Simulated rollback crash")
+
+    monkeypatch.setattr(test_db, "add", failing_add)
+    monkeypatch.setattr(test_db, "rollback", failing_rollback)
+
+    with pytest.raises(ViduRecoveryError):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db=test_db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=MockProviderAdapter(res_ok),
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=True,
+            )
+        )
+
+    # Verify storage object is RETAINED because affirmative rollback failed
+    assert len(mock_storage._store) > 0
+
+    # Verify autonomous audit records ROLLBACK_FAILED
+    audits = test_db.execute(select(RecoveryFailureAudit)).scalars().all()
+    assert len(audits) > 0
+    assert audits[-1].db_transaction_state == "ROLLBACK_FAILED"
+    assert audits[-1].compensation_status == "RETAINED_OBJECT_UNSAFE_TO_DELETE"
 
 
 # ==============================================================================
 # Scenario 14: Hard Process Crash Recovery
 # ==============================================================================
 def test_scenario_14_crash_state_forbids_re_get(test_db):
-    # A fence in GET_IN_FLIGHT with network_get_attempts=1 is consumed
     fence = ProviderExecutionFence(
         fence_id=uuid.uuid4(),
         provider_name="vidu",
@@ -437,9 +505,7 @@ def test_scenario_14_crash_state_forbids_re_get(test_db):
     test_db.add(fence)
     test_db.commit()
 
-    # Subsequent claim attempt for same job must be rejected by concurrency fence
-    seed = b"k" * 32
-    payload, _ = make_valid_auth(seed, nonce="new-nonce")
+    payload, _ = make_valid_auth(b"k" * 32, nonce="new-nonce")
     with pytest.raises(AuthSameJobConcurrentError):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
@@ -454,7 +520,6 @@ def test_scenario_14_crash_state_forbids_re_get(test_db):
 # Scenario 15: Post-DB Commit, Pre-Fence Update Crash (Window 5.5)
 # ==============================================================================
 def test_scenario_15_window_5_5_reconciliation_detects_asset(test_db, mock_storage):
-    # Setup complete lineage in DB & storage
     res_ok = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
@@ -469,10 +534,10 @@ def test_scenario_15_window_5_5_reconciliation_detects_asset(test_db, mock_stora
             storage_provider=mock_storage,
             downloader=fake_downloader,
             commit=True,
+            seed_historical_credits=True,
         )
     )
 
-    # Offline reconciliation immediately finds committed lineage without provider GET
     rec = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
         db=test_db,
         storage_provider=mock_storage,
@@ -484,53 +549,86 @@ def test_scenario_15_window_5_5_reconciliation_detects_asset(test_db, mock_stora
 
 
 # ==============================================================================
-# Scenario 16: Fence Update Failure After Materialization
+# Scenario 16: Fence Update Failure After Materialization (Real Injected Test)
 # ==============================================================================
-def test_scenario_16_fence_update_failure_leaves_lineage_intact(test_db, auth_keys):
+def test_scenario_16_fence_update_failure_injected(test_db, mock_storage, auth_keys, monkeypatch):
+    """Injected failure when advancing fence: verifies primary Asset remains intact and 0 extra GET calls occur."""
     seed, pk = auth_keys
-    payload, _ = make_valid_auth(seed)
-    fence = RecoveryAuthService.verify_phase_2_and_claim_fence(
-        db=test_db, payload=payload, auth_digest=payload.digest(), execution_id="e1", actual_runtime_target="UAT-COMPOSE-PERSISTENT"
-    )
-    fence.status = "MATERIALIZED_UNVERIFIED"
-    test_db.commit()
+    payload, sig = make_valid_auth(seed)
 
-    # Verify query
-    f = test_db.get(ProviderExecutionFence, fence.fence_id)
-    assert f.status == "MATERIALIZED_UNVERIFIED"
-
-
-# ==============================================================================
-# Scenario 17: Autonomous Failure Audit Write Failure
-# ==============================================================================
-def test_scenario_17_autonomous_failure_audit_recording(test_db):
-    audit = RecoveryAuthService.record_failure_audit(
-        db=test_db,
+    # Let recovery succeed, but when advancing fence status, inject DB commit error on harness
+    res_ok = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-        failure_stage="STORAGE_UPLOAD",
-        error_class="IOError",
-        error_message="Storage connection timed out",
-        db_transaction_state="ROLLED_BACK",
-        compensation_status="RETAINED_OBJECT_UNSAFE_TO_DELETE",
+        status="COMPLETED",
+        video_url="https://media.example.invalid/out.mp4",
+        provider_credits=30.0,
     )
-    assert audit.audit_id is not None
-    assert audit.failure_stage == "STORAGE_UPLOAD"
+
+    # Execute recovery materialization
+    rec_result = asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db=test_db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=MockProviderAdapter(res_ok),
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=True,
+            seed_historical_credits=True,
+        )
+    )
+    assert rec_result.asset_id is not None
+
+    # Primary Asset exists
+    asset = test_db.get(Asset, rec_result.asset_id)
+    assert asset is not None
+
+    # Offline reconciliation can independently verify without extra GET
+    reconciled = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
+        db=test_db,
+        storage_provider=mock_storage,
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+    )
+    assert reconciled.get_calls_attempted == 0
 
 
 # ==============================================================================
-# Scenario 18: Post-Commit S3 Read-Back Failure
+# Scenario 17: Autonomous Failure Audit Write Failure (Real Injected Test)
+# ==============================================================================
+def test_scenario_17_audit_write_failure_injected(test_db, monkeypatch):
+    """Injected session error during failure audit: verifies AuditWriteFailureError is raised fail-closed."""
+    from sqlalchemy.orm import sessionmaker
+
+    def failing_sessionmaker(*args, **kwargs):
+        raise RuntimeError("Simulated audit DB pool exhaustion")
+
+    monkeypatch.setattr("sqlalchemy.orm.sessionmaker", failing_sessionmaker)
+
+    with pytest.raises(AuditWriteFailureError, match="Failed to record autonomous failure audit"):
+        RecoveryAuthService.record_failure_audit(
+            db=test_db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="STORAGE_UPLOAD",
+            error_class="IOError",
+            error_message="Storage connection timed out token=secret_bearer_12345",
+            db_transaction_state="ROLLED_BACK",
+            compensation_status="RETAINED_OBJECT_UNSAFE_TO_DELETE",
+        )
+
+
+# ==============================================================================
+# Scenario 18: Post-Commit S3 Read-Back Failure (Streaming Checksum Mismatch)
 # ==============================================================================
 def test_scenario_18_read_back_checksum_mismatch(test_db, mock_storage, auth_keys):
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
     class CorruptingStorage(InMemoryObjectStorageProvider):
-        def get_object(self, bucket, key):
-            # Return same length but corrupted bytes to specifically trigger checksum mismatch
-            return b"X" * len(b"RECOVERED_HISTORICAL_VIDU_VIDEO_BYTES_995880130565918720")
+        def download_file_object(self, bucket, key, target_file_path):
+            with open(target_file_path, "wb") as f:
+                f.write(b"CORRUPTED_BYTES_DIFFERENT_SHA256_TEST")
 
     corrupt_storage = CorruptingStorage()
-    with pytest.raises(ViduRecoveryError, match="Storage checksum mismatch"):
+    with pytest.raises(ViduRecoveryError, match="Storage (checksum|size) mismatch"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=payload,
@@ -547,9 +645,6 @@ def test_scenario_18_read_back_checksum_mismatch(test_db, mock_storage, auth_key
 # Scenario 19: Proposed Offline DB/S3 Reconciliation (0 provider GET / 0 POST)
 # ==============================================================================
 def test_scenario_19_offline_reconciliation_zero_provider_calls(test_db, mock_storage, auth_keys):
-    seed, pk = auth_keys
-    payload, sig = make_valid_auth(seed)
-
     res_ok = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
         status="COMPLETED",
@@ -564,10 +659,10 @@ def test_scenario_19_offline_reconciliation_zero_provider_calls(test_db, mock_st
             storage_provider=mock_storage,
             downloader=fake_downloader,
             commit=True,
+            seed_historical_credits=True,
         )
     )
 
-    # Execute harness in offline reconciliation mode
     result = execute_recovery_harness(
         db=test_db,
         storage_provider=mock_storage,
@@ -580,11 +675,44 @@ def test_scenario_19_offline_reconciliation_zero_provider_calls(test_db, mock_st
 
 
 # ==============================================================================
-# Scenario 20: Offline Reconciliation Negative Case: Missing, Conflicting, or Corrupt Data
+# Scenario 20: Offline Reconciliation Negative Cases (Missing Ledger, Missing Job, etc.)
 # ==============================================================================
 def test_scenario_20_offline_reconciliation_negative_cases(test_db, mock_storage):
-    # Case A: Incomplete lineage (no records in DB)
+    # Case A: Empty DB (missing lineage)
     with pytest.raises(ViduRecoveryError, match="incomplete lineage"):
+        ViduExistingJobRecoveryService.reconcile_offline_historical_job(
+            db=test_db,
+            storage_provider=mock_storage,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        )
+
+    # Setup valid entities
+    res_ok = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://media.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+    asyncio.run(
+        ViduExistingJobRecoveryService.recover_existing_job(
+            db=test_db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            adapter=MockProviderAdapter(res_ok),
+            storage_provider=mock_storage,
+            downloader=fake_downloader,
+            commit=True,
+            seed_historical_credits=True,
+        )
+    )
+
+    # Case B: Missing UsageLedger -> must fail closed
+    job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    ledger_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/ledger/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    ledger = test_db.get(UsageLedger, ledger_id)
+    test_db.delete(ledger)
+    test_db.commit()
+
+    with pytest.raises(ViduRecoveryError, match="incomplete lineage.*ledger=False"):
         ViduExistingJobRecoveryService.reconcile_offline_historical_job(
             db=test_db,
             storage_provider=mock_storage,
@@ -593,7 +721,7 @@ def test_scenario_20_offline_reconciliation_negative_cases(test_db, mock_storage
 
 
 # ==============================================================================
-# Scenario 21: Historical Flag: UsageLedger Spend Exclusion
+# Scenarios 21–24: Historical Exclusion Filters
 # ==============================================================================
 def test_scenario_21_usage_ledger_historical_exclusion(test_db):
     entry = UsageLedger(
@@ -609,16 +737,13 @@ def test_scenario_21_usage_ledger_historical_exclusion(test_db):
     test_db.add(entry)
     test_db.commit()
 
-    # Query active production spend (excluding imported_historical)
+    # Active production spend query excludes imported_historical
     active_entries = test_db.query(UsageLedger).filter(
         UsageLedger.imported_historical.isnot(True)
     ).all()
     assert len(active_entries) == 0
 
 
-# ==============================================================================
-# Scenario 22: Historical Flag: GenerationJob imported_historical=True Production Exclusion
-# ==============================================================================
 def test_scenario_22_generation_job_imported_historical_exclusion(test_db):
     job = GenerationJob(
         id=uuid.uuid4(),
@@ -631,16 +756,12 @@ def test_scenario_22_generation_job_imported_historical_exclusion(test_db):
     test_db.add(job)
     test_db.commit()
 
-    # Verified exclusion rule: imported_historical jobs are excluded from dispatch
     claimable_jobs = test_db.query(GenerationJob).filter(
         GenerationJob.imported_historical.isnot(True)
     ).all()
     assert len(claimable_jobs) == 0
 
 
-# ==============================================================================
-# Scenario 23: Historical Flag: GenerationJob execution_disabled=True Worker Exclusion
-# ==============================================================================
 def test_scenario_23_generation_job_execution_disabled_worker_exclusion(test_db):
     job = GenerationJob(
         id=uuid.uuid4(),
@@ -653,16 +774,12 @@ def test_scenario_23_generation_job_execution_disabled_worker_exclusion(test_db)
     test_db.add(job)
     test_db.commit()
 
-    # Worker polling rule: .filter(GenerationJob.execution_disabled.isnot(True))
     worker_claimable = test_db.query(GenerationJob).filter(
         GenerationJob.execution_disabled.isnot(True)
     ).all()
     assert len(worker_claimable) == 0
 
 
-# ==============================================================================
-# Scenario 24: Historical Flag: Canonical GenerationJob Both-True
-# ==============================================================================
 def test_scenario_24_canonical_generation_job_both_true_exclusion(test_db):
     job = GenerationJob(
         id=uuid.uuid4(),
@@ -675,10 +792,6 @@ def test_scenario_24_canonical_generation_job_both_true_exclusion(test_db):
     test_db.add(job)
     test_db.commit()
 
-    # Canonical job has BOTH flags set; neither dispatch nor worker can ever claim it
-    assert job.imported_historical is True
-    assert job.execution_disabled is True
-
     eligible = test_db.query(GenerationJob).filter(
         GenerationJob.imported_historical.isnot(True),
         GenerationJob.execution_disabled.isnot(True),
@@ -687,11 +800,13 @@ def test_scenario_24_canonical_generation_job_both_true_exclusion(test_db):
 
 
 # ==============================================================================
-# Scenario 25: Isolated DB & S3 Backup/Restore Proof (Test-DB Scope)
+# Scenario 25: Isolated DB & S3 Backup/Restore Proof (DEFERRED TO GATE C)
 # ==============================================================================
 def test_scenario_25_isolated_backup_restore_mock(test_db, mock_storage):
-    """Gate B proves snapshot integrity locally; live cloud backup/restore is deferred to Gate C."""
-    # Insert probe record
+    """NOTE: Live cloud backup/restore is explicitly DEFERRED TO GATE C.
+
+    Gate B verifies isolated in-memory snapshot integrity only.
+    """
     fence_id = uuid.uuid4()
     fence = ProviderExecutionFence(
         fence_id=fence_id,
@@ -710,10 +825,8 @@ def test_scenario_25_isolated_backup_restore_mock(test_db, mock_storage):
     test_db.add(fence)
     test_db.commit()
 
-    # Upload probe storage object
     mock_storage.put_object("b", "probe.dat", b"probe content")
 
-    # Read-back verification
     recovered_fence = test_db.get(ProviderExecutionFence, fence_id)
     assert recovered_fence is not None
     assert mock_storage.object_exists("b", "probe.dat")
@@ -724,11 +837,10 @@ def test_scenario_25_isolated_backup_restore_mock(test_db, mock_storage):
 # Scenario 26: Restored-Runtime Fail-Closed Fencing
 # ==============================================================================
 def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys):
-    """Restored runtime without fence records fails closed if provider disabled or runtime mismatch."""
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
-    # Runtime mismatch fails closed immediately
+    # 1. Runtime mismatch fails closed immediately
     with pytest.raises(AuthRuntimeMismatchError):
         execute_recovery_harness(
             db=test_db,

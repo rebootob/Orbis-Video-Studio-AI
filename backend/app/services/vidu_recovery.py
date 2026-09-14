@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 import re
 import tempfile
 import uuid
@@ -241,6 +242,13 @@ class ViduExistingJobRecoveryService:
         """
         # Step 1: Preflight ID bounding BEFORE any GET, DB, or storage calls
         cls.validate_authorized_job_id(provider_job_id)
+
+        tx_state = "INITIAL"
+        db_rolled_back = False
+        unresolved_commit = False
+        uploaded_new_object = False
+        final_storage_bucket = None
+        final_storage_key = None
 
         # Step 2: GET status from provider BEFORE committing or creating DB lineage
         vidu_adapter = adapter or ViduProviderAdapter()
@@ -624,27 +632,41 @@ class ViduExistingJobRecoveryService:
 
             savepoint.commit()
             if commit:
+                tx_state = "COMMITTING"
                 db.commit()
+                tx_state = "COMMITTED"
 
         except Exception as exc:
+            # Check for ambiguous commit (timeout, connection drop, or network ambiguity during commit)
+            unresolved_commit = (tx_state == "COMMITTING" and any(
+                term in str(exc).lower() for term in ("timeout", "connection", "ambiguous", "dropped")
+            ))
+            db_rolled_back = False
+
             # Safely rollback DB state (commit has not succeeded)
             try:
                 if savepoint.is_active:
                     savepoint.rollback()
                 if commit:
                     db.rollback()
+                db_rolled_back = True
+                tx_state = "AMBIGUOUS_COMMIT" if unresolved_commit else "ROLLED_BACK"
             except Exception as rb_err:
+                db_rolled_back = False
+                unresolved_commit = True
+                tx_state = "ROLLBACK_FAILED"
                 logger.warning("DB rollback failed during recovery cleanup: %s", rb_err)
 
-            # Storage cleanup executes ONLY before durable DB commit is known successful
+            # Storage cleanup executes ONLY if affirmative guards pass
+            comp_status = "NOT_APPLICABLE"
             if auto_compensate_storage and uploaded_new_object and uploaded_bucket and uploaded_key:
                 safe_to_delete = cls.check_storage_compensation_guards(
                     db=db,
                     bucket=uploaded_bucket,
                     key=uploaded_key,
                     is_new_object="TRUE" if uploaded_new_object else "UNKNOWN",
-                    db_rolled_back=True,
-                    unresolved_commit=False,
+                    db_rolled_back=db_rolled_back,
+                    unresolved_commit=unresolved_commit,
                 )
                 if safe_to_delete:
                     try:
@@ -657,22 +679,22 @@ class ViduExistingJobRecoveryService:
                     logger.warning("Storage compensation skipped (universal guards not satisfied); retaining %s/%s", uploaded_bucket, uploaded_key)
                     comp_status = "RETAINED_OBJECT_UNSAFE_TO_DELETE"
 
-                try:
-                    from app.services.recovery_auth import RecoveryAuthService
-                    RecoveryAuthService.record_failure_audit(
-                        db=db,
-                        provider_job_id=provider_job_id,
-                        failure_stage="STORAGE_OR_DB_MATERIALIZATION",
-                        error_class=exc.__class__.__name__,
-                        error_message=str(exc),
-                        db_transaction_state="ROLLED_BACK",
-                        compensation_status=comp_status,
-                        fence_id=fence_id,
-                        orphan_bucket=uploaded_bucket,
-                        orphan_key=uploaded_key,
-                    )
-                except Exception as audit_err:
-                    logger.warning("Failed to record failure audit in recovery exception handler: %s", audit_err)
+            try:
+                from app.services.recovery_auth import RecoveryAuthService
+                RecoveryAuthService.record_failure_audit(
+                    db=db,
+                    provider_job_id=provider_job_id,
+                    failure_stage="STORAGE_OR_DB_MATERIALIZATION",
+                    error_class=exc.__class__.__name__,
+                    error_message=str(exc),
+                    db_transaction_state=tx_state,
+                    compensation_status=comp_status,
+                    fence_id=fence_id,
+                    orphan_bucket=uploaded_bucket if uploaded_new_object else None,
+                    orphan_key=uploaded_key if uploaded_new_object else None,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record failure audit in recovery exception handler: %s", audit_err)
 
             if temp_path and os.path.exists(temp_path):
                 try:
@@ -707,10 +729,10 @@ class ViduExistingJobRecoveryService:
 
         Returns True ONLY if ALL criteria are affirmatively proven:
         1. Ownership: is_new_object == 'TRUE'
-        2. Affirmative DB rollback proven
-        3. Zero committed Asset records reference (bucket, key)
-        4. No unresolved commit
-        If ambiguous/unknown: returns False (retain object).
+        2. Affirmative DB rollback proven (db_rolled_back == True)
+        3. Zero committed Asset records reference (bucket, key) via independent fresh query
+        4. No unresolved commit (unresolved_commit == False)
+        If ambiguous/unknown/failed read: returns False (retain object).
         """
         if is_new_object != "TRUE":
             return False
@@ -718,16 +740,79 @@ class ViduExistingJobRecoveryService:
             return False
         if unresolved_commit:
             return False
+
+        # Independent fresh authoritative read to avoid identity-map cache
         try:
-            ref_count = db.query(Asset).filter(
-                Asset.storage_bucket == bucket,
-                Asset.storage_key == key,
-            ).count()
-            if ref_count > 0:
-                return False
-        except Exception:
+            from sqlalchemy.orm import sessionmaker
+            engine = db.get_bind()
+            fresh_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+            with fresh_session_factory() as fresh_db:
+                ref_count = fresh_db.query(Asset).filter(
+                    Asset.storage_bucket == bucket,
+                    Asset.storage_key == key,
+                ).count()
+                if ref_count > 0:
+                    return False
+        except Exception as read_err:
+            logger.warning("Independent DB read failed in compensation guard: %s", read_err)
             return False
         return True
+
+    @classmethod
+    def stream_verify_storage_object(
+        cls,
+        storage: ObjectStorageProvider,
+        bucket: str,
+        key: str,
+        expected_size: int,
+        expected_sha256: str,
+        max_size_bytes: int = 50 * 1024 * 1024,
+    ) -> None:
+        """Bounded streaming verification of storage object without loading full payload to RAM.
+
+        Downloads to a temporary file on disk, verifies file size <= max_size_bytes,
+        and streams through hashlib in 64KB chunks to compute SHA-256.
+        """
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            try:
+                storage.download_file_object(bucket, key, tmp_path)
+            except Exception as dl_err:
+                raise ViduRecoveryError(f"Streaming verification failed to download object: {dl_err}") from dl_err
+
+            actual_size = os.path.getsize(tmp_path)
+            if actual_size > max_size_bytes:
+                raise ViduRecoveryError(
+                    f"Storage object exceeds maximum allowed size ({actual_size} > {max_size_bytes})"
+                )
+            if actual_size != expected_size:
+                raise ViduRecoveryError(
+                    f"Storage size mismatch: actual {actual_size} != expected {expected_size}"
+                )
+
+            hasher = hashlib.sha256()
+            with open(tmp_path, "rb") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+
+            calc_sha256 = hasher.hexdigest()
+            if calc_sha256 != expected_sha256:
+                raise ViduRecoveryError(
+                    f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}"
+                )
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
     @classmethod
     def reconcile_offline_historical_job(
@@ -774,12 +859,12 @@ class ViduExistingJobRecoveryService:
         except Exception as db_err:
             raise ViduRecoveryError(f"Offline reconciliation DB query failed: {db_err}") from db_err
 
-        # 4. Require complete lineage
-        if not asset or not job or not project or not scene or not shot:
+        # 4. Require complete lineage including UsageLedger
+        if not asset or not job or not project or not scene or not shot or not ledger:
             raise ViduRecoveryError(
                 f"Offline reconciliation failed: incomplete lineage for historical job {provider_job_id} "
                 f"(asset={bool(asset)}, job={bool(job)}, project={bool(project)}, "
-                f"scene={bool(scene)}, shot={bool(shot)})"
+                f"scene={bool(scene)}, shot={bool(shot)}, ledger={bool(ledger)})"
             )
 
         # 5. Verify lineage integrity & historical flags
@@ -800,6 +885,14 @@ class ViduExistingJobRecoveryService:
         if not job.execution_disabled:
             raise ViduConflictingLineageError(f"Job execution_disabled is not True")
 
+        # Full GenerationJob.result validation
+        if not isinstance(job.result, dict):
+            raise ViduRecoveryError("Offline reconciliation failed: job.result is missing or not a dictionary")
+        if job.result.get("recovery_method") != "GET_ONLY_EXISTING_JOB":
+            raise ViduRecoveryError("Offline reconciliation failed: job.result.recovery_method != 'GET_ONLY_EXISTING_JOB'")
+        if job.result.get("provider_credits_reported") is None:
+            raise ViduRecoveryError("Offline reconciliation failed: job.result missing required provider_credits_reported")
+
         if asset.project_id != project_id:
             raise ViduConflictingLineageError(f"Asset project_id '{asset.project_id}' != '{project_id}'")
         if asset.asset_type != "VIDEO":
@@ -810,10 +903,14 @@ class ViduExistingJobRecoveryService:
         if shot.scene_id != scene_id:
             raise ViduConflictingLineageError(f"Shot scene_id '{shot.scene_id}' != '{scene_id}'")
 
-        if ledger is not None and not ledger.imported_historical:
+        if not ledger.imported_historical:
             raise ViduConflictingLineageError(f"Ledger imported_historical is not True")
+        if ledger.cost_status not in ("UNKNOWN", "FINAL"):
+            raise ViduConflictingLineageError(f"Ledger cost_status '{ledger.cost_status}' invalid for historical entry")
+        if ledger.actual_cost is not None and ledger.actual_cost != 0.0:
+            raise ViduConflictingLineageError(f"Ledger actual_cost '{ledger.actual_cost}' must be 0.0 or None for historical recovery")
 
-        # 6. Verify storage object presence and checksum
+        # 6. Verify storage object presence and bounded streaming checksum
         storage = storage_provider or get_storage_provider()
         try:
             exists = storage.object_exists(asset.storage_bucket, asset.storage_key)
@@ -825,27 +922,17 @@ class ViduExistingJobRecoveryService:
                 f"Offline reconciliation failed: storage object {asset.storage_bucket}/{asset.storage_key} does not exist"
             )
 
-        # Read back bytes to verify exact size and SHA-256
-        try:
-            content = storage.get_object(asset.storage_bucket, asset.storage_key)
-            if len(content) != asset.file_size_bytes:
-                raise ViduRecoveryError(
-                    f"Offline reconciliation failed: storage size mismatch ({len(content)} != {asset.file_size_bytes})"
-                )
-            calc_sha256 = hashlib.sha256(content).hexdigest()
-            if calc_sha256 != asset.checksum_sha256:
-                raise ViduRecoveryError(
-                    f"Offline reconciliation failed: storage checksum mismatch ({calc_sha256} != {asset.checksum_sha256})"
-                )
-        except ViduRecoveryError:
-            raise
-        except Exception as read_err:
-            raise ViduRecoveryError(f"Offline reconciliation storage read-back failed: {read_err}") from read_err
+        # Bounded streaming read-back: chunks up to 50MB max without loading full payload to RAM
+        cls.stream_verify_storage_object(
+            storage=storage,
+            bucket=asset.storage_bucket,
+            key=asset.storage_key,
+            expected_size=asset.file_size_bytes,
+            expected_sha256=asset.checksum_sha256,
+            max_size_bytes=50 * 1024 * 1024,
+        )
 
-        # 7. Extract reported credits safely
-        reported_credits = 30.0
-        if isinstance(job.result, dict) and job.result.get("provider_credits_reported") is not None:
-            reported_credits = float(job.result["provider_credits_reported"])
+        reported_credits = float(job.result["provider_credits_reported"])
 
         return ViduRecoveryResult(
             provider_job_id=provider_job_id,

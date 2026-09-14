@@ -64,6 +64,28 @@ class AuthSameJobConcurrentError(RecoveryAuthError):
     pass
 
 
+class AuditWriteFailureError(RecoveryAuthError):
+    """Failure audit write failed in autonomous transaction (fail-closed)."""
+    pass
+
+
+def sanitize_error_message(text: str) -> str:
+    """Sanitize and redact sensitive tokens, passwords, and secret keys from error messages."""
+    import re
+    patterns = [
+        (r"(Bearer\s+)[A-Za-z0-9_\-\.]+", r"\1[REDACTED]"),
+        (r"(token=)[^&\s]+", r"\1[REDACTED]"),
+        (r"(password=)[^&\s]+", r"\1[REDACTED]"),
+        (r"(secret=)[^&\s]+", r"\1[REDACTED]"),
+        (r"(key=)[^&\s]+", r"\1[REDACTED]"),
+        (r"(api[_-]?key[:=]\s*)[A-Za-z0-9_\-]+", r"\1[REDACTED]"),
+    ]
+    sanitized = str(text)
+    for pat, repl in patterns:
+        sanitized = re.sub(pat, repl, sanitized, flags=re.IGNORECASE)
+    return sanitized[:512]
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -192,7 +214,12 @@ class RecoveryAuthService:
             )
 
         # 2. Revocation check
-        revocations = revocation_list or set()
+        revocations = set(revocation_list) if revocation_list is not None else None
+        if revocations is None:
+            import os
+            env_rev = os.environ.get("OWNER_AUTH_REVOCATIONS", "")
+            revocations = {x.strip() for x in env_rev.split(",") if x.strip()}
+
         if payload.auth_nonce in revocations:
             raise AuthRevokedError(f"Authorization nonce '{payload.auth_nonce}' is in revocation register")
         if payload.owner_evidence_anchor in revocations:
@@ -270,9 +297,14 @@ class RecoveryAuthService:
         orphan_bucket: Optional[str] = None,
         orphan_key: Optional[str] = None,
     ) -> RecoveryFailureAudit:
-        """Record a sanitized failure audit in an autonomous committed transaction."""
-        # Sanitize message to max 512 characters and exclude secrets/tokens
-        sanitized_msg = str(error_message)[:512]
+        """Record a sanitized failure audit in an autonomous, committed transaction.
+
+        Uses an independent session bound to the same engine to ensure the audit
+        is persisted even if the primary session is rolled back or failed.
+        """
+        from sqlalchemy.orm import sessionmaker
+
+        sanitized_msg = sanitize_error_message(str(error_message))
 
         audit = RecoveryFailureAudit(
             audit_id=uuid.uuid4(),
@@ -287,11 +319,14 @@ class RecoveryAuthService:
             compensation_status=compensation_status[:64],
             created_at=utc_now(),
         )
+
         try:
-            db.add(audit)
-            db.commit()
-            db.refresh(audit)
-            return audit
+            bind = db.get_bind()
+            autonomous_factory = sessionmaker(bind=bind, expire_on_commit=False)
+            with autonomous_factory() as autonomous_session:
+                autonomous_session.add(audit)
+                autonomous_session.commit()
+                autonomous_session.refresh(audit)
+                return audit
         except Exception as exc:
-            db.rollback()
-            raise RecoveryAuthError(f"Failed to record failure audit: {exc}") from exc
+            raise AuditWriteFailureError(f"Failed to record autonomous failure audit: {exc}") from exc
