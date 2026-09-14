@@ -7,7 +7,7 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **IN REVIEW / CORRECTIVE APPLIED (ADDRESSING REVIEWS 5197304334 & 5197787810)**
+- **Gate B Implementation Status**: **IN REVIEW / CORRECTIVE APPLIED (ADDRESSING REVIEWS 5197304334, 5197787810, & 5197967171)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -23,7 +23,7 @@
   2. Defined `down_revision = "021_core_v1_subtitles"`.
   3. Confirmed canonical versions directory contained exactly 21 migration files before adding 022.
   4. Authorized aligning references in delivery/control documents while strictly preserving all schema invariants and acceptance criteria.
-- **Independent Review Corrective (Reviews 5197304334 & 5197787810)**: Hermes addressed all 6 blocker groups across both independent reviews on PR #108: strictly binding test keys only to `--mock` paths, eliminating self-binding commit fallbacks, deriving actual runtime identity independently, failing closed on missing revocation evidence or unverified restored DB state, authoritatively retaining storage on any commit exception without keyword inference, propagating audit write failures fail-closed, enforcing byte transfer limits during streaming download, requiring conservative unknown cost truth without credit synthesis, proving failure paths via actual monkeypatch/injected faults, and testing exclusions directly through production consumers (`BudgetService` and `JobDispatchService`).
+- **Independent Review Correctives (Reviews 5197304334, 5197787810, & 5197967171)**: Hermes addressed all blocker groups across all independent reviews on PR #108: strictly binding test keys only to `--mock` paths, eliminating self-binding commit fallbacks, discovering and validating actual DB identity and storage buckets independently against authorized profiles, failing closed on missing revocation evidence or unverified empty revocation registries, protecting restored databases lacking both fence and job rows via out-of-band durable storage consumption markers, enforcing in-flight byte bounds and timeouts during streaming response transfer, verifying object-version consistency against initial HEAD, authoritatively retaining storage on any commit exception without keyword inference, propagating audit write failures fail-closed across all stages (offline, fence transitions, readback, post-commit), proving failure paths via actual monkeypatch/injected faults, and testing exclusions directly through production consumers (`BudgetService` and `JobDispatchService`).
 
 ---
 
@@ -59,30 +59,31 @@ Release = NOT DECLARED
    - Strictly rejects degenerate identity keys ($A = (0, 1)$), small-order subgroup points (orders 2, 4, 8), non-canonical scalars ($S \ge \ell$), and non-canonical coordinates ($y \ge p$).
    - Production mode binds trusted public key via `OWNER_AUTH_PUBLIC_KEY` environment variable (arbitrary keys rejected unless `--allow-test-keys` combined with `--mock` flag is set).
    - Executing artifact commit SHA independently resolved via `git rev-parse HEAD` or configuration settings (cannot be self-supplied by payload; self-binding fallback eliminated).
-   - Actual runtime target derived from database engine URL and storage bucket; compared against payload claim.
-   - Revocation register loaded fail-closed (missing revocation evidence rejected).
-   - Restored runtime verified: requires `settings.VIDU_GENERATION_ENABLED is False`, valid evidence anchor format, and rejection of restored DB missing fence records.
+   - Actual runtime target derived independently from primary database engine URL and storage bucket; compared against payload claim and validated against authorized runtime resource profile (`AUTHORIZED_RUNTIME_TARGET_PROFILES`).
+   - Revocation register loaded fail-closed (missing revocation evidence or unverified empty registry rejected).
+   - Restored runtime verified: requires `settings.VIDU_GENERATION_ENABLED is False`, explicit `VIDU_RECOVERY_GET_ENABLED is not False`, valid evidence anchor format, rejection of restored DB missing fence records, and out-of-band durable storage consumption marker detection.
 4. **Autonomous Isolated Failure Audits (`backend/app/services/recovery_auth.py`)**:
    - Autonomous isolated database session via `sessionmaker` bound to engine, committing failure audits independently of caller transaction state.
    - Regex-based token, password, and URL userinfo/DSN credential redaction before recording error messages.
-   - Captures failures across every execution stage (preflight, provider, download, storage upload, DB materialization, post-commit readback, offline reconciliation).
+   - Captures failures across every execution stage (preflight, provider, download, storage upload, DB materialization, post-commit readback, fence transitions, offline reconciliation).
    - If audit persistence fails, raises `AuditWriteFailureError` to fail closed without corrupting primary data.
 5. **Recovery Service Hardening (`backend/app/services/vidu_recovery.py`)**:
    - Universal Storage Compensation Guards: Tracks real transaction outcome (`tx_state`, `db_rolled_back`, `unresolved_commit`).
    - Independent fresh DB session used to verify 0 committed `Asset` records reference `(bucket, key)`.
    - Authoritative Commit Ambiguity: Any exception occurring during `db.commit()` marks commit outcome unknown and conservatively retains storage objects (no keyword guessing).
-   - Bounded transfer during download: Streaming chunk validation enforces byte bounds during transfer before and while writing to storage.
+   - Bounded streaming transfer: In-flight byte bounds and timeouts enforced during chunk streaming directly from network/storage stream; object-version consistency validated between initial HEAD and response stream.
    - Dedicated Offline Reconciliation (`reconcile_offline_historical_job`): strictly 0 provider GET/POST; requires complete lineage including `UsageLedger`; validates `GenerationJob.result`; enforces conservative unknown cost truth (`cost_status="UNKNOWN"`, `actual_cost=None`); records credits provenance (`PROVIDER_GET_REPORTED`, `DURABLE_HISTORICAL_RECORD`, `SEEDED_HISTORICAL_CONTRACT_METADATA`).
 6. **Single-Purpose CLI Harness (`backend/app/cli/vidu_recovery_harness.py`)**:
    - Strictly bounded to hardcoded `TARGET_HISTORICAL_PROVIDER_JOB_ID = "995880130565918720"`.
    - State transition lifecycle: `CLAIMED_PENDING_GET` -> `GET_IN_FLIGHT` (network_get_attempts = 1) -> `MATERIALIZED_UNVERIFIED` -> `CONSUMED_SUCCESS` (or `CONSUMED_TERMINAL_FAILURE` / `CONSUMED_CRASHED`).
    - Post-materialization read-back verification: uses an independent fresh database session to bypass identity map cache, combined with bounded streaming storage SHA-256 verification.
+   - Durable out-of-band consumption marker persisted to storage on successful execution (`fences/consumed/{provider_job_id}.json`).
 7. **Automated Test Suite (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-   - 29 tests covering all 26 acceptance scenarios plus RFC 8032 official vectors, adversarial degenerate key attacks, and commit ambiguity guards, exercising real injected failure paths through mocks and isolated SQLite DB.
+   - 36 tests covering all 26 acceptance scenarios plus adversarial runtime mismatches, restored-DB zero-second-GET checks, empty revocation freshness attestations, storage streaming bounds and version consistency, exercising real injected failure paths through mocks and isolated SQLite DB.
 
 ---
 
-## 5. Full 26 Acceptance Scenarios Mapping Matrix
+## 5. Full Acceptance Scenarios Mapping Matrix
 
 | # | Scenario Description | Gate B Verification Status | Proof Details / Gate Boundary |
 |---|---|---|---|
@@ -101,7 +102,7 @@ Release = NOT DECLARED
 | 13 | Universal Storage Compensation Guards | **VERIFIED (PASSED)** | Injected rollback failure: affirmative rollback failure retains storage object; records `ROLLBACK_FAILED` and `RETAINED_OBJECT_UNSAFE_TO_DELETE` audit. |
 | 14 | Hard Crash State Forbids Re-GET | **VERIFIED (PASSED)** | Crash during in-flight GET leaves fence in consumed state; automated re-GET strictly rejected. |
 | 15 | Window 5.5 Post-Commit Pre-Fence Crash | **VERIFIED (PASSED)** | Next inspection detects committed Asset and reconciles fence without issuing second provider GET. |
-| 16 | Fence Update Failure Leaves Lineage Intact | **VERIFIED (PASSED)** | Injected post-commit fence update failure via monkeypatched commit: durable DB/storage lineage is preserved; 0 additional GET calls. |
+| 16 | Fence Update Failure Leaves Lineage Intact | **VERIFIED (PASSED)** | Injected post-commit fence update failure via monkeypatched commit: durable DB/storage lineage is preserved, `FENCE_TRANSITION_MATERIALIZED` audit is verified in DB; 0 additional GET calls. |
 | 17 | Autonomous Failure Audit Recording | **VERIFIED (PASSED)** | Injected audit persistence failure: raises `AuditWriteFailureError` fail-closed; redacts secret tokens and DSN credentials. |
 | 18 | Post-Commit S3 Read-Back Failure | **VERIFIED (PASSED)** | Injected streaming checksum mismatch during independent read-back marks execution terminal; DB records retained. |
 | 19 | Proposed Offline DB/S3 Reconciliation | **VERIFIED (PASSED)** | Returns existing Asset & GenerationJob with 0 provider GET and 0 provider POST. |
@@ -112,15 +113,22 @@ Release = NOT DECLARED
 | 24 | Canonical GenerationJob Both-True Exclusion | **VERIFIED (PASSED)** | Validated directly via `JobDispatchService.claim_next_job`: Dual-fenced canonical recovered jobs are never claimable by workers. |
 | 25 | Isolated DB & S3 Backup/Restore Proof | **DEFERRED TO GATE C** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification is explicitly deferred to Gate C**. |
 | 26 | Restored-Runtime Fail-Closed Fencing | **VERIFIED (PASSED)** | Restored DB without fence records fails closed when live provider flag is disabled (`VIDU_GENERATION_ENABLED=False`), anchor format is validated, or runtime target mismatches. |
+| 27 | Adversarial Changed Resource Profile | **VERIFIED (PASSED)** | Label matches `UAT-COMPOSE-PERSISTENT` but storage bucket points to unauthorized target: fails closed with `AuthRuntimeMismatchError`. |
+| 28 | Restored DB Lacking Both Rows Fencing | **VERIFIED (PASSED)** | Restored DB snapshot lacking both `ProviderExecutionFence` and `GenerationJob` detects out-of-band durable storage consumption marker and raises `AuthReplayError` with ZERO second GET. |
+| 29 | Revocation Freshness Attestation Gate | **VERIFIED (PASSED)** | Empty `OWNER_AUTH_REVOCATIONS` without `OWNER_AUTH_REVOCATIONS_ATTESTED="true"` fails closed with `AuthRevokedError`. |
+| 30 | Storage Metadata Failure Fail-Closed | **VERIFIED (PASSED)** | Failure during storage `head_object` raises `ViduRecoveryError` fail-closed immediately. |
+| 31 | Storage Object Mutated After HEAD | **VERIFIED (PASSED)** | Object size/ETag changed between initial HEAD and response stream raises `ViduRecoveryError` fail-closed. |
+| 32 | Streaming Oversize Transfer Abort | **VERIFIED (PASSED)** | Response stream exceeding byte budget aborts transfer during streaming and raises `ViduRecoveryError`. |
+| 33 | Audit Write Failure Fail-Closed Stop | **VERIFIED (PASSED)** | Failure during autonomous audit persistence propagates `AuditWriteFailureError` fail-closed across all stages. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `29 passed in 1.34s` (including RFC 8032 vectors, adversarial degenerate key tests, and injected fault scenarios)
+  - `36 passed in 1.54s` (including RFC 8032 vectors, adversarial degenerate key tests, restored-DB zero-second-GET checks, and streaming bounds)
 - **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `67 passed in 21.65s`
+  - `74 passed in 21.79s`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`

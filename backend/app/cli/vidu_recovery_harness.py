@@ -59,6 +59,7 @@ class MockProviderAdapter(IVideoGenerationProviderAdapter):
             video_url="https://media.example.invalid/historical_mock_vidu.mp4",
             provider_credits=None,
         )
+        self.get_calls_attempted = 0
 
     @property
     def provider_id(self) -> str:
@@ -68,6 +69,7 @@ class MockProviderAdapter(IVideoGenerationProviderAdapter):
         raise RuntimeError("POST / submit_generation_job is strictly forbidden in recovery harness")
 
     async def check_job_status(self, provider_job_id: str) -> ProviderJobResult:
+        self.get_calls_attempted += 1
         if provider_job_id != TARGET_HISTORICAL_PROVIDER_JOB_ID:
             raise ViduUnauthorizedJobError(f"Unauthorized provider job ID: {provider_job_id}")
         return self._result
@@ -109,66 +111,118 @@ def execute_recovery_harness(
     # 2. Offline Reconciliation Path (Zero provider GET/POST)
     if offline_reconcile:
         logger.info("Executing dedicated offline reconciliation (0 provider GET/POST)")
-        rec_result = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
-            db=db,
-            storage_provider=storage_provider,
-            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-        )
-        return {
-            "status": "OFFLINE_RECONCILED",
-            "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
-            "get_calls_attempted": 0,
-            "posts_attempted": 0,
-            "idempotent_reused": True,
-            "asset_id": str(rec_result.asset_id),
-            "generation_job_id": str(rec_result.generation_job_id),
-            "storage_bucket": rec_result.storage_bucket,
-            "storage_key": rec_result.storage_key,
-            "checksum_sha256": rec_result.checksum_sha256,
-        }
+        try:
+            rec_result = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
+                db=db,
+                storage_provider=storage_provider,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            )
+            return {
+                "status": "OFFLINE_RECONCILED",
+                "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                "get_calls_attempted": 0,
+                "posts_attempted": 0,
+                "idempotent_reused": True,
+                "asset_id": str(rec_result.asset_id),
+                "generation_job_id": str(rec_result.generation_job_id),
+                "storage_bucket": rec_result.storage_bucket,
+                "storage_key": rec_result.storage_key,
+                "checksum_sha256": rec_result.checksum_sha256,
+            }
+        except Exception as off_err:
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="OFFLINE_RECONCILIATION",
+                error_class=off_err.__class__.__name__,
+                error_message=str(off_err),
+                db_transaction_state="FAILED",
+                compensation_status="NOT_APPLICABLE",
+            )
+            raise
 
     # 3. Phase 1: Local In-Memory Authorization Validation (Pre-DB)
     if not auth_payload or not signature_bytes or not public_key_bytes or not expected_commit_sha:
         raise RecoveryAuthError("Phase 1 verification requires auth_payload, signature, public_key, and expected_commit_sha")
 
-    auth_digest = RecoveryAuthService.verify_phase_1_in_memory(
-        payload=auth_payload,
-        signature_bytes=signature_bytes,
-        public_key_bytes=public_key_bytes,
-        expected_commit_sha=expected_commit_sha,
-        current_time=now,
-    )
+    try:
+        auth_digest = RecoveryAuthService.verify_phase_1_in_memory(
+            payload=auth_payload,
+            signature_bytes=signature_bytes,
+            public_key_bytes=public_key_bytes,
+            expected_commit_sha=expected_commit_sha,
+            current_time=now,
+        )
+    except Exception as p1_err:
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=auth_payload.provider_job_id if auth_payload else TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="AUTH_PHASE_1",
+            error_class=p1_err.__class__.__name__,
+            error_message=str(p1_err),
+            db_transaction_state="PRE_DB",
+            compensation_status="NOT_APPLICABLE",
+        )
+        raise
     logger.info("Phase 1 authorization verified successfully (digest=%s)", auth_digest)
 
     # 4. Phase 2: Database & Runtime Target Validation pre-GET
-    fence = RecoveryAuthService.verify_phase_2_and_claim_fence(
-        db=db,
-        payload=auth_payload,
-        auth_digest=auth_digest,
-        execution_id=exec_id,
-        actual_runtime_target=actual_runtime_target,
-        revocation_list=revocation_list,
-    )
-    logger.info("Phase 2 fence claimed successfully (fence_id=%s, status=%s)", fence.fence_id, fence.status)
-
-    # 5. Pre-GET Atomic State Transition: GET_IN_FLIGHT
     from app.core.config import settings
     storage = storage_provider or get_storage_provider()
     bucket_name = getattr(storage, "bucket_name", None) or getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")
+
+    try:
+        fence = RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=db,
+            payload=auth_payload,
+            auth_digest=auth_digest,
+            execution_id=exec_id,
+            actual_runtime_target=actual_runtime_target,
+            revocation_list=revocation_list,
+            storage_provider=storage,
+        )
+    except Exception as p2_err:
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=auth_payload.provider_job_id if auth_payload else TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="AUTH_PHASE_2",
+            error_class=p2_err.__class__.__name__,
+            error_message=str(p2_err),
+            db_transaction_state="FAILED",
+            compensation_status="NOT_APPLICABLE",
+        )
+        raise
+    logger.info("Phase 2 fence claimed successfully (fence_id=%s, status=%s)", fence.fence_id, fence.status)
+
+    # 5. Pre-GET Atomic State Transition: GET_IN_FLIGHT
     job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
     asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
 
-    fence.status = "GET_IN_FLIGHT"
-    fence.network_get_attempts = 1
-    fence.storage_intent_bucket = bucket_name
-    fence.storage_intent_key = f"assets/video/{project_uuid}/{asset_uuid}.mp4"
-    fence.target_asset_id = asset_uuid
-    fence.target_job_id = job_uuid
-    fence.target_project_id = project_uuid
-    fence.updated_at = utc_now()
-    db.commit()
-    db.refresh(fence)
+    try:
+        fence.status = "GET_IN_FLIGHT"
+        fence.network_get_attempts = 1
+        fence.storage_intent_bucket = bucket_name
+        fence.storage_intent_key = f"assets/video/{project_uuid}/{asset_uuid}.mp4"
+        fence.target_asset_id = asset_uuid
+        fence.target_job_id = job_uuid
+        fence.target_project_id = project_uuid
+        fence.updated_at = utc_now()
+        db.commit()
+        db.refresh(fence)
+    except Exception as get_inflight_err:
+        db.rollback()
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="FENCE_TRANSITION_GET_IN_FLIGHT",
+            error_class=get_inflight_err.__class__.__name__,
+            error_message=str(get_inflight_err),
+            db_transaction_state="ROLLED_BACK",
+            compensation_status="NOT_APPLICABLE",
+            fence_id=fence.fence_id if fence else None,
+        )
+        raise
 
     # 6. Execute Recovery
     chosen_adapter = adapter
@@ -201,14 +255,27 @@ def execute_recovery_harness(
             )
         )
         # Advance fence to MATERIALIZED_UNVERIFIED
-        fence.status = "MATERIALIZED_UNVERIFIED"
-        fence.storage_is_new_object = "FALSE" if recovery_result.idempotent_reused else "TRUE"
-        fence.storage_intent_sha256 = recovery_result.checksum_sha256
-        fence.storage_intent_bytes = recovery_result.file_size_bytes
-        fence.updated_at = utc_now()
-        db.commit()
-        db.refresh(fence)
-    except Exception as exc:
+        try:
+            fence.status = "MATERIALIZED_UNVERIFIED"
+            fence.storage_is_new_object = "FALSE" if recovery_result.idempotent_reused else "TRUE"
+            fence.storage_intent_sha256 = recovery_result.checksum_sha256
+            fence.storage_intent_bytes = recovery_result.file_size_bytes
+            fence.updated_at = utc_now()
+            db.commit()
+            db.refresh(fence)
+        except Exception as post_mat_err:
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="FENCE_TRANSITION_MATERIALIZED",
+                error_class=post_mat_err.__class__.__name__,
+                error_message=str(post_mat_err),
+                db_transaction_state="COMMITTED_MATERIALIZED_FENCE_FAILED",
+                compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
+                fence_id=fence.fence_id if fence else None,
+            )
+            raise
+    except Exception:
         fence.status = "CONSUMED_TERMINAL_FAILURE"
         fence.updated_at = utc_now()
         try:
@@ -229,7 +296,10 @@ def execute_recovery_harness(
         db_job = readback_db.get(GenerationJob, job_uuid)
         if not db_asset or not db_job:
             fence.status = "CONSUMED_TERMINAL_FAILURE"
-            db.commit()
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
             RecoveryAuthService.record_failure_audit(
                 db=db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -244,7 +314,10 @@ def execute_recovery_harness(
 
         if not storage.object_exists(db_asset.storage_bucket, db_asset.storage_key):
             fence.status = "CONSUMED_TERMINAL_FAILURE"
-            db.commit()
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
             RecoveryAuthService.record_failure_audit(
                 db=db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -268,7 +341,10 @@ def execute_recovery_harness(
             )
         except Exception as stream_err:
             fence.status = "CONSUMED_TERMINAL_FAILURE"
-            db.commit()
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
             RecoveryAuthService.record_failure_audit(
                 db=db,
                 provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -281,11 +357,40 @@ def execute_recovery_harness(
             )
             raise
 
-    # 8. All verifications passed: CONSUMED_SUCCESS
-    fence.status = "CONSUMED_SUCCESS"
-    fence.updated_at = utc_now()
-    db.commit()
-    db.refresh(fence)
+    # 8. All verifications passed: persist out-of-band marker and CONSUMED_SUCCESS
+    try:
+        marker_bytes = json.dumps({
+            "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            "consumed_at": utc_now().isoformat(),
+            "nonce": auth_payload.auth_nonce if auth_payload else "UNKNOWN",
+            "fence_id": str(fence.fence_id),
+        }).encode("utf-8")
+        marker_key = f"fences/consumed/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
+        if hasattr(storage, "put_object"):
+            storage.put_object(bucket_name, marker_key, marker_bytes)
+        elif hasattr(storage, "client") and hasattr(storage.client, "put_object"):
+            storage.client.put_object(Bucket=bucket_name, Key=marker_key, Body=marker_bytes)
+    except Exception as marker_err:
+        logger.warning("Failed to persist storage consumption marker: %s", marker_err)
+
+    try:
+        fence.status = "CONSUMED_SUCCESS"
+        fence.updated_at = utc_now()
+        db.commit()
+        db.refresh(fence)
+    except Exception as succ_err:
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="FENCE_TRANSITION_CONSUMED_SUCCESS",
+            error_class=succ_err.__class__.__name__,
+            error_message=str(succ_err),
+            db_transaction_state="COMMITTED_PRIMARY_PRESERVED",
+            compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
+            fence_id=fence.fence_id if fence else None,
+        )
+        raise
+
     logger.info("Recovery completed successfully with fence state CONSUMED_SUCCESS")
 
     return {
@@ -377,6 +482,11 @@ def main():
             print(f"Error: Specified commit {args.expected_commit} does not match executing artifact SHA {executing_commit}", file=sys.stderr)
             sys.exit(1)
 
+        storage = get_storage_provider()
+        from app.services.recovery_auth import resolve_canonical_resource_identities
+        actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage)
+        logger.info("Discovered runtime resources: db=%s, storage=%s", actual_db_id, actual_storage_id)
+
         result = execute_recovery_harness(
             db=db,
             auth_payload=payload,
@@ -385,6 +495,7 @@ def main():
             expected_commit_sha=executing_commit,
             actual_runtime_target=args.runtime_target,
             mock_mode=args.mock,
+            storage_provider=storage,
         )
         print(json.dumps(result, indent=2))
         sys.exit(0)

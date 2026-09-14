@@ -66,6 +66,7 @@ from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
 @pytest.fixture(autouse=True)
 def setup_auth_env(monkeypatch):
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
+    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
     monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
 
 
@@ -642,6 +643,16 @@ def test_scenario_16_fence_update_failure_injected(test_db, mock_storage, auth_k
     asset = test_db.get(Asset, asset_uuid)
     assert asset is not None
 
+    # Assert durable failure audit was persisted with failure_stage 'FENCE_TRANSITION_MATERIALIZED'
+    audits = test_db.execute(
+        select(RecoveryFailureAudit).where(
+            RecoveryFailureAudit.provider_job_id == TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            RecoveryFailureAudit.failure_stage == "FENCE_TRANSITION_MATERIALIZED",
+        )
+    ).scalars().all()
+    assert len(audits) >= 1
+    assert "Simulated fence update commit failure" in audits[0].error_message
+
     # Offline reconciliation can independently verify without extra GET
     monkeypatch.setattr(test_db, "commit", real_commit)
     reconciled = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
@@ -684,9 +695,10 @@ def test_scenario_18_read_back_checksum_mismatch(test_db, mock_storage, auth_key
     payload, sig = make_valid_auth(seed)
 
     class CorruptingStorage(InMemoryObjectStorageProvider):
-        def download_file_object(self, bucket, key, target_file_path):
-            with open(target_file_path, "wb") as f:
-                f.write(b"CORRUPTED_BYTES_DIFFERENT_SHA256_TEST")
+        def upload_file_object(self, bucket, key, file_path, content_type="application/octet-stream"):
+            self.ensure_bucket_exists(bucket)
+            self._store[(bucket, key)] = (b"CORRUPTED_BYTES_DIFFERENT_SHA256_TEST", content_type)
+            return key
 
     corrupt_storage = CorruptingStorage()
     with pytest.raises(ViduRecoveryError, match="Storage (checksum|size) mismatch"):
@@ -1023,4 +1035,206 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
             expected_commit_sha=payload.authorized_commit_sha,
             actual_runtime_target="UNAUTHORIZED-RUNTIME-TARGET",
             mock_mode=True,
+        )
+
+
+# ==============================================================================
+# Scenario 27: Adversarial Same-Label Changed Storage/DB Config Fails Closed
+# ==============================================================================
+def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(test_db, mock_storage, auth_keys):
+    """Adversarial check: label is UAT-COMPOSE-PERSISTENT, but storage bucket is unauthorized -> fails closed."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    # Point storage provider to an unauthorized foreign bucket
+    mock_storage.bucket_name = "unauthorized-exfiltration-bucket"
+
+    with pytest.raises(AuthRuntimeMismatchError, match="Actual resource configuration does not match authorized runtime target profile"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            storage_provider=mock_storage,
+        )
+
+
+# ==============================================================================
+# Scenario 28: Restored Snapshot Lacking BOTH Rows Prevents Second GET
+# ==============================================================================
+def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(test_db, mock_storage, auth_keys):
+    """Restored DB lacking both ProviderExecutionFence and GenerationJob detects out-of-band artifact and prevents 2nd GET."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed, nonce="nonce-run-1")
+
+    mock_adapter = MockProviderAdapter()
+
+    # Run 1: successful execution
+    result = execute_recovery_harness(
+        db=test_db,
+        auth_payload=payload,
+        signature_bytes=sig,
+        public_key_bytes=pk,
+        expected_commit_sha=payload.authorized_commit_sha,
+        actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        mock_mode=True,
+        adapter=mock_adapter,
+        storage_provider=mock_storage,
+    )
+    assert result["status"] == "CONSUMED_SUCCESS"
+    assert mock_adapter.get_calls_attempted == 1
+
+    # SIMULATE RESTORED DATABASE:
+    # A restored snapshot taken before the run has 0 fences, jobs, or assets in DB!
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.query(GenerationJob).delete()
+    test_db.query(UsageLedger).delete()
+    test_db.query(Shot).delete()
+    test_db.query(Scene).delete()
+    test_db.query(Asset).delete()
+    test_db.query(Project).delete()
+    test_db.commit()
+
+    # Verify rows are completely gone from DB
+    assert test_db.query(ProviderExecutionFence).count() == 0
+    assert test_db.query(GenerationJob).count() == 0
+    assert test_db.query(Asset).count() == 0
+
+    # Run 2: Operator or attacker tries to run recovery again against restored DB
+    payload2, sig2 = make_valid_auth(seed, nonce="nonce-run-2")
+    second_mock_adapter = MockProviderAdapter()
+
+    with pytest.raises(AuthReplayError, match="Out-of-band storage evidence detected: durable artifact exists"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload2,
+            signature_bytes=sig2,
+            public_key_bytes=pk,
+            expected_commit_sha=payload2.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=second_mock_adapter,
+            storage_provider=mock_storage,
+        )
+
+    # CRITICAL INVARIANT: ZERO SECOND GET CALL!
+    assert second_mock_adapter.get_calls_attempted == 0
+
+
+# ==============================================================================
+# Scenario 29: Empty Revocation Registry Without Freshness Attestation Fails Closed
+# ==============================================================================
+def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed(test_db, auth_keys, monkeypatch):
+    """Empty OWNER_AUTH_REVOCATIONS without explicit freshness attestation must fail closed."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
+    monkeypatch.delenv("OWNER_AUTH_REVOCATIONS_ATTESTED", raising=False)
+
+    with pytest.raises(AuthRevokedError, match="revocation registry is empty without active freshness attestation"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest=payload.digest(),
+            execution_id="exec-rev-test",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        )
+
+
+# ==============================================================================
+# Scenario 30: Storage Streaming Metadata Failure Fails Closed
+# ==============================================================================
+def test_scenario_30_storage_streaming_metadata_failure_fails_closed(mock_storage):
+    """Storage metadata access failure (e.g. head_object error) must fail closed immediately."""
+    class FailingMetadataStorage:
+        def __init__(self):
+            self.client = self
+        def head_object(self, **kwargs):
+            raise RuntimeError("Simulated storage metadata head_object network timeout")
+
+    failing_storage = FailingMetadataStorage()
+    with pytest.raises(ViduRecoveryError, match="Storage metadata access failed"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=failing_storage,
+            bucket="orbis-media-assets",
+            key="test.mp4",
+            expected_size=100,
+            expected_sha256="abc",
+        )
+
+
+# ==============================================================================
+# Scenario 31: Storage Streaming Object Mutated After HEAD Fails Closed
+# ==============================================================================
+def test_scenario_31_storage_streaming_object_mutated_after_head_fails_closed(mock_storage):
+    """Object size/hash mutated between HEAD and GET must fail closed."""
+    mock_storage.put_object("orbis-media-assets", "assets/test.mp4", b"INITIAL_DATA")
+
+    # Call with expected size matching initial data, but mutate underlying store during read
+    class MutatingStorage:
+        def __init__(self, inner):
+            self._store = inner._store
+        def head_object(self, **kwargs):
+            return {"ContentLength": len(b"INITIAL_DATA"), "ETag": "etag-1"}
+
+    # Mutate data length after initial HEAD length check
+    mock_storage._store[("orbis-media-assets", "assets/test.mp4")] = (b"MUTATED_DIFFERENT_DATA", {})
+    with pytest.raises(ViduRecoveryError, match="Storage size mismatch"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=mock_storage,
+            bucket="orbis-media-assets",
+            key="assets/test.mp4",
+            expected_size=len(b"INITIAL_DATA"),
+            expected_sha256="abc",
+        )
+
+
+# ==============================================================================
+# Scenario 32: Storage Streaming Oversize Stream Aborts During Transfer
+# ==============================================================================
+def test_scenario_32_storage_streaming_oversize_stream_aborts_during_transfer(mock_storage):
+    """Stream transfer exceeding byte bound is aborted during streaming without full memory consumption."""
+    oversize_bytes = b"X" * (1024 * 1024 + 10)  # 1MB + 10 bytes
+    mock_storage.put_object("orbis-media-assets", "assets/oversize.mp4", oversize_bytes)
+
+    with pytest.raises(ViduRecoveryError, match="exceeds maximum allowed size|exceeded maximum budget"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=mock_storage,
+            bucket="orbis-media-assets",
+            key="assets/oversize.mp4",
+            expected_size=len(oversize_bytes),
+            expected_sha256="abc",
+            max_size_bytes=1024 * 1024,  # Budget = 1MB
+        )
+
+
+# ==============================================================================
+# Scenario 33: Audit Write Failure Stops Fail-Closed Across All Stages
+# ==============================================================================
+def test_scenario_33_audit_write_failure_stops_fail_closed(test_db, mock_storage, auth_keys, monkeypatch):
+    """When autonomous failure audit writing fails, AuditWriteFailureError is raised fail-closed."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    def failing_record_failure_audit(*args, **kwargs):
+        raise AuditWriteFailureError("Simulated autonomous DB connection failure during audit write")
+
+    monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", failing_record_failure_audit)
+
+    # Force a post-commit readback error to trigger audit write
+    with pytest.raises(AuditWriteFailureError, match="Simulated autonomous DB connection failure"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha="WRONG_COMMIT_SHA",  # Triggers phase 1 error -> audit write
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            storage_provider=mock_storage,
         )

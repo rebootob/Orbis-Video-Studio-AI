@@ -793,75 +793,128 @@ class ViduExistingJobRecoveryService:
         expected_size: int,
         expected_sha256: str,
         max_size_bytes: int = 50 * 1024 * 1024,
+        max_duration_seconds: float = 30.0,
     ) -> None:
-        """Bounded streaming verification of storage object without loading full payload to RAM.
+        """Bounded streaming verification of storage object without unbounded download or full payload in RAM.
 
-        Enforces byte bounds before and during transfer (rejects > max_size_bytes prior to full disk write),
-        and streams through hashlib in 64KB chunks to compute SHA-256.
+        Enforces:
+        1. Fail-closed metadata check: metadata failures immediately raise ViduRecoveryError.
+        2. Bounded response streaming: byte bounds and timeouts enforced during chunk streaming.
+        3. Object-version consistency: validates that object size and ETag have not mutated between HEAD and GET.
+        4. Incremental 64KB hashing directly from network/storage stream.
         """
-        import tempfile
+        import time
 
-        # 1. Pre-transfer metadata bound check
-        if hasattr(storage, "_store"):
-            item = storage._store.get((bucket, key))
-            if not item:
-                raise KeyError(f"Object '{key}' not found in bucket '{bucket}'")
-            raw_len = len(item[0]) if isinstance(item[0], (bytes, bytearray)) else 0
-            if raw_len > max_size_bytes:
-                raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})")
-            if raw_len != expected_size:
-                raise ViduRecoveryError(f"Storage size mismatch: actual {raw_len} != expected {expected_size}")
+        # 1. Pre-transfer metadata check (fail-closed on any error)
+        head_len = None
+        head_etag = None
 
         if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
             try:
                 head = storage.client.head_object(Bucket=bucket, Key=key)
-                head_len = head.get("ContentLength", 0)
-                if head_len > max_size_bytes:
-                    raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})")
-                if head_len != expected_size:
-                    raise ViduRecoveryError(f"Storage size mismatch: actual {head_len} != expected {expected_size}")
+                head_len = head.get("ContentLength")
+                head_etag = head.get("ETag")
             except Exception as h_err:
-                if isinstance(h_err, ViduRecoveryError):
-                    raise
+                raise ViduRecoveryError(f"Storage metadata access failed for '{bucket}/{key}': {h_err}") from h_err
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp_path = tmp.name
+            if head_len is None:
+                raise ViduRecoveryError(f"Storage metadata missing ContentLength for '{bucket}/{key}'")
+            if head_len > max_size_bytes:
+                raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})")
+            if head_len != expected_size:
+                raise ViduRecoveryError(f"Storage size mismatch: head ContentLength {head_len} != expected {expected_size}")
 
-        try:
+        elif hasattr(storage, "_store"):
+            item = storage._store.get((bucket, key))
+            if not item:
+                raise KeyError(f"Object '{key}' not found in bucket '{bucket}'")
+            raw_len = len(item[0]) if isinstance(item[0], (bytes, bytearray)) else 0
+            head_len = raw_len
+            if raw_len > max_size_bytes:
+                raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})")
+            if raw_len != expected_size:
+                raise ViduRecoveryError(f"Storage size mismatch: actual {raw_len} != expected {expected_size}")
+        else:
+            raise ViduRecoveryError(f"Storage provider does not support metadata inspection for '{bucket}/{key}'")
+
+        # 2. Response streaming with in-flight byte and time bounding
+        hasher = hashlib.sha256()
+        bytes_transferred = 0
+        start_time = time.monotonic()
+
+        if hasattr(storage, "client") and hasattr(storage.client, "get_object"):
             try:
-                storage.download_file_object(bucket, key, tmp_path)
-            except Exception as dl_err:
-                raise ViduRecoveryError(f"Streaming verification failed to download object: {dl_err}") from dl_err
+                response = storage.client.get_object(Bucket=bucket, Key=key)
+            except Exception as get_err:
+                raise ViduRecoveryError(f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}") from get_err
 
-            actual_size = os.path.getsize(tmp_path)
-            if actual_size > max_size_bytes:
+            # Version consistency check against initial HEAD
+            curr_etag = response.get("ETag")
+            curr_len = response.get("ContentLength")
+            if head_etag is not None and curr_etag != head_etag:
                 raise ViduRecoveryError(
-                    f"Storage object exceeds maximum allowed size ({actual_size} > {max_size_bytes})"
+                    f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')"
                 )
-            if actual_size != expected_size:
+            if head_len is not None and curr_len != head_len:
                 raise ViduRecoveryError(
-                    f"Storage size mismatch: actual {actual_size} != expected {expected_size}"
+                    f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})"
                 )
 
-            hasher = hashlib.sha256()
-            with open(tmp_path, "rb") as f:
+            body = response["Body"]
+            chunk_size = 64 * 1024
+            try:
                 while True:
-                    chunk = f.read(64 * 1024)
+                    if time.monotonic() - start_time > max_duration_seconds:
+                        raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
+                    chunk = body.read(chunk_size)
                     if not chunk:
                         break
+                    bytes_transferred += len(chunk)
+                    if bytes_transferred > max_size_bytes:
+                        raise ViduRecoveryError(
+                            f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes during response streaming"
+                        )
                     hasher.update(chunk)
-
-            calc_sha256 = hasher.hexdigest()
-            if calc_sha256 != expected_sha256:
-                raise ViduRecoveryError(
-                    f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}"
-                )
-        finally:
-            if os.path.exists(tmp_path):
+            finally:
                 try:
-                    os.remove(tmp_path)
+                    body.close()
                 except Exception:
                     pass
+
+        elif hasattr(storage, "_store"):
+            item_now = storage._store.get((bucket, key))
+            if not item_now:
+                raise KeyError(f"Object '{key}' disappeared during stream verification")
+            raw_now = item_now[0] if isinstance(item_now, tuple) else item_now
+            curr_len = len(raw_now) if isinstance(raw_now, (bytes, bytearray)) else 0
+            if curr_len != head_len:
+                raise ViduRecoveryError(
+                    f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})"
+                )
+
+            chunk_size = 64 * 1024
+            offset = 0
+            while offset < len(raw_now):
+                if time.monotonic() - start_time > max_duration_seconds:
+                    raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
+                chunk = raw_now[offset : offset + chunk_size]
+                offset += len(chunk)
+                bytes_transferred += len(chunk)
+                if bytes_transferred > max_size_bytes:
+                    raise ViduRecoveryError(
+                        f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes during response streaming"
+                    )
+                hasher.update(chunk)
+
+        # 3. Final integrity validation
+        if bytes_transferred != expected_size:
+            raise ViduRecoveryError(f"Storage size mismatch: transferred {bytes_transferred} != expected {expected_size}")
+
+        calc_sha256 = hasher.hexdigest()
+        if calc_sha256 != expected_sha256:
+            raise ViduRecoveryError(
+                f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}"
+            )
 
     @classmethod
     def reconcile_offline_historical_job(

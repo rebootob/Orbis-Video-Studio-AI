@@ -24,6 +24,43 @@ TARGET_PROVIDER_JOB_ID = "995880130565918720"
 MAX_VALIDITY_WINDOW_SECONDS = 7200  # 2 hours
 
 
+AUTHORIZED_RUNTIME_TARGET_PROFILES = {
+    "UAT-COMPOSE-PERSISTENT": {
+        "allowed_db_patterns": [r"sqlite.*", r".*orbis.*", r".*5432.*", r".*localhost.*", r".*127\.0\.0\.1.*", r".*postgres.*"],
+        "allowed_buckets": ["orbis-media-assets", "orbis-assets", "test-bucket"],
+    },
+    "PRODUCTION": {
+        "allowed_db_patterns": [r".*prod.*orbis.*"],
+        "allowed_buckets": ["orbis-media-assets-prod"],
+    },
+}
+
+
+def resolve_canonical_resource_identities(
+    db: Session,
+    storage_provider: Optional[any] = None,
+) -> tuple[str, str]:
+    """Independently discover and sanitize primary DB identity and storage bucket identity.
+
+    Returns:
+        (db_identity, storage_identity)
+        e.g. ("sqlite:///:memory:", "storage://orbis-media-assets")
+    """
+    bind = db.get_bind()
+    url = str(bind.url)
+    sanitized_db = sanitize_error_message(url)
+
+    bucket = None
+    if storage_provider is not None:
+        bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None)
+    if not bucket:
+        from app.core.config import settings
+        bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")
+
+    storage_identity = f"storage://{bucket}"
+    return sanitized_db, storage_identity
+
+
 class RecoveryAuthError(RuntimeError):
     """Base exception for recovery authorization failures."""
     pass
@@ -197,15 +234,21 @@ class RecoveryAuthService:
         auth_digest: str,
         execution_id: str,
         actual_runtime_target: str,
-        revocation_list: Optional[Set[str]] = None,
+        revocation_list: Optional[list[str]] = None,
+        storage_provider: Optional[any] = None,
     ) -> ProviderExecutionFence:
         """Phase 2: Database and runtime target validation pre-GET.
 
         Verifies:
-        1. Actual runtime target matches authorized runtime_target
-        2. Nonce or anchor not in revocation register
-        3. Replay protection (nonce uniqueness)
-        4. Same-job concurrency fence (provider_name + provider_job_id uniqueness)
+        1. Restored-runtime safety: VIDU_GENERATION_ENABLED must be False, VIDU_RECOVERY_GET_ENABLED must not be False.
+        2. Out-of-band evidence anchor syntax matches allowed format.
+        3. Independently discovered actual DB identity and storage bucket match authorized profile for runtime_target.
+        4. Runtime target string matches payload.
+        5. Revocation check (Fail-Closed: missing or unattested empty registry rejected).
+        6. Replay protection (nonce uniqueness in DB).
+        7. Same-job concurrency fence (provider_name + provider_job_id uniqueness in DB).
+        8. Restored DB check: deterministic GenerationJob existence when fence missing.
+        9. Authoritative out-of-band consumption check: detects consumed job in storage marker/asset or external registry.
 
         Inserts and commits fence record with status 'CLAIMED_PENDING_GET'.
         """
@@ -218,25 +261,48 @@ class RecoveryAuthService:
         if gen_enabled:
             raise RecoveryAuthError("Restored runtime safety check failed: VIDU_GENERATION_ENABLED must be False during recovery")
 
+        rec_enabled = getattr(settings, "VIDU_RECOVERY_GET_ENABLED", None)
+        if rec_enabled is None:
+            rec_enabled = os.environ.get("VIDU_RECOVERY_GET_ENABLED", "true").lower() in ("true", "1")
+        if not rec_enabled:
+            raise RecoveryAuthError("Restored runtime safety check failed: VIDU_RECOVERY_GET_ENABLED is False (fail-closed)")
+
         # 2. Out-of-band evidence anchor validation
         import re
         anchor = (payload.owner_evidence_anchor or "").strip()
         if not re.match(r"^(telegram|issue|pr|evidence|rec1|r5|run1)[\w\-\.\/:]+$", anchor, re.IGNORECASE):
             raise AuthScopeMismatchError(f"Invalid owner_evidence_anchor format: '{anchor}'")
 
-        # 3. Actual runtime target match
+        # 3. Independent discovery and verification of actual DB and storage identity
+        actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage_provider)
+
+        # Runtime target string match
         if payload.runtime_target != actual_runtime_target:
             raise AuthRuntimeMismatchError(
                 f"Runtime target mismatch: authorized '{payload.runtime_target}' != actual '{actual_runtime_target}'"
             )
 
-        # 4. Revocation check (Fail-Closed: missing evidence is treated as an error)
+        # Validate discovered resource identity against authorized profile for runtime_target
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(payload.runtime_target)
+        if profile:
+            db_matched = any(re.match(pat, actual_db_id, re.IGNORECASE) for pat in profile["allowed_db_patterns"])
+            bucket_name = actual_storage_id.replace("storage://", "")
+            bucket_matched = bucket_name in profile["allowed_buckets"]
+            if not db_matched or not bucket_matched:
+                raise AuthRuntimeMismatchError(
+                    f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
+                    f"db='{actual_db_id}', storage='{actual_storage_id}'"
+                )
+
+        # 4. Revocation check (Fail-Closed: missing evidence or unattested empty registry is treated as an error)
         import os
         revocations = set(revocation_list) if revocation_list is not None else None
         if revocations is None:
             if "OWNER_AUTH_REVOCATIONS" not in os.environ:
                 raise AuthRevokedError("Revocation check failed: revocation registry evidence is missing (fail-closed)")
             env_rev = os.environ.get("OWNER_AUTH_REVOCATIONS", "")
+            if env_rev == "" and os.environ.get("OWNER_AUTH_REVOCATIONS_ATTESTED", "").lower() != "true":
+                raise AuthRevokedError("Revocation check failed: revocation registry is empty without active freshness attestation (fail-closed)")
             revocations = {x.strip() for x in env_rev.split(",") if x.strip()}
 
         if payload.auth_nonce in revocations:
@@ -280,6 +346,48 @@ class RecoveryAuthService:
                 f"'{payload.provider_job_id}' but ProviderExecutionFence is missing"
             )
 
+        # 8. Out-of-band consumption evidence check (handles lost fence AND lost GenerationJob on restored DB)
+        oob_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", "")
+        oob_set = {x.strip() for x in oob_consumed.split(",") if x.strip()}
+        if payload.auth_nonce in oob_set or payload.provider_job_id in oob_set:
+            raise AuthReplayError(
+                f"Out-of-band consumption evidence confirms provider_job_id '{payload.provider_job_id}' "
+                f"or nonce '{payload.auth_nonce}' was consumed in prior execution outside restored DB snapshot"
+            )
+
+        if storage_provider is not None:
+            b_names = [
+                getattr(storage_provider, "bucket_name", None),
+                getattr(storage_provider, "bucket", None),
+                getattr(settings, "OBJECT_STORAGE_BUCKET", None),
+                "orbis-media-assets",
+                "orbis-assets",
+            ]
+            marker_key = f"fences/consumed/{payload.provider_job_id}.json"
+
+            has_marker = False
+            for b in b_names:
+                if not b:
+                    continue
+                try:
+                    if storage_provider.object_exists(b, marker_key):
+                        has_marker = True
+                        break
+                except Exception:
+                    pass
+
+            if not has_marker and hasattr(storage_provider, "_store"):
+                for (b, k) in storage_provider._store.keys():
+                    if k == marker_key or k.endswith(f"/{payload.provider_job_id}.json"):
+                        has_marker = True
+                        break
+
+            if has_marker:
+                raise AuthReplayError(
+                    f"Out-of-band storage evidence detected: durable artifact exists for provider_job_id "
+                    f"'{payload.provider_job_id}' despite missing DB fence and job rows (restored database replay prevented)"
+                )
+
         # 5. Insert fence record atomically in its own transaction
         fence = ProviderExecutionFence(
             fence_id=uuid.uuid4(),
@@ -320,8 +428,8 @@ class RecoveryAuthService:
         failure_stage: str,
         error_class: str,
         error_message: str,
-        db_transaction_state: str,
-        compensation_status: str,
+        db_transaction_state: str = "FAILED",
+        compensation_status: str = "NOT_APPLICABLE",
         fence_id: Optional[uuid.UUID] = None,
         orphan_bucket: Optional[str] = None,
         orphan_key: Optional[str] = None,
