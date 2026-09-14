@@ -73,6 +73,8 @@ def sanitize_error_message(text: str) -> str:
     """Sanitize and redact sensitive tokens, passwords, and secret keys from error messages."""
     import re
     patterns = [
+        (r"(://[^:/@\s]+:)[^@\s]+(@)", r"\1[REDACTED]\2"),
+        (r"://([^:]+):([^@]+)@", r"://[REDACTED_USER]:[REDACTED_PASS]@"),
         (r"(Bearer\s+)[A-Za-z0-9_\-\.]+", r"\1[REDACTED]"),
         (r"(token=)[^&\s]+", r"\1[REDACTED]"),
         (r"(password=)[^&\s]+", r"\1[REDACTED]"),
@@ -207,16 +209,33 @@ class RecoveryAuthService:
 
         Inserts and commits fence record with status 'CLAIMED_PENDING_GET'.
         """
-        # 1. Actual runtime target match
+        # 1. Restored-runtime provider safety check: Generation must be disabled
+        import os
+        from app.core.config import settings
+        gen_enabled = getattr(settings, "VIDU_GENERATION_ENABLED", None)
+        if gen_enabled is None:
+            gen_enabled = os.environ.get("VIDU_GENERATION_ENABLED", "false").lower() in ("true", "1")
+        if gen_enabled:
+            raise RecoveryAuthError("Restored runtime safety check failed: VIDU_GENERATION_ENABLED must be False during recovery")
+
+        # 2. Out-of-band evidence anchor validation
+        import re
+        anchor = (payload.owner_evidence_anchor or "").strip()
+        if not re.match(r"^(telegram|issue|pr|evidence|rec1|r5|run1)[\w\-\.\/:]+$", anchor, re.IGNORECASE):
+            raise AuthScopeMismatchError(f"Invalid owner_evidence_anchor format: '{anchor}'")
+
+        # 3. Actual runtime target match
         if payload.runtime_target != actual_runtime_target:
             raise AuthRuntimeMismatchError(
                 f"Runtime target mismatch: authorized '{payload.runtime_target}' != actual '{actual_runtime_target}'"
             )
 
-        # 2. Revocation check
+        # 4. Revocation check (Fail-Closed: missing evidence is treated as an error)
+        import os
         revocations = set(revocation_list) if revocation_list is not None else None
         if revocations is None:
-            import os
+            if "OWNER_AUTH_REVOCATIONS" not in os.environ:
+                raise AuthRevokedError("Revocation check failed: revocation registry evidence is missing (fail-closed)")
             env_rev = os.environ.get("OWNER_AUTH_REVOCATIONS", "")
             revocations = {x.strip() for x in env_rev.split(",") if x.strip()}
 
@@ -225,7 +244,7 @@ class RecoveryAuthService:
         if payload.owner_evidence_anchor in revocations:
             raise AuthRevokedError(f"Owner evidence anchor '{payload.owner_evidence_anchor}' is in revocation register")
 
-        # 3. Check existing fence by nonce (Replay check)
+        # 5. Check existing fence by nonce (Replay check)
         existing_nonce_fence = db.execute(
             select(ProviderExecutionFence).where(
                 ProviderExecutionFence.auth_nonce == payload.auth_nonce
@@ -237,7 +256,7 @@ class RecoveryAuthService:
                 f"Authorization nonce '{payload.auth_nonce}' has already been consumed (fence_id={existing_nonce_fence.fence_id})"
             )
 
-        # 4. Check existing fence by provider_job_id (Same-job concurrency check)
+        # 6. Check existing fence by provider_job_id (Same-job concurrency check)
         existing_job_fence = db.execute(
             select(ProviderExecutionFence).where(
                 ProviderExecutionFence.provider_name == "vidu",
@@ -249,6 +268,16 @@ class RecoveryAuthService:
             raise AuthSameJobConcurrentError(
                 f"Provider job fence already exists for 'vidu/{payload.provider_job_id}' "
                 f"(fence_id={existing_job_fence.fence_id}, status={existing_job_fence.status})"
+            )
+
+        # 7. Adversarial check for restored DB missing fence with unchanged runtime label
+        from app.models.generation_job import GenerationJob
+        job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{payload.provider_job_id}")
+        existing_job = db.get(GenerationJob, job_uuid)
+        if existing_job is not None:
+            raise AuthSameJobConcurrentError(
+                f"Restored DB state detected: GenerationJob '{job_uuid}' already exists for provider_job_id "
+                f"'{payload.provider_job_id}' but ProviderExecutionFence is missing"
             )
 
         # 5. Insert fence record atomically in its own transaction

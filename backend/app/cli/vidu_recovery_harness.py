@@ -340,7 +340,13 @@ def main():
         sig_bytes = bytes.fromhex(args.signature)
 
         # 1. Trusted Public Key Resolution (no caller override in production)
-        if not args.mock and not args.allow_test_keys:
+        if not args.mock:
+            if args.allow_test_keys:
+                print("Error: --allow-test-keys is strictly prohibited on real-provider path (requires --mock)", file=sys.stderr)
+                sys.exit(1)
+            if args.public_key:
+                print("Error: --public-key cannot be passed on real-provider path (trust root is pinned to OWNER_AUTH_PUBLIC_KEY)", file=sys.stderr)
+                sys.exit(1)
             pk_hex = os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
             if not pk_hex:
                 print("Error: Production recovery requires trusted OWNER_AUTH_PUBLIC_KEY environment variable", file=sys.stderr)
@@ -352,7 +358,7 @@ def main():
                 sys.exit(1)
         pk_bytes = bytes.fromhex(pk_hex)
 
-        # 2. Independent Executing Artifact Commit Resolution
+        # 2. Independent Executing Artifact Commit Resolution (No self-binding fallback)
         executing_commit = os.environ.get("EXECUTING_COMMIT_SHA", "")
         if not executing_commit:
             import subprocess
@@ -361,7 +367,11 @@ def main():
                 executing_commit = git_proc.stdout.strip()
             except Exception:
                 from app.core.config import settings
-                executing_commit = getattr(settings, "GIT_COMMIT_SHA", None) or payload.authorized_commit_sha
+                executing_commit = getattr(settings, "GIT_COMMIT_SHA", None)
+
+        if not executing_commit:
+            print("Error: Cannot independently determine executing artifact commit SHA (git/config discovery failed; self-binding fallback is prohibited)", file=sys.stderr)
+            sys.exit(1)
 
         if args.expected_commit and args.expected_commit != executing_commit:
             print(f"Error: Specified commit {args.expected_commit} does not match executing artifact SHA {executing_commit}", file=sys.stderr)

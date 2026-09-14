@@ -251,29 +251,49 @@ class ViduExistingJobRecoveryService:
         final_storage_key = None
 
         # Step 2: GET status from provider BEFORE committing or creating DB lineage
-        vidu_adapter = adapter or ViduProviderAdapter()
-        job_result: ProviderJobResult = await vidu_adapter.check_job_status(provider_job_id)
+        try:
+            vidu_adapter = adapter or ViduProviderAdapter()
+            job_result: ProviderJobResult = await vidu_adapter.check_job_status(provider_job_id)
 
-        # Validate returned provider_job_id if present
-        if job_result.provider_job_id and job_result.provider_job_id != TARGET_HISTORICAL_PROVIDER_JOB_ID:
-            raise ViduConflictingLineageError(
-                f"Provider returned mismatched provider_job_id '{job_result.provider_job_id}', "
-                f"expected '{TARGET_HISTORICAL_PROVIDER_JOB_ID}'"
-            )
+            # Validate returned provider_job_id if present
+            if job_result.provider_job_id and job_result.provider_job_id != TARGET_HISTORICAL_PROVIDER_JOB_ID:
+                raise ViduConflictingLineageError(
+                    f"Provider returned mismatched provider_job_id '{job_result.provider_job_id}', "
+                    f"expected '{TARGET_HISTORICAL_PROVIDER_JOB_ID}'"
+                )
 
-        # Step 3: Validate provider response strictly
-        if job_result.status == "FAILED":
-            if job_result.provider_error_code in ("TASK_NOT_FOUND", "NOT_FOUND") or job_result.status_code == 404:
-                raise ViduJobNotFoundError(f"Provider task {provider_job_id} not found")
-            raise ViduRecoveryError(f"Provider task failed: {job_result.error_code or job_result.error_message}")
+            # Step 3: Validate provider response strictly
+            if job_result.status == "FAILED":
+                if job_result.provider_error_code in ("TASK_NOT_FOUND", "NOT_FOUND") or job_result.status_code == 404:
+                    raise ViduJobNotFoundError(f"Provider task {provider_job_id} not found")
+                raise ViduRecoveryError(f"Provider task failed: {job_result.error_code or job_result.error_message}")
 
-        if job_result.status != "COMPLETED":
-            raise ViduJobNotCompletedError(
-                f"Provider task is not COMPLETED (current status: {job_result.status})"
-            )
+            if job_result.status != "COMPLETED":
+                raise ViduJobNotCompletedError(
+                    f"Provider task is not COMPLETED (current status: {job_result.status})"
+                )
 
-        if not job_result.video_url:
-            raise ViduMissingOutputUrlError("Provider reported COMPLETED but no video_url present")
+            if not job_result.video_url:
+                raise ViduMissingOutputUrlError("Provider reported COMPLETED but no video_url present")
+        except Exception as prov_err:
+            try:
+                from app.services.recovery_auth import RecoveryAuthService
+                RecoveryAuthService.record_failure_audit(
+                    db=db,
+                    provider_job_id=provider_job_id,
+                    failure_stage="PROVIDER_GET_OR_VALIDATION",
+                    error_class=prov_err.__class__.__name__,
+                    error_message=str(prov_err),
+                    db_transaction_state="NOT_STARTED",
+                    compensation_status="NOT_APPLICABLE",
+                    fence_id=fence_id,
+                )
+            except Exception as audit_err:
+                from app.services.recovery_auth import AuditWriteFailureError
+                if isinstance(audit_err, AuditWriteFailureError):
+                    raise
+                raise AuditWriteFailureError(f"Failed to record failure audit: {audit_err}") from audit_err
+            raise
 
         # Check if already fully materialized and idempotent
         job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{provider_job_id}")
@@ -562,11 +582,16 @@ class ViduExistingJobRecoveryService:
             db.add(asset)
             db.flush()
 
-            effective_credits = (
-                job_result.provider_credits
-                if job_result.provider_credits is not None
-                else (30.0 if seed_historical_credits else None)
-            )
+            if job_result.provider_credits is not None:
+                effective_credits = job_result.provider_credits
+                credits_provenance = "PROVIDER_GET_REPORTED"
+            elif seed_historical_credits:
+                effective_credits = 30.0
+                credits_provenance = "SEEDED_HISTORICAL_CONTRACT_METADATA"
+            else:
+                effective_credits = None
+                credits_provenance = "UNREPORTED"
+
             job.output_asset_id = asset.id
             job.status = "COMPLETED"
             job.imported_historical = True
@@ -577,6 +602,7 @@ class ViduExistingJobRecoveryService:
                 "new_generation_posts": 0,
                 "provider_status": job_result.status or "COMPLETED",
                 "provider_credits_reported": effective_credits,
+                "credits_provenance": credits_provenance,
                 "actual_credits_consumed": "UNKNOWN / NOT CONFIRMED",
                 "usd_equivalent": "UNKNOWN / NOT CONVERTED",
                 "imported_historical": True,
@@ -637,18 +663,15 @@ class ViduExistingJobRecoveryService:
                 tx_state = "COMMITTED"
 
         except Exception as exc:
-            # Check for ambiguous commit (timeout, connection drop, or network ambiguity during commit)
-            unresolved_commit = (tx_state == "COMMITTING" and any(
-                term in str(exc).lower() for term in ("timeout", "connection", "ambiguous", "dropped")
-            ))
+            # If an exception occurred while committing, outcome is authoritatively unknown (ambiguous)
+            unresolved_commit = (tx_state == "COMMITTING")
             db_rolled_back = False
 
-            # Safely rollback DB state (commit has not succeeded)
+            # Safely rollback DB state
             try:
                 if savepoint.is_active:
                     savepoint.rollback()
-                if commit:
-                    db.rollback()
+                db.rollback()
                 db_rolled_back = True
                 tx_state = "AMBIGUOUS_COMMIT" if unresolved_commit else "ROLLED_BACK"
             except Exception as rb_err:
@@ -694,7 +717,10 @@ class ViduExistingJobRecoveryService:
                     orphan_key=uploaded_key if uploaded_new_object else None,
                 )
             except Exception as audit_err:
-                logger.warning("Failed to record failure audit in recovery exception handler: %s", audit_err)
+                from app.services.recovery_auth import AuditWriteFailureError
+                if isinstance(audit_err, AuditWriteFailureError):
+                    raise
+                raise AuditWriteFailureError(f"Failed to record failure audit in exception handler: {audit_err}") from audit_err
 
             if temp_path and os.path.exists(temp_path):
                 try:
@@ -770,10 +796,33 @@ class ViduExistingJobRecoveryService:
     ) -> None:
         """Bounded streaming verification of storage object without loading full payload to RAM.
 
-        Downloads to a temporary file on disk, verifies file size <= max_size_bytes,
+        Enforces byte bounds before and during transfer (rejects > max_size_bytes prior to full disk write),
         and streams through hashlib in 64KB chunks to compute SHA-256.
         """
         import tempfile
+
+        # 1. Pre-transfer metadata bound check
+        if hasattr(storage, "_store"):
+            item = storage._store.get((bucket, key))
+            if not item:
+                raise KeyError(f"Object '{key}' not found in bucket '{bucket}'")
+            raw_len = len(item[0]) if isinstance(item[0], (bytes, bytearray)) else 0
+            if raw_len > max_size_bytes:
+                raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})")
+            if raw_len != expected_size:
+                raise ViduRecoveryError(f"Storage size mismatch: actual {raw_len} != expected {expected_size}")
+
+        if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
+            try:
+                head = storage.client.head_object(Bucket=bucket, Key=key)
+                head_len = head.get("ContentLength", 0)
+                if head_len > max_size_bytes:
+                    raise ViduRecoveryError(f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})")
+                if head_len != expected_size:
+                    raise ViduRecoveryError(f"Storage size mismatch: actual {head_len} != expected {expected_size}")
+            except Exception as h_err:
+                if isinstance(h_err, ViduRecoveryError):
+                    raise
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp_path = tmp.name
@@ -890,6 +939,20 @@ class ViduExistingJobRecoveryService:
             raise ViduRecoveryError("Offline reconciliation failed: job.result is missing or not a dictionary")
         if job.result.get("recovery_method") != "GET_ONLY_EXISTING_JOB":
             raise ViduRecoveryError("Offline reconciliation failed: job.result.recovery_method != 'GET_ONLY_EXISTING_JOB'")
+        if job.result.get("provider_job_id") != provider_job_id:
+            raise ViduConflictingLineageError(f"Offline reconciliation failed: job.result.provider_job_id '{job.result.get('provider_job_id')}' != '{provider_job_id}'")
+        if job.result.get("new_generation_posts") != 0:
+            raise ViduConflictingLineageError(f"Offline reconciliation failed: job.result.new_generation_posts '{job.result.get('new_generation_posts')}' != 0")
+        if job.result.get("provider_status") != "COMPLETED":
+            raise ViduConflictingLineageError(f"Offline reconciliation failed: job.result.provider_status '{job.result.get('provider_status')}' != 'COMPLETED'")
+        if job.result.get("actual_credits_consumed") != "UNKNOWN / NOT CONFIRMED":
+            raise ViduConflictingLineageError("Offline reconciliation failed: job.result.actual_credits_consumed != 'UNKNOWN / NOT CONFIRMED'")
+        if job.result.get("usd_equivalent") != "UNKNOWN / NOT CONVERTED":
+            raise ViduConflictingLineageError("Offline reconciliation failed: job.result.usd_equivalent != 'UNKNOWN / NOT CONVERTED'")
+        if job.result.get("imported_historical") is not True:
+            raise ViduConflictingLineageError("Offline reconciliation failed: job.result.imported_historical is not True")
+        if job.result.get("execution_disabled") is not True:
+            raise ViduConflictingLineageError("Offline reconciliation failed: job.result.execution_disabled is not True")
         if job.result.get("provider_credits_reported") is None:
             raise ViduRecoveryError("Offline reconciliation failed: job.result missing required provider_credits_reported")
 
@@ -905,10 +968,18 @@ class ViduExistingJobRecoveryService:
 
         if not ledger.imported_historical:
             raise ViduConflictingLineageError(f"Ledger imported_historical is not True")
-        if ledger.cost_status not in ("UNKNOWN", "FINAL"):
-            raise ViduConflictingLineageError(f"Ledger cost_status '{ledger.cost_status}' invalid for historical entry")
-        if ledger.actual_cost is not None and ledger.actual_cost != 0.0:
-            raise ViduConflictingLineageError(f"Ledger actual_cost '{ledger.actual_cost}' must be 0.0 or None for historical recovery")
+        if ledger.cost_status != "UNKNOWN":
+            raise ViduConflictingLineageError(f"Ledger cost_status '{ledger.cost_status}' must be strictly 'UNKNOWN' for conservative recovery truth")
+        if ledger.actual_cost is not None:
+            raise ViduConflictingLineageError(f"Ledger actual_cost '{ledger.actual_cost}' must be None for historical recovery")
+        if ledger.estimated_cost is not None:
+            raise ViduConflictingLineageError(f"Ledger estimated_cost '{ledger.estimated_cost}' must be None for historical recovery")
+        if ledger.job_id != job.id:
+            raise ViduConflictingLineageError(f"Ledger job_id '{ledger.job_id}' != '{job.id}'")
+        if ledger.project_id != project.id:
+            raise ViduConflictingLineageError(f"Ledger project_id '{ledger.project_id}' != '{project.id}'")
+        if ledger.shot_id != shot.id:
+            raise ViduConflictingLineageError(f"Ledger shot_id '{ledger.shot_id}' != '{shot.id}'")
 
         # 6. Verify storage object presence and bounded streaming checksum
         storage = storage_provider or get_storage_provider()

@@ -63,6 +63,12 @@ from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
 
 
 # Fixture for isolated SQLite test database
+@pytest.fixture(autouse=True)
+def setup_auth_env(monkeypatch):
+    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
+    monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
+
+
 @pytest.fixture
 def test_db():
     engine = create_engine("sqlite:///:memory:")
@@ -249,11 +255,12 @@ def test_scenario_04_same_job_concurrency_rejection(test_db, auth_keys):
 # ==============================================================================
 # Scenario 5: Revoked Nonce / Evidence Anchor
 # ==============================================================================
-def test_scenario_05_revocation_rejection(test_db, auth_keys):
+def test_scenario_05_revocation_rejection(test_db, auth_keys, monkeypatch):
     seed, pk = auth_keys
     payload, _ = make_valid_auth(seed, nonce="revoked-nonce-123")
     revocations = {"revoked-nonce-123"}
 
+    # 1. Explicit revocation list rejects
     with pytest.raises(AuthRevokedError, match="revocation register"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
@@ -262,6 +269,18 @@ def test_scenario_05_revocation_rejection(test_db, auth_keys):
             execution_id="exec-1",
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             revocation_list=revocations,
+        )
+
+    # 2. Missing revocation registry evidence fails closed
+    monkeypatch.delenv("OWNER_AUTH_REVOCATIONS", raising=False)
+    with pytest.raises(AuthRevokedError, match="revocation registry evidence is missing"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest=payload.digest(),
+            execution_id="exec-1",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            revocation_list=None,
         )
 
 
@@ -436,6 +455,40 @@ def test_scenario_12_ambiguous_db_commit_real_path_injected(test_db, mock_storag
     assert audits[-1].compensation_status == "RETAINED_OBJECT_UNSAFE_TO_DELETE"
 
 
+def test_commit_exception_without_matching_keywords_retains_storage(test_db, mock_storage, monkeypatch):
+    """Verifies that ANY exception during commit phase (even with unrelated message) conservatively retains storage."""
+    res_ok = ProviderJobResult(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        video_url="https://media.example.invalid/out.mp4",
+        provider_credits=30.0,
+    )
+
+    def arbitrary_error_commit():
+        raise RuntimeError("Unrelated primary key sequence corruption xyz 123")
+
+    monkeypatch.setattr(test_db, "commit", arbitrary_error_commit)
+
+    with pytest.raises(ViduRecoveryError, match="Unrelated primary key sequence corruption"):
+        asyncio.run(
+            ViduExistingJobRecoveryService.recover_existing_job(
+                db=test_db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                adapter=MockProviderAdapter(res_ok),
+                storage_provider=mock_storage,
+                downloader=fake_downloader,
+                commit=True,
+            )
+        )
+
+    # Storage object must still be retained
+    assert len(mock_storage._store) > 0
+    audits = test_db.execute(select(RecoveryFailureAudit)).scalars().all()
+    assert len(audits) > 0
+    assert audits[-1].db_transaction_state == "AMBIGUOUS_COMMIT"
+    assert audits[-1].compensation_status == "RETAINED_OBJECT_UNSAFE_TO_DELETE"
+
+
 # ==============================================================================
 # Scenario 13: Universal Storage Compensation Real-Path Rollback Failure Injection
 # ==============================================================================
@@ -556,33 +609,41 @@ def test_scenario_16_fence_update_failure_injected(test_db, mock_storage, auth_k
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
-    # Let recovery succeed, but when advancing fence status, inject DB commit error on harness
-    res_ok = ProviderJobResult(
-        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-        status="COMPLETED",
-        video_url="https://media.example.invalid/out.mp4",
-        provider_credits=30.0,
-    )
+    real_commit = test_db.commit
+    commit_counter = {"count": 0}
 
-    # Execute recovery materialization
-    rec_result = asyncio.run(
-        ViduExistingJobRecoveryService.recover_existing_job(
+    def failing_commit():
+        commit_counter["count"] += 1
+        # Commit 1: Phase 2 claim fence
+        # Commit 2: pre-GET transition (GET_IN_FLIGHT)
+        # Commit 3: recover_existing_job durable commit
+        # Commit 4: harness transition to MATERIALIZED_UNVERIFIED -> inject commit failure!
+        if commit_counter["count"] == 4:
+            raise RuntimeError("Simulated fence update commit failure after materialization")
+        return real_commit()
+
+    monkeypatch.setattr(test_db, "commit", failing_commit)
+
+    with pytest.raises(RuntimeError, match="Simulated fence update commit failure"):
+        execute_recovery_harness(
             db=test_db,
-            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-            adapter=MockProviderAdapter(res_ok),
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
             storage_provider=mock_storage,
-            downloader=fake_downloader,
-            commit=True,
-            seed_historical_credits=True,
         )
-    )
-    assert rec_result.asset_id is not None
 
-    # Primary Asset exists
-    asset = test_db.get(Asset, rec_result.asset_id)
+    # Primary Asset and GenerationJob were already committed in commit 3
+    job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
+    asset = test_db.get(Asset, asset_uuid)
     assert asset is not None
 
     # Offline reconciliation can independently verify without extra GET
+    monkeypatch.setattr(test_db, "commit", real_commit)
     reconciled = ViduExistingJobRecoveryService.reconcile_offline_historical_job(
         db=test_db,
         storage_provider=mock_storage,
@@ -721,51 +782,87 @@ def test_scenario_20_offline_reconciliation_negative_cases(test_db, mock_storage
 
 
 # ==============================================================================
-# Scenarios 21–24: Historical Exclusion Filters
+# Scenarios 21–24: Historical Exclusion Filters via Production Consumers
 # ==============================================================================
 def test_scenario_21_usage_ledger_historical_exclusion(test_db):
-    entry = UsageLedger(
-        id=uuid.uuid4(),
-        project_id=uuid.uuid4(),
-        provider="vidu",
-        operation="historical_recovery_get",
-        model="viduq2",
-        currency="USD",
-        actual_cost=None,
-        imported_historical=True,
-    )
-    test_db.add(entry)
+    """Verifies that production consumer BudgetService authoritatively excludes historical entries."""
+    from app.services.budget import BudgetService
+    from app.models.project import Project
+
+    proj = Project(id=uuid.uuid4(), title="Test Exclusion Project")
+    test_db.add(proj)
     test_db.commit()
 
-    # Active production spend query excludes imported_historical
-    active_entries = test_db.query(UsageLedger).filter(
-        UsageLedger.imported_historical.isnot(True)
-    ).all()
-    assert len(active_entries) == 0
+    # Active spend: $12.50
+    active_entry = UsageLedger(
+        id=uuid.uuid4(),
+        project_id=proj.id,
+        provider="vidu",
+        operation="video_generation",
+        cost_status="CONFIRMED",
+        actual_cost=12.50,
+        imported_historical=False,
+    )
+    # Historical recovered spend: $30.00 equivalent
+    hist_entry = UsageLedger(
+        id=uuid.uuid4(),
+        project_id=proj.id,
+        provider="vidu",
+        operation="historical_recovery_get",
+        cost_status="CONFIRMED",
+        actual_cost=30.00,
+        imported_historical=True,
+    )
+    test_db.add(active_entry)
+    test_db.add(hist_entry)
+    test_db.commit()
+
+    committed = BudgetService.get_project_committed_cost(test_db, proj.id)
+    assert committed == 12.50
 
 
 def test_scenario_22_generation_job_imported_historical_exclusion(test_db):
+    """Verifies that production consumer JobDispatchService excludes imported_historical jobs."""
+    from app.services.job_dispatch import JobDispatchService
+    from app.models.shot import Shot
+    from app.models.scene import Scene
+
+    scene = Scene(id=uuid.uuid4(), project_id=uuid.uuid4(), scene_number=1)
+    test_db.add(scene)
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=101, shot_type="video")
+    test_db.add(shot)
+    test_db.commit()
+
     job = GenerationJob(
         id=uuid.uuid4(),
-        shot_id=uuid.uuid4(),
+        shot_id=shot.id,
         provider_name="vidu",
-        status="COMPLETED",
+        status="PENDING",
         imported_historical=True,
         execution_disabled=False,
     )
     test_db.add(job)
     test_db.commit()
 
-    claimable_jobs = test_db.query(GenerationJob).filter(
-        GenerationJob.imported_historical.isnot(True)
-    ).all()
-    assert len(claimable_jobs) == 0
+    claimed = JobDispatchService.claim_next_job(test_db, worker_id="test-consumer-worker-1")
+    assert claimed is None
 
 
 def test_scenario_23_generation_job_execution_disabled_worker_exclusion(test_db):
+    """Verifies that production consumer JobDispatchService excludes execution_disabled jobs."""
+    from app.services.job_dispatch import JobDispatchService
+    from app.models.shot import Shot
+    from app.models.scene import Scene
+
+    scene = Scene(id=uuid.uuid4(), project_id=uuid.uuid4(), scene_number=2)
+    test_db.add(scene)
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=102, shot_type="video")
+    test_db.add(shot)
+    test_db.commit()
+
     job = GenerationJob(
         id=uuid.uuid4(),
-        shot_id=uuid.uuid4(),
+        shot_id=shot.id,
         provider_name="vidu",
         status="PENDING",
         imported_historical=False,
@@ -774,29 +871,35 @@ def test_scenario_23_generation_job_execution_disabled_worker_exclusion(test_db)
     test_db.add(job)
     test_db.commit()
 
-    worker_claimable = test_db.query(GenerationJob).filter(
-        GenerationJob.execution_disabled.isnot(True)
-    ).all()
-    assert len(worker_claimable) == 0
+    claimed = JobDispatchService.claim_next_job(test_db, worker_id="test-consumer-worker-2")
+    assert claimed is None
 
 
 def test_scenario_24_canonical_generation_job_both_true_exclusion(test_db):
+    """Verifies that dual-fenced canonical recovered jobs can never be claimed by JobDispatchService."""
+    from app.services.job_dispatch import JobDispatchService
+    from app.models.shot import Shot
+    from app.models.scene import Scene
+
+    scene = Scene(id=uuid.uuid4(), project_id=uuid.uuid4(), scene_number=3)
+    test_db.add(scene)
+    shot = Shot(id=uuid.uuid4(), scene_id=scene.id, shot_number=103, shot_type="video")
+    test_db.add(shot)
+    test_db.commit()
+
     job = GenerationJob(
         id=uuid.uuid4(),
-        shot_id=uuid.uuid4(),
+        shot_id=shot.id,
         provider_name="vidu",
-        status="COMPLETED",
+        status="PENDING",
         imported_historical=True,
         execution_disabled=True,
     )
     test_db.add(job)
     test_db.commit()
 
-    eligible = test_db.query(GenerationJob).filter(
-        GenerationJob.imported_historical.isnot(True),
-        GenerationJob.execution_disabled.isnot(True),
-    ).all()
-    assert len(eligible) == 0
+    claimed = JobDispatchService.claim_next_job(test_db, worker_id="test-consumer-worker-3")
+    assert claimed is None
 
 
 # ==============================================================================
@@ -816,7 +919,7 @@ def test_scenario_25_isolated_backup_restore_mock(test_db, mock_storage):
         task_id=TARGET_TASK_ID,
         authorized_commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7",
         runtime_target="UAT-COMPOSE-PERSISTENT",
-        owner_evidence_anchor="telegram:msg:152428:5653543",
+        owner_evidence_anchor="issue#63:gate-b-test",
         auth_digest="digest",
         auth_nonce=str(uuid.uuid4()),
         auth_issued_at=datetime.now(timezone.utc),
@@ -834,20 +937,90 @@ def test_scenario_25_isolated_backup_restore_mock(test_db, mock_storage):
 
 
 # ==============================================================================
-# Scenario 26: Restored-Runtime Fail-Closed Fencing
+# Scenario 26: Restored-Runtime & Provider-Disabled Proof Fail-Closed Fencing
 # ==============================================================================
-def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys):
+def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatch):
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
-    # 1. Runtime mismatch fails closed immediately
-    with pytest.raises(AuthRuntimeMismatchError):
+    # 1. Provider generation enabled -> must fail closed
+    monkeypatch.setenv("VIDU_GENERATION_ENABLED", "true")
+    with pytest.raises(RecoveryAuthError, match="VIDU_GENERATION_ENABLED must be False"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=payload,
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UNKNOWN-RESTORED-RUNTIME",
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+        )
+
+    # Restore settings
+    monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
+
+    # 2. Restored DB missing fence with unchanged runtime label -> must fail closed
+    job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
+    restored_job = GenerationJob(
+        id=job_uuid,
+        shot_id=uuid.uuid4(),
+        provider_name="vidu",
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        status="COMPLETED",
+        imported_historical=True,
+        execution_disabled=True,
+    )
+    test_db.add(restored_job)
+    test_db.commit()
+
+    with pytest.raises(AuthSameJobConcurrentError, match="Restored DB state detected"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+        )
+
+    # Clean up restored job
+    test_db.delete(restored_job)
+    test_db.commit()
+
+    # 3. Invalid out-of-band evidence anchor format -> must fail closed
+    invalid_anchor_payload = CanonicalAuthPayload(
+        authorized_commit_sha=payload.authorized_commit_sha,
+        task_id=payload.task_id,
+        provider_job_id=payload.provider_job_id,
+        runtime_target="UAT-COMPOSE-PERSISTENT",
+        owner_evidence_anchor="arbitrary-unstructured-anchor-without-prefix",
+        issued_at=payload.issued_at,
+        expires_at=payload.expires_at,
+        auth_nonce=str(uuid.uuid4()),
+    )
+    from tests.ed25519_test_signer import ed25519_sign
+    invalid_sig = ed25519_sign(invalid_anchor_payload.to_canonical_json(), seed)
+
+    with pytest.raises(AuthScopeMismatchError, match="Invalid owner_evidence_anchor format"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=invalid_anchor_payload,
+            signature_bytes=invalid_sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+        )
+
+    # 4. Runtime target mismatch -> must fail closed
+    with pytest.raises(AuthRuntimeMismatchError, match="Runtime target mismatch"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UNAUTHORIZED-RUNTIME-TARGET",
             mock_mode=True,
         )
