@@ -309,7 +309,10 @@ def test_storage_upload_failure_rolls_back_cleanly(clean_db):
 
 
 def test_db_commit_failure_after_new_upload_cleans_new_storage_object(clean_db, mock_storage):
-    """If upload succeeds but commit fails, storage compensation deletes the new object and rolls back DB."""
+    """If upload succeeds but commit fails, storage compensation conservatively retains the object
+
+    to prevent data loss on ambiguous commit outcome (Review 5197787810 Blocker 3).
+    """
     db_session = clean_db
     job_result = ProviderJobResult(
         provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -331,14 +334,14 @@ def test_db_commit_failure_after_new_upload_cleans_new_storage_object(clean_db, 
                 )
             )
 
-    # Invariants: 0 DB records, 0 orphaned objects in storage
+    # Invariants: 0 DB records, storage object retained because commit outcome is unknown (fail-closed)
     assert db_session.query(Project).count() == 0
     assert db_session.query(Scene).count() == 0
     assert db_session.query(Shot).count() == 0
     assert db_session.query(GenerationJob).count() == 0
     assert db_session.query(Asset).count() == 0
     assert db_session.query(UsageLedger).count() == 0
-    assert len(mock_storage._store) == 0
+    assert len(mock_storage._store) == 1
 
 
 # =========================================================================
