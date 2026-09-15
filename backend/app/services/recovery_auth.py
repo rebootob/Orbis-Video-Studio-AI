@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Set
@@ -187,6 +189,7 @@ class CanonicalAuthPayload(BaseModel):
     issued_at: datetime
     expires_at: datetime
     auth_nonce: str
+    restore_epoch: str
 
     def to_canonical_json(self) -> bytes:
         """Serialize payload to deterministic, sorted UTF-8 JSON without whitespace."""
@@ -197,6 +200,7 @@ class CanonicalAuthPayload(BaseModel):
             "issued_at": self.issued_at.astimezone(timezone.utc).isoformat(),
             "owner_evidence_anchor": self.owner_evidence_anchor,
             "provider_job_id": self.provider_job_id,
+            "restore_epoch": self.restore_epoch,
             "runtime_target": self.runtime_target,
             "task_id": self.task_id,
         }
@@ -210,60 +214,117 @@ class CanonicalAuthPayload(BaseModel):
 class AuthoritativeExternalExecutionRegister:
     """Authoritative execution register maintained outside the DB and Object Storage restore sets.
 
-    Per Gate A contract: enforces an out-of-band reconciliation check against durable accepted
-    execution evidence outside the restored snapshot before any network I/O is permitted.
+    Guarantees atomic durable pre-GET claim with file locking, atomic swap, and fsync.
+    Validates that the register path resides in a trusted external topology outside the DB and S3 restore set.
+    Rejects read-only or empty-environment execution.
     """
 
     @classmethod
-    def get_register_path(cls) -> Optional[str]:
-        import os
-        return os.environ.get("EXTERNAL_EXECUTION_REGISTER_PATH")
+    def get_register_path(cls) -> str:
+        reg_path = os.environ.get("EXTERNAL_EXECUTION_REGISTER_PATH", "").strip()
+        if not reg_path:
+            raise AuthRevokedError(
+                "Mandatory authoritative external execution register is missing: EXTERNAL_EXECUTION_REGISTER_PATH "
+                "must be configured to a writable durable path outside DB/storage restore set (fail-closed)"
+            )
+        return reg_path
+
+    @classmethod
+    def validate_register_topology(cls, reg_path: str, db_identity: str = "", storage_identity: str = "") -> None:
+        """Validate that register topology is trusted and decoupled from DB and Storage."""
+        topology_attested = os.environ.get("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "").strip().lower() == "true"
+        freshness_attested = os.environ.get("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "").strip().lower() == "true"
+        if not topology_attested or not freshness_attested:
+            raise AuthRevokedError(
+                "External execution register lacks mandatory topology/freshness attestation "
+                "(EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED and EXTERNAL_EXECUTION_REGISTER_ATTESTED must be 'true')"
+            )
+
+        norm_path = os.path.abspath(os.path.normpath(reg_path))
+
+        # Disallow register from residing inside DB or storage paths
+        if db_identity and db_identity.lower().startswith("sqlite:///"):
+            db_file = os.path.abspath(os.path.normpath(db_identity[len("sqlite:///"):]))
+            if norm_path == db_file or norm_path.startswith(os.path.dirname(db_file)):
+                raise AuthRuntimeMismatchError(
+                    f"External execution register path '{norm_path}' cannot reside inside DB directory (topology collision)"
+                )
+        if "storage" in norm_path.lower() and "bucket" in norm_path.lower():
+            raise AuthRuntimeMismatchError(
+                f"External execution register path '{norm_path}' cannot reside inside storage bucket directory"
+            )
+
+    @classmethod
+    def _acquire_lock_and_read(cls, reg_path: str):
+        """Cross-platform atomic file lock and load."""
+        import time
+        lock_path = f"{reg_path}.lock"
+        os.makedirs(os.path.dirname(os.path.abspath(reg_path)), exist_ok=True)
+
+        acquired = False
+        start_lock = time.monotonic()
+        while time.monotonic() - start_lock < 5.0:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                acquired = True
+                break
+            except FileExistsError:
+                time.sleep(0.02)
+
+        if not acquired:
+            raise RecoveryAuthError(f"Failed to acquire atomic lock on external register '{lock_path}' within 5s")
+
+        try:
+            reg_data = {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
+            if os.path.exists(reg_path):
+                with open(reg_path, "r", encoding="utf-8") as f:
+                    reg_data = json.load(f)
+            return fd, lock_path, reg_data
+        except Exception as e:
+            try:
+                os.close(fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
+            raise RecoveryAuthError(f"Failed to read external register at '{reg_path}': {sanitize_error_message(str(e))}") from e
+
+    @classmethod
+    def _write_atomic_and_release(cls, reg_path: str, fd: int, lock_path: str, reg_data: dict) -> None:
+        """Atomic write via temporary file, flush, fsync, os.replace, and release lock."""
+        import time
+        tmp_path = f"{reg_path}.tmp.{os.getpid()}.{time.time_ns()}"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(reg_data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, reg_path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            try:
+                os.close(fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
 
     @classmethod
     def check_and_assert_freshness(cls, provider_job_id: str, auth_nonce: str) -> None:
         """Verify external evidence outside DB and storage before any network I/O.
 
-        Fails closed if evidence is missing, unattested, or indicates prior dispatch/consumption.
+        Requires a valid, writable external register path with attested topology.
+        Empty environment or read-only mode fails closed.
         """
-        import os
         reg_path = cls.get_register_path()
-        env_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", None)
+        cls.validate_register_topology(reg_path)
 
-        # 1. Mandatory requirement: Must have attested external evidence source
-        if not reg_path and env_consumed is None:
-            raise AuthRevokedError(
-                "Authoritative external execution register is missing: neither EXTERNAL_EXECUTION_REGISTER_PATH "
-                "nor OUT_OF_BAND_CONSUMED_EVIDENCE is configured outside the DB/storage restore set (fail-closed)"
-            )
-
-        # 2. Check freshness attestation
-        if env_consumed is not None:
-            if os.environ.get("OUT_OF_BAND_CONSUMED_ATTESTED", "").lower() != "true":
-                raise AuthRevokedError("External consumed registry lacks mandatory freshness attestation (OUT_OF_BAND_CONSUMED_ATTESTED != 'true')")
-
-        if reg_path:
-            if os.environ.get("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "").lower() != "true":
-                raise AuthRevokedError("Authoritative external execution register lacks mandatory freshness attestation (EXTERNAL_EXECUTION_REGISTER_ATTESTED != 'true')")
-
-        # 3. Check environment registry entries if present
-        if env_consumed:
-            consumed_set = {x.strip() for x in env_consumed.split(",") if x.strip()}
-            if auth_nonce in consumed_set or provider_job_id in consumed_set:
-                raise AuthReplayError(
-                    f"Authoritative external register confirms provider_job_id '{provider_job_id}' "
-                    f"or nonce '{auth_nonce}' was previously dispatched or consumed outside DB/storage restore set; second GET rejected"
-                )
-
-        # 4. Check file register if present
-        if reg_path and os.path.exists(reg_path):
-            try:
-                with open(reg_path, "r", encoding="utf-8") as f:
-                    reg_data = json.load(f)
-            except Exception as e:
-                raise AuthRevokedError(
-                    f"Failed to read authoritative external execution register from '{reg_path}': {e} (fail-closed)"
-                ) from e
-
+        fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
+        try:
             dispatched_jobs = reg_data.get("dispatched_jobs", [])
             dispatched_nonces = reg_data.get("dispatched_nonces", [])
             consumed_jobs = reg_data.get("consumed_jobs", [])
@@ -279,56 +340,99 @@ class AuthoritativeExternalExecutionRegister:
                     f"Authoritative external register at '{reg_path}' confirms nonce '{auth_nonce}' "
                     f"was previously consumed outside DB/storage restore set; second GET rejected"
                 )
+        finally:
+            try:
+                os.close(fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
+
+    @classmethod
+    def claim_pre_get_dispatch(cls, provider_job_id: str, auth_nonce: str, execution_id: str) -> None:
+        """Atomically claim pre-GET dispatch fence with durable fsync before provider GET."""
+        reg_path = cls.get_register_path()
+        cls.validate_register_topology(reg_path)
+
+        fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
+        try:
+            dispatched_jobs = reg_data.setdefault("dispatched_jobs", [])
+            dispatched_nonces = reg_data.setdefault("dispatched_nonces", [])
+            consumed_jobs = reg_data.setdefault("consumed_jobs", [])
+            consumed_nonces = reg_data.setdefault("consumed_nonces", [])
+
+            if provider_job_id in dispatched_jobs or provider_job_id in consumed_jobs:
+                raise AuthReplayError(
+                    f"Authoritative external register at '{reg_path}' confirms provider_job_id '{provider_job_id}' "
+                    f"was already claimed/dispatched; concurrent or replay GET rejected"
+                )
+            if auth_nonce in dispatched_nonces or auth_nonce in consumed_nonces:
+                raise AuthReplayError(
+                    f"Authoritative external register at '{reg_path}' confirms nonce '{auth_nonce}' "
+                    f"was already claimed; concurrent or replay GET rejected"
+                )
+
+            dispatched_jobs.append(provider_job_id)
+            dispatched_nonces.append(auth_nonce)
+            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data)
+        except Exception:
+            try:
+                os.close(fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
+            raise
 
     @classmethod
     def record_dispatch(cls, provider_job_id: str, auth_nonce: str, execution_id: str) -> None:
-        """Record pre-GET dispatch to external register before provider GET."""
-        import os
-        reg_path = cls.get_register_path()
-        if reg_path:
-            try:
-                reg_data = {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
-                if os.path.exists(reg_path):
-                    with open(reg_path, "r", encoding="utf-8") as f:
-                        reg_data = json.load(f)
-                if provider_job_id not in reg_data.setdefault("dispatched_jobs", []):
-                    reg_data["dispatched_jobs"].append(provider_job_id)
-                if auth_nonce not in reg_data.setdefault("dispatched_nonces", []):
-                    reg_data["dispatched_nonces"].append(auth_nonce)
-                with open(reg_path, "w", encoding="utf-8") as f:
-                    json.dump(reg_data, f, indent=2)
-            except Exception as exc:
-                sanitized_exc = sanitize_error_message(str(exc))
-                raise RecoveryAuthError(
-                    f"Failed to record dispatch to authoritative external execution register '{reg_path}': {sanitized_exc}"
-                ) from exc
+        """Alias to atomic claim_pre_get_dispatch for backwards compatibility."""
+        cls.claim_pre_get_dispatch(provider_job_id, auth_nonce, execution_id)
 
     @classmethod
     def record_consumed(cls, provider_job_id: str, auth_nonce: str) -> None:
-        """Record terminal consumption to external register."""
-        import os
+        """Atomically record terminal consumption to external register."""
         reg_path = cls.get_register_path()
-        if reg_path:
+        cls.validate_register_topology(reg_path)
+
+        fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
+        try:
+            consumed_jobs = reg_data.setdefault("consumed_jobs", [])
+            consumed_nonces = reg_data.setdefault("consumed_nonces", [])
+            if provider_job_id not in consumed_jobs:
+                consumed_jobs.append(provider_job_id)
+            if auth_nonce not in consumed_nonces:
+                consumed_nonces.append(auth_nonce)
+            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data)
+        except Exception:
             try:
-                reg_data = {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
-                if os.path.exists(reg_path):
-                    with open(reg_path, "r", encoding="utf-8") as f:
-                        reg_data = json.load(f)
-                if provider_job_id not in reg_data.setdefault("consumed_jobs", []):
-                    reg_data["consumed_jobs"].append(provider_job_id)
-                if auth_nonce not in reg_data.setdefault("consumed_nonces", []):
-                    reg_data["consumed_nonces"].append(auth_nonce)
-                with open(reg_path, "w", encoding="utf-8") as f:
-                    json.dump(reg_data, f, indent=2)
-            except Exception as exc:
-                sanitized_exc = sanitize_error_message(str(exc))
-                raise RecoveryAuthError(
-                    f"Failed to record terminal consumption to authoritative external register '{reg_path}': {sanitized_exc}"
-                ) from exc
+                os.close(fd)
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+            except Exception:
+                pass
+            raise
 
 
 class RecoveryAuthService:
     """Two-phase asymmetric authorization verification."""
+
+    @classmethod
+    def get_current_runtime_restore_epoch(cls) -> str:
+        """Independently source current runtime restore epoch with fail-closed missing/attestation check."""
+        import os
+        epoch = os.environ.get("CURRENT_RESTORE_EPOCH", "").strip()
+        attested = os.environ.get("RESTORE_EPOCH_ATTESTED", "").strip().lower() == "true"
+        if not epoch:
+            raise AuthRevokedError(
+                "Current runtime restore epoch is missing (CURRENT_RESTORE_EPOCH must be set, fail-closed)"
+            )
+        if not attested:
+            raise AuthRevokedError(
+                "Current runtime restore epoch lacks mandatory freshness attestation "
+                "(RESTORE_EPOCH_ATTESTED must be 'true', fail-closed)"
+            )
+        return epoch
 
     @classmethod
     def verify_phase_1_in_memory(
@@ -347,6 +451,7 @@ class RecoveryAuthService:
         3. Exact commit SHA binding
         4. Exact task_id and provider_job_id scope
         5. Presence of owner_evidence_anchor
+        6. Explicit signed restore_epoch matching current runtime restore epoch
 
         Returns auth_digest if valid; raises RecoveryAuthError otherwise.
         """
@@ -392,6 +497,17 @@ class RecoveryAuthService:
         # 5. Evidence anchor
         if not payload.owner_evidence_anchor or not payload.owner_evidence_anchor.strip():
             raise AuthScopeMismatchError("Authorization missing required owner_evidence_anchor")
+
+        # 6. Restore Epoch verification (required signed field)
+        token_epoch = getattr(payload, "restore_epoch", None)
+        if not token_epoch or not str(token_epoch).strip():
+            raise AuthScopeMismatchError("CanonicalAuthPayload missing required non-empty 'restore_epoch' field")
+
+        current_epoch = cls.get_current_runtime_restore_epoch()
+        if str(token_epoch).strip() != current_epoch:
+            raise AuthScopeMismatchError(
+                f"Restore epoch mismatch: token restore_epoch '{token_epoch}' != current runtime epoch '{current_epoch}' (fail-closed)"
+            )
 
         return payload.digest()
 
@@ -509,6 +625,19 @@ class RecoveryAuthService:
                 f"(fence_id={existing_job_fence.fence_id}, status={existing_job_fence.status})"
             )
 
+        # 6. Mandatory check on OUT_OF_BAND_CONSUMED_EVIDENCE freshness attestation
+        out_of_band_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", "").strip()
+        if out_of_band_consumed:
+            oob_attested = os.environ.get("OUT_OF_BAND_CONSUMED_ATTESTED", "").strip().lower() == "true"
+            if not oob_attested:
+                raise AuthRevokedError("External consumed registry lacks mandatory freshness attestation")
+            consumed_list = [j.strip() for j in out_of_band_consumed.split(",") if j.strip()]
+            if payload.provider_job_id in consumed_list:
+                raise AuthReplayError(
+                    f"Out-of-band consumption evidence confirms provider_job_id '{payload.provider_job_id}' "
+                    f"was already executed and consumed outside current DB state; second GET rejected"
+                )
+
         # 7. Adversarial check for restored DB missing fence with unchanged runtime label
         from app.models.generation_job import GenerationJob
         job_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/job/{payload.provider_job_id}")
@@ -519,18 +648,11 @@ class RecoveryAuthService:
                 f"'{payload.provider_job_id}' but ProviderExecutionFence is missing"
             )
 
-        # 8. Restore Epoch binding validation: Token must be bound to current runtime restore epoch
-        current_epoch = os.environ.get("CURRENT_RESTORE_EPOCH", "epoch-0").strip()
-        token_epoch = getattr(payload, "restore_epoch", None)
-        if not token_epoch:
-            import re
-            m = re.search(r"(?:^|[:\-_])epoch[:\-_]?([A-Za-z0-9\-_]+)", payload.owner_evidence_anchor, re.IGNORECASE)
-            if m:
-                token_epoch = f"epoch-{m.group(1)}"
-
-        if token_epoch and token_epoch.lower() != current_epoch.lower():
+        # 8. Restore Epoch binding validation: Token must match independently sourced current restore epoch
+        current_epoch = cls.get_current_runtime_restore_epoch()
+        if payload.restore_epoch != current_epoch:
             raise AuthScopeMismatchError(
-                f"Authorization token is bound to stale restore epoch: '{token_epoch}' != current runtime epoch '{current_epoch}' (fail-closed)"
+                f"Authorization token is bound to stale restore epoch: '{payload.restore_epoch}' != current runtime epoch '{current_epoch}' (fail-closed)"
             )
 
         # 9. Mandatory Authoritative External Execution Register Check (Decoupled from DB/Storage restore set)

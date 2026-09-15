@@ -803,7 +803,58 @@ class ViduExistingJobRecoveryService:
         3. Object-version consistency: validates that object size and ETag have not mutated between HEAD and GET.
         4. Incremental 64KB hashing directly from network/storage stream.
         """
+        import queue
+        import threading
         import time
+
+        def _execute_with_transport_deadline(func, timeout_seconds: float, desc: str):
+            q = queue.Queue(maxsize=1)
+            def _worker():
+                try:
+                    q.put((True, func()))
+                except Exception as e:
+                    q.put((False, e))
+            w = threading.Thread(target=_worker, daemon=True)
+            w.start()
+            try:
+                success, val = q.get(timeout=timeout_seconds)
+                if not success:
+                    raise val
+                return val
+            except queue.Empty:
+                raise ViduRecoveryError(f"{desc} timed out after {timeout_seconds}s (transport deadline enforced)")
+
+        def _read_chunk_cancellable(body_stream, chunk_sz: int, timeout_sec: float) -> bytes:
+            if hasattr(body_stream, "_raw_stream") and hasattr(body_stream._raw_stream, "sock") and body_stream._raw_stream.sock:
+                try:
+                    body_stream._raw_stream.sock.settimeout(timeout_sec)
+                except Exception:
+                    pass
+
+            cq = queue.Queue(maxsize=1)
+            def _cworker():
+                try:
+                    data = body_stream.read(chunk_sz)
+                    cq.put((True, data))
+                except Exception as ex:
+                    cq.put((False, ex))
+
+            cw = threading.Thread(target=_cworker, daemon=True)
+            cw.start()
+            try:
+                csuccess, cval = cq.get(timeout=timeout_sec)
+                if not csuccess:
+                    raise cval
+                return cval
+            except queue.Empty:
+                if hasattr(body_stream, "close"):
+                    try:
+                        body_stream.close()
+                    except Exception:
+                        pass
+                raise ViduRecoveryError(
+                    f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
+                )
 
         # 1. Pre-transfer metadata check (fail-closed on any error)
         head_len = None
@@ -811,10 +862,16 @@ class ViduExistingJobRecoveryService:
 
         if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
             try:
-                head = storage.client.head_object(Bucket=bucket, Key=key)
+                head = _execute_with_transport_deadline(
+                    lambda: storage.client.head_object(Bucket=bucket, Key=key),
+                    timeout_seconds=5.0,
+                    desc=f"Storage metadata access for '{bucket}/{key}'",
+                )
                 head_len = head.get("ContentLength")
                 head_etag = head.get("ETag")
             except Exception as h_err:
+                if isinstance(h_err, ViduRecoveryError):
+                    raise
                 raise ViduRecoveryError(f"Storage metadata access failed for '{bucket}/{key}': {h_err}") from h_err
 
             if head_len is None:
@@ -844,8 +901,14 @@ class ViduExistingJobRecoveryService:
 
         if hasattr(storage, "client") and hasattr(storage.client, "get_object"):
             try:
-                response = storage.client.get_object(Bucket=bucket, Key=key)
+                response = _execute_with_transport_deadline(
+                    lambda: storage.client.get_object(Bucket=bucket, Key=key),
+                    timeout_seconds=10.0,
+                    desc=f"Initiating stream retrieval for '{bucket}/{key}'",
+                )
             except Exception as get_err:
+                if isinstance(get_err, ViduRecoveryError):
+                    raise
                 raise ViduRecoveryError(f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}") from get_err
 
             body = response.get("Body") if isinstance(response, dict) else getattr(response, "Body", None)
@@ -865,8 +928,6 @@ class ViduExistingJobRecoveryService:
                 if body is None:
                     raise ViduRecoveryError(f"Storage get_object response missing Body stream for '{bucket}/{key}'")
 
-                import concurrent.futures
-
                 chunk_size = 64 * 1024
                 deadline = start_time + max_duration_seconds
 
@@ -875,30 +936,18 @@ class ViduExistingJobRecoveryService:
                     if remaining_time <= 0:
                         raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
 
-                    # Enforce timeout using bounded executor primitive to interrupt blocking body.read()
                     chunk_timeout = min(remaining_time, 10.0)
-                    chunk = None
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(body.read, chunk_size)
-                        try:
-                            chunk = future.result(timeout=chunk_timeout)
-                        except concurrent.futures.TimeoutError as te:
-                            if hasattr(body, "close"):
-                                try:
-                                    body.close()
-                                except Exception:
-                                    pass
-                            executor.shutdown(wait=False, cancel_futures=True)
-                            raise ViduRecoveryError(
-                                f"Storage stream read blocked and timed out after {chunk_timeout}s"
-                            ) from te
-                        except Exception as read_err:
-                            if hasattr(body, "close"):
-                                try:
-                                    body.close()
-                                except Exception:
-                                    pass
-                            raise ViduRecoveryError(f"Storage stream read failure: {read_err}") from read_err
+                    try:
+                        chunk = _read_chunk_cancellable(body, chunk_size, chunk_timeout)
+                    except Exception as read_err:
+                        if hasattr(body, "close"):
+                            try:
+                                body.close()
+                            except Exception:
+                                pass
+                        if isinstance(read_err, ViduRecoveryError):
+                            raise
+                        raise ViduRecoveryError(f"Storage stream read failure: {read_err}") from read_err
 
                     # Verify deadline again after read completes (prevents slow EOF / blocking read overrun)
                     if time.monotonic() > deadline:
@@ -914,7 +963,7 @@ class ViduExistingJobRecoveryService:
                         )
                     hasher.update(chunk)
             finally:
-                if body is not None:
+                if hasattr(body, "close"):
                     try:
                         body.close()
                     except Exception:

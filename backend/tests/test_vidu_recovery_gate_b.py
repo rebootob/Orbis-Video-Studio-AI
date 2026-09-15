@@ -40,6 +40,7 @@ from app.services.recovery_auth import (
     AuthSameJobConcurrentError,
     AuthScopeMismatchError,
     AuthSignatureVerificationError,
+    AuthoritativeExternalExecutionRegister,
     CanonicalAuthPayload,
     RecoveryAuthError,
     RecoveryAuthService,
@@ -69,10 +70,12 @@ def setup_auth_env(monkeypatch, tmp_path):
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
     monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
     monkeypatch.setenv("VIDU_RECOVERY_GET_ENABLED", "true")
-    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
     monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-0")
-    reg_file = str(tmp_path / "test_execution_register.json")
+    monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "true")
+    reg_file = str(tmp_path / "trusted_external_register.json")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", reg_file)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
 
 
 @pytest.fixture
@@ -100,7 +103,7 @@ def auth_keys():
     return seed, pk
 
 
-def make_valid_auth(seed, commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7", nonce=None):
+def make_valid_auth(seed, commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7", nonce=None, restore_epoch="epoch-0"):
     now = datetime.now(timezone.utc)
     payload = CanonicalAuthPayload(
         authorized_commit_sha=commit_sha,
@@ -111,6 +114,7 @@ def make_valid_auth(seed, commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7",
         issued_at=now - timedelta(minutes=5),
         expires_at=now + timedelta(minutes=55),
         auth_nonce=nonce or str(uuid.uuid4()),
+        restore_epoch=restore_epoch,
     )
     sig = ed25519_sign(payload.to_canonical_json(), seed)
     return payload, sig
@@ -1015,6 +1019,7 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
         issued_at=payload.issued_at,
         expires_at=payload.expires_at,
         auth_nonce=str(uuid.uuid4()),
+        restore_epoch="epoch-0",
     )
     from tests.ed25519_test_signer import ed25519_sign
     invalid_sig = ed25519_sign(invalid_anchor_payload.to_canonical_json(), seed)
@@ -1091,6 +1096,7 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
         issued_at=payload.issued_at,
         expires_at=payload.expires_at,
         auth_nonce=str(uuid.uuid4()),
+        restore_epoch="epoch-0",
     )
     unauthorized_sig = ed25519_sign(unauthorized_payload.to_canonical_json(), seed)
     with pytest.raises(AuthRuntimeMismatchError, match="Unknown or unauthorized runtime target profile"):
@@ -1302,7 +1308,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     payload_c, sig_c = make_valid_auth(seed, nonce="nonce-subcase-c")
     blocked_adapter = MockProviderAdapter()
 
-    with pytest.raises(AuthRevokedError, match="Authoritative external execution register is missing"):
+    with pytest.raises(AuthRevokedError, match="authoritative external execution register is missing"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=payload_c,
@@ -1331,11 +1337,12 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
         issued_at=now - timedelta(minutes=5),
         expires_at=now + timedelta(minutes=55),
         auth_nonce=str(uuid.uuid4()),
+        restore_epoch="epoch-0",
     )
     epoch0_sig = ed25519_sign(epoch0_payload.to_canonical_json(), seed)
 
     epoch_blocked_adapter = MockProviderAdapter()
-    with pytest.raises(AuthScopeMismatchError, match="Authorization token is bound to stale restore epoch"):
+    with pytest.raises(AuthScopeMismatchError, match="Restore epoch mismatch"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=epoch0_payload,
@@ -1608,15 +1615,17 @@ def test_scenario_34_phase1_failure_strictly_zero_db_io(test_db, mock_storage, a
 
 
 # ==============================================================================
-# Scenario 35: SDK Stream Timeout, Blocked Read Interruption, and Transfer Bounds
+# Scenario 35: Genuinely Bounded Storage Transfer & Non-Returning Read Cancellation
 # ==============================================================================
-def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds(monkeypatch):
+def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
     """Streaming transfer exceeding deadline or suffering slow EOF/blocked read must be interrupted and Body closed."""
+    import threading
     import time
     from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 
-    # Subcase A: Blocked body.read() is interrupted by transfer deadline primitive
-    class BlockedBodyStreamClient:
+    # Subcase A: Indefinitely non-returning body.read() interrupted without hanging the suite
+    hang_event = threading.Event()
+    class NonReturningBodyStreamClient:
         def __init__(self):
             self.body_closed = False
 
@@ -1625,32 +1634,35 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds(monkeypatch):
 
         def get_object(self, Bucket, Key):
             client_self = self
-            class BlockedBody:
+            class NonReturningBody:
                 def read(self, amt=64*1024):
-                    # Simulate indefinitely blocked socket read
-                    time.sleep(2.0)
-                    return b"data"
+                    # Blocks indefinitely until hang_event is set
+                    hang_event.wait()
+                    return b""
                 def close(self):
                     client_self.body_closed = True
 
-            return {"Body": BlockedBody(), "ContentLength": 1000, "ETag": '"etag-blocked"'}
+            return {"Body": NonReturningBody(), "ContentLength": 1000, "ETag": '"etag-blocked"'}
 
-    class MockBlockedStorageWrapper:
+    class MockNonReturningStorageWrapper:
         def __init__(self):
-            self.client = BlockedBodyStreamClient()
+            self.client = NonReturningBodyStreamClient()
 
-    blocked_wrapper = MockBlockedStorageWrapper()
-    # Deadline 0.05s interrupts blocked body.read()
-    with pytest.raises(ViduRecoveryError, match="Storage stream read blocked and timed out"):
+    non_returning_wrapper = MockNonReturningStorageWrapper()
+    t_start = time.monotonic()
+    with pytest.raises(ViduRecoveryError, match="transport deadline enforced"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=blocked_wrapper,
+            storage=non_returning_wrapper,
             bucket="orbis-media-assets",
             key="assets/blocked.mp4",
             expected_size=1000,
             expected_sha256="any-hash",
-            max_duration_seconds=0.05,
+            max_duration_seconds=0.1,
         )
-    assert blocked_wrapper.client.body_closed is True
+    elapsed = time.monotonic() - t_start
+    hang_event.set()  # Clean up background thread
+    assert elapsed < 0.6  # Strictly proves bounded completion without waiting for read
+    assert non_returning_wrapper.client.body_closed is True
 
     # Subcase B: Slow EOF transfer bounds
     class SlowBodyStreamClient:
@@ -1739,6 +1751,29 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds(monkeypatch):
             expected_sha256="any-hash",
         )
     assert read_timeout_wrapper.client.body_closed is True
+
+    # Subcase E: Hung head_object call bounded by transport deadline
+    head_hang = threading.Event()
+    class HungHeadClient:
+        def head_object(self, Bucket, Key):
+            head_hang.wait()
+            return {"ContentLength": 1000, "ETag": '"etag-hung"'}
+
+    class MockHungHeadWrapper:
+        def __init__(self):
+            self.client = HungHeadClient()
+
+    t_head = time.monotonic()
+    with pytest.raises(ViduRecoveryError, match="Storage metadata access.*timed out"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=MockHungHeadWrapper(),
+            bucket="orbis-media-assets",
+            key="assets/hung_head.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+        )
+    head_hang.set()
+    assert time.monotonic() - t_head < 6.0
 
 
 # ==============================================================================
@@ -1884,3 +1919,179 @@ def test_scenario_38_readback_terminal_transition_commit_failure_audited(test_db
     assert audit is not None
     assert audit.error_class == "RuntimeError"
     assert "Injected readback terminal commit failure" in audit.error_message
+
+
+# ==============================================================================
+# Scenario 39: Mandatory Signed Restore Epoch & Independent Freshness Attestation
+# ==============================================================================
+def test_scenario_39_mandatory_signed_restore_epoch_and_freshness(auth_keys, monkeypatch):
+    """Restore epoch must be an explicit required signed field, independently sourced, and fail-closed if missing/stale/unattested."""
+    seed, pk = auth_keys
+
+    # Subcase A: Missing CURRENT_RESTORE_EPOCH fails closed
+    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "")
+    monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "true")
+    with pytest.raises(AuthRevokedError, match="Current runtime restore epoch is missing"):
+        RecoveryAuthService.get_current_runtime_restore_epoch()
+
+    # Subcase B: Unattested RESTORE_EPOCH_ATTESTED fails closed
+    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-1")
+    monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "false")
+    with pytest.raises(AuthRevokedError, match="lacks mandatory freshness attestation"):
+        RecoveryAuthService.get_current_runtime_restore_epoch()
+
+    # Subcase C: Token with stale restore_epoch fails closed
+    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-2")
+    monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "true")
+    stale_payload, stale_sig = make_valid_auth(seed, restore_epoch="epoch-1")
+    with pytest.raises(AuthScopeMismatchError, match="Restore epoch mismatch"):
+        RecoveryAuthService.verify_phase_1_in_memory(
+            payload=stale_payload,
+            signature_bytes=stale_sig,
+            public_key_bytes=pk,
+            expected_commit_sha=stale_payload.authorized_commit_sha,
+        )
+
+    # Subcase D: Valid current matching restore_epoch succeeds Phase 1
+    valid_payload, valid_sig = make_valid_auth(seed, restore_epoch="epoch-2")
+    RecoveryAuthService.verify_phase_1_in_memory(
+        payload=valid_payload,
+        signature_bytes=valid_sig,
+        public_key_bytes=pk,
+        expected_commit_sha=valid_payload.authorized_commit_sha,
+    )
+
+
+# ==============================================================================
+# Scenario 40: External Register Atomic Claim, Concurrency & Topology Validation
+# ==============================================================================
+def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monkeypatch):
+    """External register requires mandatory writable path, topology validation, atomic claims, and crash safety."""
+    # Subcase A: Empty environment / no writable register fails closed
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", "")
+    with pytest.raises(AuthRevokedError, match="Mandatory authoritative external execution register is missing"):
+        AuthoritativeExternalExecutionRegister.check_and_assert_freshness("job-1", "nonce-1")
+
+    # Subcase B: Untrusted topology (inside SQLite DB directory)
+    db_file = str(tmp_path / "app.db")
+    colliding_reg = str(tmp_path / "app.db.register.json")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", colliding_reg)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
+    with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside DB directory"):
+        AuthoritativeExternalExecutionRegister.validate_register_topology(colliding_reg, db_identity=f"sqlite:///{db_file}")
+
+    # Subcase C: Untrusted topology (inside storage bucket path)
+    bucket_colliding_reg = str(tmp_path / "storage" / "bucket" / "register.json")
+    with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage bucket directory"):
+        AuthoritativeExternalExecutionRegister.validate_register_topology(bucket_colliding_reg)
+
+    # Subcase D: Unattested topology fails closed
+    valid_reg = str(tmp_path / "trusted_external_ledger.json")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", valid_reg)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "false")
+    with pytest.raises(AuthRevokedError, match="lacks mandatory topology/freshness attestation"):
+        AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg)
+
+    # Subcase E: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
+    import threading
+    results = []
+
+    def claim_task():
+        try:
+            AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
+                provider_job_id="concurrent-job-1",
+                auth_nonce="concurrent-nonce-1",
+                execution_id="exec-1",
+            )
+            results.append("SUCCESS")
+        except AuthReplayError:
+            results.append("REPLAY_BLOCKED")
+        except Exception as e:
+            results.append(f"ERROR: {e}")
+
+    t1 = threading.Thread(target=claim_task)
+    t2 = threading.Thread(target=claim_task)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert sorted(results) == ["REPLAY_BLOCKED", "SUCCESS"]
+
+    # Subcase F: Write/flush failure during atomic claim raises RecoveryAuthError
+    orig_write = AuthoritativeExternalExecutionRegister._write_atomic_and_release
+
+    def failing_write(*args, **kwargs):
+        raise OSError("Injected disk sync/fsync failure")
+
+    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_write_atomic_and_release", failing_write)
+    with pytest.raises(OSError, match="Injected disk sync/fsync failure"):
+        AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
+            provider_job_id="crash-job-1",
+            auth_nonce="crash-nonce-1",
+            execution_id="exec-crash",
+        )
+
+
+# ==============================================================================
+# Scenario 41: External Dispatch Registration Failure Audited Truthfully
+# ==============================================================================
+def test_scenario_41_external_dispatch_registration_failure_audited(test_db, mock_storage, auth_keys, monkeypatch):
+    """When AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch fails, failure audit is recorded and provider GET is never called."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    # Inject failure into AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch
+    def failing_dispatch(*args, **kwargs):
+        raise RecoveryAuthError("Injected external ledger claim lock failure")
+
+    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "claim_pre_get_dispatch", failing_dispatch)
+
+    mock_provider = MockProviderAdapter()
+    with pytest.raises(RecoveryAuthError, match="Injected external ledger claim lock failure"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+
+    # Invariant check: zero provider GET calls
+    assert mock_provider.get_calls_attempted == 0
+
+    # Verify fence transitioned to CONSUMED_TERMINAL_FAILURE
+    fence = test_db.query(ProviderExecutionFence).filter_by(provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID).first()
+    assert fence is not None
+    assert fence.status == "CONSUMED_TERMINAL_FAILURE"
+
+    # Verify audit is recorded with failure_stage="EXTERNAL_DISPATCH_REGISTRATION"
+    audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="EXTERNAL_DISPATCH_REGISTRATION").first()
+    assert audit is not None
+    assert audit.error_class == "RecoveryAuthError"
+    assert "Injected external ledger claim lock failure" in audit.error_message
+    assert audit.db_transaction_state == "COMMITTED_TERMINAL"
+
+    # Subcase B: Audit write failure during external dispatch registration failure must propagate fail-closed
+    def failing_record_audit(*args, **kwargs):
+        raise AuditWriteFailureError("Injected DB audit table disk full failure")
+
+    monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", failing_record_audit)
+    with pytest.raises(AuditWriteFailureError, match="Injected DB audit table disk full failure"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )

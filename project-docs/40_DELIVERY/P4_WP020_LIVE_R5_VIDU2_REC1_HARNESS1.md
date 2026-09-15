@@ -7,7 +7,7 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (ADDRESSING REVIEWS 5197304334, 5197787810, 5197967171, 5198347460, & 5204067383: CHANGES REQUIRED -> R5 RESOLVED)**
+- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (ADDRESSING REVIEWS 5197304334, 5197787810, 5197967171, 5198347460, 5204067383 & 5204217914: CHANGES REQUIRED -> R5 RESOLVED)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -121,21 +121,24 @@ Release = NOT DECLARED
 | 32 | Streaming Oversize Transfer Abort | **VERIFIED (PASSED)** | Response stream exceeding byte budget aborts transfer during streaming and raises `ViduRecoveryError`. |
 | 33 | Audit Write Failure Fail-Closed Stop | **VERIFIED (PASSED)** | Failure during autonomous audit persistence propagates `AuditWriteFailureError` fail-closed across DB stages (Phase 2, Get In Flight, Materialization, Readback). |
 | 34 | Gate A Pre-DB Isolation Invariant | **VERIFIED (PASSED)** | Invalid Phase 1 authorization input fails closed with zero DB connections or queries opened. |
-| 35 | SDK Stream Timeout & Blocked Read Interruption | **VERIFIED (PASSED)** | Storage stream transfer exceeding deadline, slow EOF, connect timeout, read timeout, or blocked body.read is interrupted by transfer primitive and response Body is closed. |
+| 35 | SDK Stream Timeout & Blocked Read Interruption | **VERIFIED (PASSED)** | Storage stream transfer exceeding deadline, slow EOF, connect timeout, read timeout, or non-returning body.read is interrupted by transport-level primitive within <= 0.6s and response Body is closed. |
 | 36 | Pre-GET Fence Rollback Failure Truthful Audit | **VERIFIED (PASSED)** | Rollback failure during pre-GET fence transition is truthfully recorded in audit as `db_transaction_state="ROLLBACK_FAILED"`. |
 | 37 | Recovery Terminal Transition Commit Failure Audit | **VERIFIED (PASSED)** | Commit failure when transitioning fence to terminal state after recovery failure is recorded in `FENCE_TRANSITION_TERMINAL` audit and propagated fail-closed without masking primary error. |
 | 38 | Readback Terminal Transition Commit Failure Audit | **VERIFIED (PASSED)** | Commit failure when transitioning fence to terminal state after readback failure is recorded in `FENCE_TRANSITION_TERMINAL_READBACK` audit and propagated fail-closed. |
+| 39 | Mandatory Signed Restore Epoch & Independent Freshness | **VERIFIED (PASSED)** | `restore_epoch` is an explicit REQUIRED field in `CanonicalAuthPayload` and signed canonical JSON; sourced independently via `get_current_runtime_restore_epoch()`; missing/stale/unattested epoch fails closed. |
+| 40 | External Register Atomic Claim, Concurrency & Topology | **VERIFIED (PASSED)** | Mandatory writable register; topology validation rejects paths inside DB or storage; atomic lock (`O_CREAT | O_EXCL`) + `os.fsync` + `os.replace`; concurrent claims permit exactly 1 winner with second blocked (`AuthReplayError`); crash/write failure halts before provider GET. |
+| 41 | External Dispatch Registration Failure Audited Truthfully | **VERIFIED (PASSED)** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; audit write failure propagates `AuditWriteFailureError` fail-closed. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `41 passed in 4.46s` (covering all 38 scenarios including restore-safe anti-replay across successful/failed/crashed GETs, SDK timeouts, blocked read interruptions, truthful failure audits, and pre-DB invariants)
+  - `44 passed in 7.97s` (covering all 41 scenarios including restore-safe anti-replay across successful/failed/crashed GETs, transport-level bounded cancellation, atomic external claims, truthful failure audits, and pre-DB invariants)
 - **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `79 passed in 24.86s`
+  - `82 passed in 28.46s`
 - **Frontend Test Suite (`frontend`)**:
-  - `52 passed in 4.76s`
+  - `52 passed in 6.39s`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`

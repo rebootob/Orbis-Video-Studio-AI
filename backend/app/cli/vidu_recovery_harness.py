@@ -190,11 +190,38 @@ def execute_recovery_harness(
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
 
     # Write authoritative external pre-GET dispatch fence to storage and external register BEFORE issuing any provider GET
-    AuthoritativeExternalExecutionRegister.record_dispatch(
-        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-        auth_nonce=auth_payload.auth_nonce,
-        execution_id=exec_id,
-    )
+    try:
+        AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            auth_nonce=auth_payload.auth_nonce,
+            execution_id=exec_id,
+        )
+    except Exception as ext_err:
+        sanitized_ext_err = sanitize_error_message(str(ext_err))
+        ext_rb_state = "UNKNOWN"
+        try:
+            fence.status = "CONSUMED_TERMINAL_FAILURE"
+            fence.updated_at = utc_now()
+            db.commit()
+            ext_rb_state = "COMMITTED_TERMINAL"
+        except Exception:
+            try:
+                db.rollback()
+                ext_rb_state = "ROLLED_BACK"
+            except Exception:
+                ext_rb_state = "ROLLBACK_FAILED"
+
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="EXTERNAL_DISPATCH_REGISTRATION",
+            error_class=ext_err.__class__.__name__,
+            error_message=sanitized_ext_err,
+            db_transaction_state=ext_rb_state,
+            compensation_status="NOT_APPLICABLE",
+            fence_id=fence.fence_id if fence else None,
+        )
+        raise
 
     pre_get_marker_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
     marker_data = json.dumps({
