@@ -56,6 +56,16 @@ AUTHORIZED_RUNTIME_TARGET_PROFILES = {
             "s3://minio:9000/orbis-media-assets",
             "s3://minio:9000/orbis-assets",
         ],
+        "require_distinct_mount": True,
+        "require_directory_fsync": True,
+        "trusted_register_paths": [
+            "/var/run/orbis/external_execution_register.json",
+            "/opt/orbis/register/authoritative_register.json",
+        ],
+        "trusted_register_dirs": [
+            "/var/run/orbis",
+            "/opt/orbis/register",
+        ],
     },
     "PRODUCTION": {
         "trusted_db_identities": [
@@ -64,8 +74,51 @@ AUTHORIZED_RUNTIME_TARGET_PROFILES = {
         "trusted_storage_identities": [
             "s3://https://s3.ap-southeast-1.amazonaws.com/orbis-media-assets-prod",
         ],
+        "require_distinct_mount": True,
+        "require_directory_fsync": True,
+        "trusted_register_paths": [
+            "/var/run/orbis/external_execution_register.json",
+            "/opt/orbis/register/authoritative_register.json",
+        ],
+        "trusted_register_dirs": [
+            "/var/run/orbis",
+            "/opt/orbis/register",
+        ],
     },
 }
+
+
+def resolve_canonical_storage_restore_roots(
+    storage_provider: Optional[any] = None,
+    storage_identity: str = "",
+) -> list[str]:
+    """Derive actual local filesystem restore roots from storage provider and storage identity."""
+    roots = []
+    if storage_provider is not None:
+        for attr in ("restore_root", "storage_dir", "base_dir", "root_dir", "bucket_dir", "local_dir", "_base_path"):
+            val = getattr(storage_provider, attr, None)
+            if val and isinstance(val, (str, bytes, os.PathLike)):
+                roots.append(os.path.realpath(os.path.abspath(str(val))))
+
+    from app.core.config import settings
+    env_root = os.environ.get("STORAGE_RESTORE_ROOT") or getattr(settings, "LOCAL_STORAGE_DIR", None) or os.environ.get("LOCAL_STORAGE_DIR")
+    if env_root:
+        roots.append(os.path.realpath(os.path.abspath(str(env_root))))
+    s_bucket_dir = os.environ.get("STORAGE_BUCKET_DIR") or os.environ.get("OBJECT_STORAGE_BUCKET_DIR")
+    if s_bucket_dir:
+        roots.append(os.path.realpath(os.path.abspath(str(s_bucket_dir))))
+
+    if storage_identity:
+        clean_s = storage_identity.strip()
+        if clean_s.startswith("file://"):
+            clean_s = clean_s[7:]
+        if os.path.isabs(clean_s) or os.path.exists(clean_s):
+            roots.append(os.path.realpath(os.path.abspath(clean_s)))
+        if "://" in clean_s:
+            path_part = clean_s.split("://", 1)[1]
+            if os.path.isabs(path_part) or os.path.exists(path_part):
+                roots.append(os.path.realpath(os.path.abspath(path_part)))
+    return list(dict.fromkeys(roots))
 
 
 def resolve_canonical_resource_identities(
@@ -230,14 +283,28 @@ class AuthoritativeExternalExecutionRegister:
         return reg_path
 
     @classmethod
-    def is_directory_fsync_supported(cls, reg_dir: str) -> bool:
-        """Determine platform/filesystem directory fsync capability before authorization."""
+    def is_directory_fsync_required(cls, reg_dir: str, runtime_target: str = "UAT-COMPOSE-PERSISTENT") -> bool:
+        """Determine platform/filesystem directory fsync capability, failing closed on downgrade."""
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(runtime_target, {})
+        profile_requires_fsync = profile.get("require_directory_fsync", False)
         env_override = os.environ.get("DIRECTORY_FSYNC_SUPPORTED")
-        if env_override is not None:
-            return env_override.strip().lower() in ("true", "1", "yes")
+
+        # Policy downgrade rejection
+        if (profile_requires_fsync or os.name == "posix") and env_override is not None and env_override.strip().lower() in ("false", "0", "no"):
+            raise RecoveryAuthError(
+                f"Durability policy violation: directory fsync requirement cannot be downgraded for '{runtime_target}' (fail-closed)"
+            )
+
+        if env_override is not None and env_override.strip().lower() in ("true", "1", "yes"):
+            return True
         if os.name == "posix":
             return True
-        return os.environ.get("DIRECTORY_FSYNC_REQUIRED", "").strip().lower() in ("true", "1")
+        return False
+
+    @classmethod
+    def is_directory_fsync_supported(cls, reg_dir: str) -> bool:
+        """Backwards-compatible alias to is_directory_fsync_required."""
+        return cls.is_directory_fsync_required(reg_dir)
 
     @classmethod
     def validate_register_topology(
@@ -246,6 +313,7 @@ class AuthoritativeExternalExecutionRegister:
         db_identity: str = "",
         storage_identity: str = "",
         storage_provider: typing.Any = None,
+        runtime_target: str = "UAT-COMPOSE-PERSISTENT",
     ) -> None:
         """Validate that register topology is trusted and decoupled from DB and Storage without heuristic proofs."""
         topology_attested = os.environ.get("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "").strip().lower() == "true"
@@ -258,18 +326,30 @@ class AuthoritativeExternalExecutionRegister:
 
         norm_path = os.path.realpath(os.path.abspath(reg_path))
 
-        # 1. Allowed external register binding (mandatory trusted binding)
+        # 1. Exact authoritative register and directory binding
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(runtime_target, {})
+        trusted_exact_path = os.environ.get("TRUSTED_EXTERNAL_REGISTER_PATH", "").strip()
         trusted_dir = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
-        if not trusted_dir:
+
+        if not trusted_exact_path and not trusted_dir:
             raise AuthRevokedError(
-                "Mandatory trusted external register directory binding is missing "
-                "(TRUSTED_EXTERNAL_REGISTER_DIR must be set, fail-closed)"
+                "Mandatory trusted external register configuration is missing "
+                "(TRUSTED_EXTERNAL_REGISTER_PATH or TRUSTED_EXTERNAL_REGISTER_DIR must be set, fail-closed)"
             )
-        norm_allowed = os.path.realpath(os.path.abspath(trusted_dir))
-        if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
-            raise AuthRuntimeMismatchError(
-                f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
-            )
+
+        if trusted_exact_path:
+            norm_trusted_exact = os.path.realpath(os.path.abspath(trusted_exact_path))
+            if norm_path != norm_trusted_exact:
+                raise AuthRuntimeMismatchError(
+                    f"External execution register path '{norm_path}' does not match trusted exact register path '{norm_trusted_exact}'"
+                )
+
+        if trusted_dir:
+            norm_allowed = os.path.realpath(os.path.abspath(trusted_dir))
+            if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
+                raise AuthRuntimeMismatchError(
+                    f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
+                )
 
         # 2. Real path / mount decoupling from DB restore set
         db_dir = None
@@ -287,35 +367,8 @@ class AuthoritativeExternalExecutionRegister:
                         f"External execution register path '{norm_path}' cannot reside inside DB directory/file '{db_dir}' (topology collision)"
                     )
 
-        # 3. Real path / mount decoupling from Storage restore set (derived directly from real identities)
-        storage_roots = []
-        if storage_identity:
-            clean_s = storage_identity.strip()
-            if clean_s.startswith("file://"):
-                clean_s = clean_s[7:]
-            if os.path.isabs(clean_s) or os.path.exists(clean_s):
-                storage_roots.append(os.path.realpath(os.path.abspath(clean_s)))
-            if "://" in clean_s:
-                path_part = clean_s.split("://", 1)[1]
-                if os.path.isabs(path_part) or os.path.exists(path_part):
-                    storage_roots.append(os.path.realpath(os.path.abspath(path_part)))
-
-        if storage_provider is not None:
-            for attr in ("base_dir", "root_dir", "_base_path", "storage_dir", "bucket_dir", "local_dir"):
-                val = getattr(storage_provider, attr, None)
-                if val and isinstance(val, (str, bytes, os.PathLike)):
-                    storage_roots.append(os.path.realpath(os.path.abspath(str(val))))
-
-        from app.core.config import settings
-        local_store_root = getattr(settings, "LOCAL_STORAGE_DIR", None) or os.environ.get("LOCAL_STORAGE_DIR", "")
-        if local_store_root:
-            storage_roots.append(os.path.realpath(os.path.abspath(local_store_root)))
-        storage_bucket_dir = os.environ.get("STORAGE_BUCKET_DIR", "")
-        if storage_bucket_dir:
-            storage_roots.append(os.path.realpath(os.path.abspath(storage_bucket_dir)))
-        storage_bucket_env = os.environ.get("OBJECT_STORAGE_BUCKET_DIR", "")
-        if storage_bucket_env:
-            storage_roots.append(os.path.realpath(os.path.abspath(storage_bucket_env)))
+        # 3. Real path / mount decoupling from Storage restore set (derived directly from real provider and identity)
+        storage_roots = resolve_canonical_storage_restore_roots(storage_provider=storage_provider, storage_identity=storage_identity)
 
         for s_root in storage_roots:
             if s_root:
@@ -325,8 +378,16 @@ class AuthoritativeExternalExecutionRegister:
                         f"External execution register path '{norm_path}' cannot reside inside storage restore set directory '{s_real}' (topology collision)"
                     )
 
-        # 4. Strict mount / device decoupling if required
-        require_distinct_mount = os.environ.get("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT", "").strip().lower() == "true"
+        # 4. Strict mount / device decoupling and non-downgradeable policy
+        profile_requires_distinct_mount = profile.get("require_distinct_mount", False)
+        env_distinct_mount = os.environ.get("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT")
+
+        if profile_requires_distinct_mount and env_distinct_mount is not None and env_distinct_mount.strip().lower() in ("false", "0", "no"):
+            raise AuthRuntimeMismatchError(
+                f"Durability policy violation: distinct mount requirement cannot be downgraded for runtime target '{runtime_target}' (fail-closed)"
+            )
+
+        require_distinct_mount = profile_requires_distinct_mount or (env_distinct_mount and env_distinct_mount.strip().lower() in ("true", "1", "yes"))
         if require_distinct_mount:
             reg_check_path = norm_path if os.path.exists(norm_path) else os.path.dirname(norm_path)
             if os.path.exists(reg_check_path):
@@ -337,14 +398,14 @@ class AuthoritativeExternalExecutionRegister:
                         db_stat = os.stat(db_dir)
                         if getattr(db_stat, "st_dev", None) == reg_dev:
                             raise AuthRuntimeMismatchError(
-                                f"External execution register mount (dev={reg_dev}) collides with DB mount (dev={getattr(db_stat, 'st_dev', None)}); distinct mount required"
+                                f"External execution register mount (dev={reg_dev}) collides with DB mount (dev={getattr(db_stat, 'st_dev', None)}); distinct mount required (fail-closed)"
                             )
                     for s_root in storage_roots:
                         if s_root and os.path.exists(s_root):
                             s_stat = os.stat(s_root)
                             if getattr(s_stat, "st_dev", None) == reg_dev:
                                 raise AuthRuntimeMismatchError(
-                                    f"External execution register mount (dev={reg_dev}) collides with storage mount (dev={getattr(s_stat, 'st_dev', None)}); distinct mount required"
+                                    f"External execution register mount (dev={reg_dev}) collides with storage mount (dev={getattr(s_stat, 'st_dev', None)}); distinct mount required (fail-closed)"
                                 )
 
     @classmethod
@@ -391,7 +452,14 @@ class AuthoritativeExternalExecutionRegister:
             raise RecoveryAuthError(f"Failed to read external register at '{reg_path}': {sanitize_error_message(str(e))}") from e
 
     @classmethod
-    def _write_atomic_and_release(cls, reg_path: str, fd: int, lock_path: str, reg_data: dict) -> None:
+    def _write_atomic_and_release(
+        cls,
+        reg_path: str,
+        fd: int,
+        lock_path: str,
+        reg_data: dict,
+        runtime_target: str = "UAT-COMPOSE-PERSISTENT",
+    ) -> None:
         """Atomic write via temporary file, flush, fsync, os.replace, parent directory fsync, and release lock."""
         import time
         reg_dir = os.path.dirname(os.path.abspath(reg_path))
@@ -406,7 +474,7 @@ class AuthoritativeExternalExecutionRegister:
             os.replace(tmp_path, reg_path)
 
             # Directory durability acknowledgement: fsync parent directory on supported platforms (fail-closed)
-            if cls.is_directory_fsync_supported(reg_dir):
+            if cls.is_directory_fsync_required(reg_dir, runtime_target=runtime_target):
                 dir_fd = None
                 try:
                     open_flags = os.O_RDONLY
@@ -461,6 +529,8 @@ class AuthoritativeExternalExecutionRegister:
         auth_nonce: str,
         db_identity: str = "",
         storage_identity: str = "",
+        storage_provider: typing.Any = None,
+        runtime_target: str = "UAT-COMPOSE-PERSISTENT",
     ) -> None:
         """Verify external evidence outside DB and storage before any network I/O.
 
@@ -468,7 +538,13 @@ class AuthoritativeExternalExecutionRegister:
         Empty environment or read-only mode fails closed.
         """
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
+        cls.validate_register_topology(
+            reg_path,
+            db_identity=db_identity,
+            storage_identity=storage_identity,
+            storage_provider=storage_provider,
+            runtime_target=runtime_target,
+        )
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -503,10 +579,18 @@ class AuthoritativeExternalExecutionRegister:
         execution_id: str,
         db_identity: str = "",
         storage_identity: str = "",
+        storage_provider: typing.Any = None,
+        runtime_target: str = "UAT-COMPOSE-PERSISTENT",
     ) -> None:
         """Atomically claim pre-GET dispatch fence with durable fsync before provider GET."""
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
+        cls.validate_register_topology(
+            reg_path,
+            db_identity=db_identity,
+            storage_identity=storage_identity,
+            storage_provider=storage_provider,
+            runtime_target=runtime_target,
+        )
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -528,7 +612,7 @@ class AuthoritativeExternalExecutionRegister:
 
             dispatched_jobs.append(provider_job_id)
             dispatched_nonces.append(auth_nonce)
-            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data)
+            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data, runtime_target=runtime_target)
 
             # Durable acknowledgement read-back verification
             ack_data = cls._read_register_unlocked(reg_path)
@@ -560,10 +644,18 @@ class AuthoritativeExternalExecutionRegister:
         auth_nonce: str,
         db_identity: str = "",
         storage_identity: str = "",
+        storage_provider: typing.Any = None,
+        runtime_target: str = "UAT-COMPOSE-PERSISTENT",
     ) -> None:
         """Atomically record terminal consumption to external register."""
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
+        cls.validate_register_topology(
+            reg_path,
+            db_identity=db_identity,
+            storage_identity=storage_identity,
+            storage_provider=storage_provider,
+            runtime_target=runtime_target,
+        )
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -573,7 +665,7 @@ class AuthoritativeExternalExecutionRegister:
                 consumed_jobs.append(provider_job_id)
             if auth_nonce not in consumed_nonces:
                 consumed_nonces.append(auth_nonce)
-            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data)
+            cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data, runtime_target=runtime_target)
         except Exception:
             try:
                 os.close(fd)
@@ -831,6 +923,8 @@ class RecoveryAuthService:
             auth_nonce=payload.auth_nonce,
             db_identity=actual_db_id,
             storage_identity=actual_storage_id,
+            storage_provider=storage_provider,
+            runtime_target=payload.runtime_target,
         )
 
         if storage_provider is not None:

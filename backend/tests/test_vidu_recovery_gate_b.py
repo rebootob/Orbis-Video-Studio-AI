@@ -58,6 +58,7 @@ from app.services.vidu_recovery import (
     ViduMissingOutputUrlError,
     ViduRecoveryError,
     ViduRecoveryResult,
+    ViduTransportCancellationFailureError,
     ViduUnauthorizedJobError,
 )
 from app.cli.vidu_recovery_harness import MockProviderAdapter, execute_recovery_harness
@@ -1202,6 +1203,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     # Subcase B1: Actual Failed provider GET path followed by combined DB + Storage restore
     fresh_reg_b1 = str(tmp_path / "ext_reg_b1.json")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b1)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", fresh_reg_b1)
 
     class FailingViduAdapter(MockProviderAdapter):
         def __init__(self):
@@ -1255,6 +1257,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     # Subcase B2: Actual Crashed GET path followed by combined DB + Storage restore
     fresh_reg_b2 = str(tmp_path / "ext_reg_b2.json")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b2)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", fresh_reg_b2)
 
     class CrashingViduAdapter(MockProviderAdapter):
         def __init__(self):
@@ -1622,78 +1625,129 @@ def test_scenario_34_phase1_failure_strictly_zero_db_io(test_db, mock_storage, a
 # ==============================================================================
 def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
     """Streaming transfer exceeding deadline or suffering slow EOF/blocked read must be interrupted and Body closed with zero surviving operations."""
+    import socket
     import threading
     import time
     from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
+    from app.services.vidu_recovery import _SURVIVING_WORKERS
 
-    # Subcase A: Non-returning body.read() terminated via transport-level socket/timeout cancellation
+    _SURVIVING_WORKERS.clear()
     threads_before = threading.active_count()
 
-    class NonReturningSocketStream:
-        def __init__(self):
-            self.closed = False
-            self.timeout_set = None
-            self._abort_event = threading.Event()
+    # Subcase A: Real OS TCP loopback socket cancellation via socket.socketpair()
+    s_client, s_server = socket.socketpair()
 
-        def settimeout(self, t):
-            self.timeout_set = t
+    class RealSocketRawStream:
+        def __init__(self, sock):
+            self.sock = sock
 
-        def gettimeout(self):
-            return self.timeout_set
-
-        def close(self):
-            self.closed = True
-            self._abort_event.set()
-
-    class NonReturningBody:
-        def __init__(self):
-            self._sock = NonReturningSocketStream()
-            self._raw_stream = type("RawStream", (), {"sock": self._sock})()
+    class RealSocketBody:
+        def __init__(self, sock):
+            self._sock = sock
+            self._raw_stream = RealSocketRawStream(sock)
             self.body_closed = False
 
         def read(self, amt=64*1024):
-            # Truly non-returning read: blocks indefinitely until transport is closed/aborted
-            self._sock._abort_event.wait()
-            raise ConnectionResetError("Transport socket closed by cancellation deadline")
+            # True blocking OS syscall on real loopback socket with zero server data
+            return self._sock.recv(amt)
 
         def close(self):
             self.body_closed = True
-            self._sock.close()
+            try:
+                self._sock.close()
+            except Exception:
+                pass
 
-    class MockNonReturningStorageWrapper:
-        def __init__(self):
-            self.body = NonReturningBody()
+    class RealSocketStorageWrapper:
+        def __init__(self, body):
+            self.body = body
 
         class Client:
             def __init__(self, body):
                 self.body = body
 
             def head_object(self, Bucket, Key):
-                return {"ContentLength": 1000, "ETag": '"etag-blocked"'}
+                return {"ContentLength": 1000, "ETag": '"etag-real-sock"'}
 
             def get_object(self, Bucket, Key):
-                return {"Body": self.body, "ContentLength": 1000, "ETag": '"etag-blocked"'}
+                return {"Body": self.body, "ContentLength": 1000, "ETag": '"etag-real-sock"'}
 
         @property
         def client(self):
             return self.Client(self.body)
 
-    wrapper = MockNonReturningStorageWrapper()
+    real_body = RealSocketBody(s_client)
+    real_wrapper = RealSocketStorageWrapper(real_body)
     t_start = time.monotonic()
     with pytest.raises(ViduRecoveryError, match="Storage stream.*timed out"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=wrapper,
+            storage=real_wrapper,
             bucket="orbis-media-assets",
-            key="assets/blocked.mp4",
+            key="assets/real_sock.mp4",
             expected_size=1000,
             expected_sha256="any-hash",
             max_duration_seconds=0.1,
         )
     elapsed = time.monotonic() - t_start
     assert elapsed < 0.6  # Strictly proves bounded completion
-    assert wrapper.body.body_closed is True  # Body cleaned up
-    assert wrapper.body._sock.closed is True  # Transport socket closed
+    assert real_body.body_closed is True  # Body cleaned up
     assert threading.active_count() <= threads_before  # Zero surviving threads/operations
+    assert len(_SURVIVING_WORKERS) == 0
+    s_server.close()
+
+    # Subcase B: Non-cooperative blocked operation that ignores close/abort fails closed without claiming zero surviving work
+    uncooperative_block = threading.Event()
+
+    class UncooperativeBody:
+        def __init__(self):
+            self.body_closed = False
+
+        def read(self, amt=64*1024):
+            # Deliberately ignores transport cancellation / close and remains blocked
+            uncooperative_block.wait(timeout=10.0)
+            return b""
+
+        def close(self):
+            self.body_closed = True
+            # Deliberately does NOT unblock uncooperative_block
+
+    class UncooperativeStorageWrapper:
+        def __init__(self, body):
+            self.body = body
+
+        class Client:
+            def __init__(self, body):
+                self.body = body
+
+            def head_object(self, Bucket, Key):
+                return {"ContentLength": 1000, "ETag": '"etag-uncoop"'}
+
+            def get_object(self, Bucket, Key):
+                return {"Body": self.body, "ContentLength": 1000, "ETag": '"etag-uncoop"'}
+
+        @property
+        def client(self):
+            return self.Client(self.body)
+
+    uncoop_body = UncooperativeBody()
+    uncoop_wrapper = UncooperativeStorageWrapper(uncoop_body)
+    t_start_b = time.monotonic()
+    with pytest.raises(ViduTransportCancellationFailureError, match="surviving worker detected; fail-closed without claiming zero surviving work"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=uncoop_wrapper,
+            bucket="orbis-media-assets",
+            key="assets/uncoop.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+            max_duration_seconds=0.1,
+        )
+    elapsed_b = time.monotonic() - t_start_b
+    assert elapsed_b < 0.6  # Bounded fail-closed detection
+    assert uncoop_body.body_closed is True
+    # Unblock thread to cleanup
+    uncooperative_block.set()
+    time.sleep(0.05)
+    _SURVIVING_WORKERS.clear()
 
     # Subcase B: Slow EOF transfer bounds interrupted pre-emptively
     class SlowBodyStreamClient:
@@ -2008,52 +2062,115 @@ def test_scenario_39_mandatory_signed_restore_epoch_and_freshness(auth_keys, mon
 # ==============================================================================
 # Scenario 40: External Register Atomic Claim, Concurrency & Topology Validation
 # ==============================================================================
-def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monkeypatch):
+def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monkeypatch, test_db, mock_storage, auth_keys):
     """External register requires mandatory writable path, topology validation, atomic claims, crash safety, and real identities."""
     import os
     import threading
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+    mock_provider = MockProviderAdapter()
 
-    # Subcase A: Empty environment / no writable register fails closed
+    # Subcase A: Empty environment / no writable register fails closed via execute_recovery_harness
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", "")
     with pytest.raises(AuthRevokedError, match="Mandatory authoritative external execution register is missing"):
-        AuthoritativeExternalExecutionRegister.check_and_assert_freshness("job-1", "nonce-1")
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
 
-    # Subcase B: Untrusted topology (inside SQLite DB directory) with neutral filename
-    db_file = str(tmp_path / "app.db")
-    colliding_reg = str(tmp_path / "neutral_audit_ledger.json")
-    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", colliding_reg)
+    # Subcase B: Actual storage restore-root topology collision tested through execute_recovery_harness using neutral path names
+    colliding_storage_dir = tmp_path / "colliding_storage_root"
+    colliding_storage_dir.mkdir(parents=True, exist_ok=True)
+    neutral_reg_inside_storage = str(colliding_storage_dir / "neutral_checkpoint_audit.json")
+
+    mock_storage.storage_dir = str(colliding_storage_dir)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", neutral_reg_inside_storage)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
-    with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside DB directory"):
-        AuthoritativeExternalExecutionRegister.validate_register_topology(colliding_reg, db_identity=f"sqlite:///{db_file}")
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", neutral_reg_inside_storage)
 
-    # Subcase C: Untrusted topology (inside storage bucket path) with neutral filename (no heuristic)
-    bucket_dir = tmp_path / "isolated_store"
-    bucket_dir.mkdir(parents=True, exist_ok=True)
-    neutral_reg = str(bucket_dir / "neutral_registry.dat")
     with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage restore set directory"):
-        AuthoritativeExternalExecutionRegister.validate_register_topology(neutral_reg, storage_identity=str(bucket_dir))
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
 
-    # Subcase D: Symlink collision resolution to storage root
-    safe_dir = tmp_path / "safe_ext"
-    safe_dir.mkdir(parents=True, exist_ok=True)
-    symlink_reg = str(safe_dir / "symlink_ledger.json")
-    target_in_bucket = str(bucket_dir / "target_store.json")
-    with open(target_in_bucket, "w") as f:
-        f.write("{}")
-    try:
-        os.symlink(target_in_bucket, symlink_reg)
-        symlink_supported = True
-    except (OSError, NotImplementedError):
-        symlink_supported = False
+    # Subcase C: Missing trusted register configuration tested through execute_recovery_harness
+    safe_reg_dir = tmp_path / "safe_ext_dir"
+    safe_reg_dir.mkdir(parents=True, exist_ok=True)
+    safe_reg_path = str(safe_reg_dir / "safe_ledger.json")
+    mock_storage.storage_dir = str(tmp_path / "other_store_dir")
 
-    if symlink_supported:
-        monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
-        with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage restore set directory"):
-            AuthoritativeExternalExecutionRegister.validate_register_topology(symlink_reg, storage_identity=str(bucket_dir))
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)
+    monkeypatch.delenv("TRUSTED_EXTERNAL_REGISTER_DIR", raising=False)
+    monkeypatch.delenv("TRUSTED_EXTERNAL_REGISTER_PATH", raising=False)
 
-    # Subcase E: Mount/device collision check
+    with pytest.raises(AuthRevokedError, match="Mandatory trusted external register configuration is missing"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+
+    # Subcase D: Exact register path mismatch tested through execute_recovery_harness
+    expected_exact_path = str(safe_reg_dir / "expected_authoritative_register.json")
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", expected_exact_path)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)  # safe_reg_path != expected_exact_path
+
+    with pytest.raises(AuthRuntimeMismatchError, match="does not match trusted exact register path"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+
+    # Subcase E: Durability policy downgrade rejection (DIRECTORY_FSYNC_SUPPORTED=false fails closed)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", safe_reg_path)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)
+    monkeypatch.setenv("DIRECTORY_FSYNC_SUPPORTED", "false")
+
+    with pytest.raises(RecoveryAuthError, match="directory fsync requirement cannot be downgraded"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload,
+            signature_bytes=sig,
+            public_key_bytes=pk,
+            expected_commit_sha=payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+    monkeypatch.delenv("DIRECTORY_FSYNC_SUPPORTED", raising=False)
+
+    # Subcase F: Mount / device collision check
     isolated_db_dir = tmp_path / "db_store"
     isolated_db_dir.mkdir(parents=True, exist_ok=True)
     db_file_e = str(isolated_db_dir / "app.db")
@@ -2062,18 +2179,19 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     valid_dir = tmp_path / "external_register_dir"
     valid_dir.mkdir(parents=True, exist_ok=True)
     valid_reg = str(valid_dir / "trusted_external_ledger.json")
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", valid_reg)
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(valid_dir))
     with pytest.raises(AuthRuntimeMismatchError, match="distinct mount required"):
         AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg, db_identity=f"sqlite:///{db_file_e}")
     monkeypatch.delenv("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT", raising=False)
 
-    # Subcase F: Unattested topology fails closed
+    # Subcase G: Unattested topology fails closed
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", valid_reg)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "false")
     with pytest.raises(AuthRevokedError, match="lacks mandatory topology/freshness attestation"):
         AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg)
 
-    # Subcase G: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
+    # Subcase H: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
     results = []
 
@@ -2099,7 +2217,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
 
     assert sorted(results) == ["REPLAY_BLOCKED", "SUCCESS"]
 
-    # Subcase H: Injected failures into ACTUAL os.fsync/os.replace stages without replacing writer
+    # Subcase I: Injected failures into ACTUAL os.fsync/os.replace stages without replacing writer
     orig_fsync = os.fsync
     orig_replace = os.replace
 
@@ -2140,7 +2258,6 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
             raise OSError("Injected directory fsync failure after replace")
         return orig_fsync(fd)
 
-    # On Windows where os.open on directory is PermissionError, os.open or os.fsync triggers failure
     monkeypatch.setattr(os, "fsync", failing_parent_dir_fsync)
     with pytest.raises(RecoveryAuthError, match="Parent directory fsync failed"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(

@@ -52,6 +52,24 @@ class ViduRecoveryError(RuntimeError):
     pass
 
 
+class ViduTransportCancellationFailureError(ViduRecoveryError):
+    """Raised when transport-level cancellation fails to terminate the underlying worker operation."""
+    pass
+
+
+_SURVIVING_WORKERS = set()
+
+
+def get_surviving_workers() -> list:
+    """Return list of still-alive worker threads from un-terminated operations."""
+    return [w for w in _SURVIVING_WORKERS if w.is_alive()]
+
+
+def clear_surviving_workers() -> None:
+    """Clear registered surviving workers (for test isolation)."""
+    _SURVIVING_WORKERS.clear()
+
+
 class ViduUnauthorizedJobError(ViduRecoveryError):
     """Attempted to recover an unauthorized provider job ID."""
     pass
@@ -809,11 +827,6 @@ class ViduExistingJobRecoveryService:
 
         def _abort_stream(body_obj):
             """Abort underlying transport socket and close stream to cancel any in-flight read."""
-            if hasattr(body_obj, "close"):
-                try:
-                    body_obj.close()
-                except Exception:
-                    pass
             sock = None
             if hasattr(body_obj, "_raw_stream") and hasattr(body_obj._raw_stream, "sock"):
                 sock = body_obj._raw_stream.sock
@@ -823,7 +836,17 @@ class ViduExistingJobRecoveryService:
                 sock = body_obj.sock
             if sock is not None:
                 try:
+                    if hasattr(sock, "shutdown") and hasattr(socket, "SHUT_RDWR"):
+                        sock.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+                try:
                     sock.close()
+                except Exception:
+                    pass
+            if hasattr(body_obj, "close"):
+                try:
+                    body_obj.close()
                 except Exception:
                     pass
 
@@ -833,9 +856,17 @@ class ViduExistingJobRecoveryService:
             Guarantees:
             1. Execution is bounded by timeout_seconds.
             2. On timeout, triggers abort_action() to terminate the underlying transport socket/connection.
-            3. Joins the worker thread ensuring zero surviving background operations.
-            4. Fails closed with ViduRecoveryError.
+            3. Authoritatively confirms worker thread termination; if surviving workers exist or cannot be terminated,
+               fails closed without claiming zero surviving operations and halts to prevent unbounded daemon accumulation.
+            4. Fails closed with ViduRecoveryError or ViduTransportCancellationFailureError.
             """
+            surviving_active = [w for w in _SURVIVING_WORKERS if w.is_alive()]
+            if surviving_active:
+                raise ViduTransportCancellationFailureError(
+                    f"Transport execution rejected: {len(surviving_active)} un-terminated worker(s) still active; "
+                    "unbounded daemon accumulation prevented (fail-closed)"
+                )
+
             result = [None]
             exc = [None]
             done = threading.Event()
@@ -857,10 +888,17 @@ class ViduExistingJobRecoveryService:
                         abort_action()
                     except Exception:
                         pass
-                t.join(timeout=0.4)
+                t.join(timeout=0.3)
                 if t.is_alive():
-                    logger.error("Transport cancellation failed to terminate worker for %s", desc)
-                raise ViduRecoveryError(f"{desc} timed out after {timeout_seconds}s (transport deadline enforced)")
+                    _SURVIVING_WORKERS.add(t)
+                    logger.error("Transport cancellation failed to terminate worker for %s (surviving thread detected)", desc)
+                    raise ViduTransportCancellationFailureError(
+                        f"{desc} timed out after {timeout_seconds}s and transport cancellation could not verify worker termination "
+                        "(surviving worker detected; fail-closed without claiming zero surviving work)"
+                    )
+                raise ViduRecoveryError(
+                    f"{desc} timed out after {timeout_seconds}s (transport deadline enforced and underlying worker terminated)"
+                )
 
             if exc[0]:
                 raise exc[0]

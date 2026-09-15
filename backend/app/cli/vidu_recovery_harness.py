@@ -200,6 +200,8 @@ def execute_recovery_harness(
             execution_id=exec_id,
             db_identity=actual_db_id,
             storage_identity=actual_storage_id,
+            storage_provider=storage,
+            runtime_target=actual_runtime_target,
         )
     except Exception as ext_err:
         sanitized_ext_err = sanitize_error_message(str(ext_err))
@@ -466,6 +468,8 @@ def execute_recovery_harness(
             auth_nonce=auth_payload.auth_nonce,
             db_identity=actual_db_id,
             storage_identity=actual_storage_id,
+            storage_provider=storage,
+            runtime_target=actual_runtime_target,
         )
     except Exception as rec_cons_err:
         sanitized_rc_err = sanitize_error_message(str(rec_cons_err))
