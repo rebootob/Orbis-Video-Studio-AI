@@ -7,7 +7,7 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE APPLIED (ADDRESSING REVIEWS 5197304334, 5197787810, 5197967171, & 5198347460: CHANGES REQUIRED)**
+- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (ADDRESSING REVIEWS 5197304334, 5197787810, 5197967171, 5198347460, & 5204067383: CHANGES REQUIRED -> R5 RESOLVED)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -114,23 +114,30 @@ Release = NOT DECLARED
 | 25 | Isolated DB & S3 Backup/Restore Proof | **NOT PROVEN / DEFERRED TO GATE C** | Validated on isolated SQLite/mock storage. **Live cloud backup/restore verification is explicitly not proven in Gate B and deferred to Gate C**. |
 | 26 | Restored-Runtime Fail-Closed Fencing | **VERIFIED (PASSED)** | Restored DB without fence records fails closed when live provider flag is disabled (`VIDU_GENERATION_ENABLED=False`), anchor format is validated, or runtime target mismatches. |
 | 27 | Adversarial Changed Resource Profile | **VERIFIED (PASSED)** | Label matches `UAT-COMPOSE-PERSISTENT` but storage bucket, endpoint, or DB host/name points to unauthorized target: fails closed with `AuthRuntimeMismatchError`. |
-| 28 | Restored DB Lacking Both Rows Fencing | **VERIFIED (PASSED)** | Restored DB snapshot lacking both `ProviderExecutionFence` and `GenerationJob` detects out-of-band durable storage consumption marker (successful, failed, crashed) and raises `AuthReplayError` with ZERO second GET; missing marker access fails closed. |
+| 28 | Restored DB & Storage Anti-Replay | **VERIFIED (PASSED)** | Restored DB + Storage snapshot lacking rows and storage markers detects authoritative external execution register outside DB/storage restore set across successful, failed, and crashed GET paths; raises `AuthReplayError` with ZERO second GET. |
 | 29 | Revocation Freshness Attestation Gate | **VERIFIED (PASSED)** | Empty `OWNER_AUTH_REVOCATIONS` without `OWNER_AUTH_REVOCATIONS_ATTESTED="true"` fails closed with `AuthRevokedError`. |
 | 30 | Storage Metadata Failure Fail-Closed | **VERIFIED (PASSED)** | Failure during storage `head_object` raises `ViduRecoveryError` fail-closed immediately. |
 | 31 | Storage Object Mutated After HEAD | **VERIFIED (PASSED)** | Object size/ETag changed between initial HEAD and response stream raises `ViduRecoveryError` fail-closed. |
 | 32 | Streaming Oversize Transfer Abort | **VERIFIED (PASSED)** | Response stream exceeding byte budget aborts transfer during streaming and raises `ViduRecoveryError`. |
-| 33 | Audit Write Failure Fail-Closed Stop | **VERIFIED (PASSED)** | Failure during autonomous audit persistence propagates `AuditWriteFailureError` fail-closed across all stages. |
+| 33 | Audit Write Failure Fail-Closed Stop | **VERIFIED (PASSED)** | Failure during autonomous audit persistence propagates `AuditWriteFailureError` fail-closed across DB stages (Phase 2, Get In Flight, Materialization, Readback). |
 | 34 | Gate A Pre-DB Isolation Invariant | **VERIFIED (PASSED)** | Invalid Phase 1 authorization input fails closed with zero DB connections or queries opened. |
-| 35 | Streaming Delayed Read Timeout Abort | **VERIFIED (PASSED)** | Storage stream read delay exceeding maximum per-operation deadline aborts transfer fail-closed. |
+| 35 | SDK Stream Timeout & Blocked Read Interruption | **VERIFIED (PASSED)** | Storage stream transfer exceeding deadline, slow EOF, connect timeout, read timeout, or blocked body.read is interrupted by transfer primitive and response Body is closed. |
+| 36 | Pre-GET Fence Rollback Failure Truthful Audit | **VERIFIED (PASSED)** | Rollback failure during pre-GET fence transition is truthfully recorded in audit as `db_transaction_state="ROLLBACK_FAILED"`. |
+| 37 | Recovery Terminal Transition Commit Failure Audit | **VERIFIED (PASSED)** | Commit failure when transitioning fence to terminal state after recovery failure is recorded in `FENCE_TRANSITION_TERMINAL` audit and propagated fail-closed without masking primary error. |
+| 38 | Readback Terminal Transition Commit Failure Audit | **VERIFIED (PASSED)** | Commit failure when transitioning fence to terminal state after readback failure is recorded in `FENCE_TRANSITION_TERMINAL_READBACK` audit and propagated fail-closed. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `38 passed in 1.60s` (including RFC 8032 vectors, adversarial degenerate key tests, restored-DB zero-second-GET checks, streaming bounds, and pre-DB invariant)
+  - `41 passed in 4.46s` (covering all 38 scenarios including restore-safe anti-replay across successful/failed/crashed GETs, SDK timeouts, blocked read interruptions, truthful failure audits, and pre-DB invariants)
 - **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `76 passed in 21.85s`
+  - `79 passed in 24.86s`
+- **Frontend Test Suite (`frontend`)**:
+  - `52 passed in 4.76s`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`
+- **Latest Routed Continuation Checkpoint**:
+  - Recorded at `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`

@@ -26,11 +26,13 @@ from app.models.generation_job import GenerationJob
 from app.models.recovery_fence import ProviderExecutionFence
 from app.providers.base import IVideoGenerationProviderAdapter, ProviderJobResult
 from app.services.recovery_auth import (
+    AuthoritativeExternalExecutionRegister,
     CanonicalAuthPayload,
     RecoveryAuthError,
     RecoveryAuthService,
     TARGET_PROVIDER_JOB_ID,
     TARGET_TASK_ID,
+    sanitize_error_message,
 )
 from app.services.storage import ObjectStorageProvider, get_storage_provider
 from app.services.vidu_recovery import (
@@ -187,7 +189,13 @@ def execute_recovery_harness(
     asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
 
-    # Write authoritative external pre-GET dispatch fence to storage BEFORE issuing any provider GET
+    # Write authoritative external pre-GET dispatch fence to storage and external register BEFORE issuing any provider GET
+    AuthoritativeExternalExecutionRegister.record_dispatch(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        auth_nonce=auth_payload.auth_nonce,
+        execution_id=exec_id,
+    )
+
     pre_get_marker_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
     marker_data = json.dumps({
         "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
@@ -231,17 +239,20 @@ def execute_recovery_harness(
         db.commit()
         db.refresh(fence)
     except Exception as get_inflight_err:
+        db_state = "UNKNOWN"
         try:
             db.rollback()
+            db_state = "ROLLED_BACK"
         except Exception as rb_err:
             logger.warning("Rollback failed during pre-GET fence transition: %s", sanitize_error_message(str(rb_err)))
+            db_state = "ROLLBACK_FAILED"
         RecoveryAuthService.record_failure_audit(
             db=db,
             provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
             failure_stage="FENCE_TRANSITION_GET_IN_FLIGHT",
             error_class=get_inflight_err.__class__.__name__,
             error_message=str(get_inflight_err),
-            db_transaction_state="ROLLED_BACK",
+            db_transaction_state=db_state,
             compensation_status="NOT_APPLICABLE",
             fence_id=fence.fence_id if fence else None,
         )
@@ -298,13 +309,38 @@ def execute_recovery_harness(
                 fence_id=fence.fence_id if fence else None,
             )
             raise
-    except Exception:
+    except Exception as rec_err:
         fence.status = "CONSUMED_TERMINAL_FAILURE"
         fence.updated_at = utc_now()
+        term_commit_err = None
+        term_db_state = "UNKNOWN"
         try:
             db.commit()
-        except Exception:
-            db.rollback()
+            term_db_state = "COMMITTED_TERMINAL"
+        except Exception as c_err:
+            term_commit_err = c_err
+            try:
+                db.rollback()
+                term_db_state = "ROLLED_BACK"
+            except Exception:
+                term_db_state = "ROLLBACK_FAILED"
+
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="FENCE_TRANSITION_TERMINAL",
+                error_class=c_err.__class__.__name__,
+                error_message=str(c_err),
+                db_transaction_state=term_db_state,
+                compensation_status="RETAINED_OBJECT_UNSAFE_TO_DELETE",
+                fence_id=fence.fence_id if fence else None,
+            )
+
+        if term_commit_err is not None:
+            raise ViduRecoveryError(
+                f"Terminal fence commit failed after recovery failure ({sanitize_error_message(str(term_commit_err))}); "
+                f"primary error: {sanitize_error_message(str(rec_err))}"
+            ) from rec_err
         raise
 
     # 7. Post-Materialization Read-Back Verification (Entire block audited)
@@ -333,23 +369,51 @@ def execute_recovery_harness(
             )
     except Exception as readback_err:
         fence.status = "CONSUMED_TERMINAL_FAILURE"
+        rb_term_commit_err = None
+        rb_term_db_state = "UNKNOWN"
         try:
             db.commit()
-        except Exception:
-            db.rollback()
+            rb_term_db_state = "COMMITTED_TERMINAL"
+        except Exception as rb_c_err:
+            rb_term_commit_err = rb_c_err
+            try:
+                db.rollback()
+                rb_term_db_state = "ROLLED_BACK"
+            except Exception:
+                rb_term_db_state = "ROLLBACK_FAILED"
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="FENCE_TRANSITION_TERMINAL_READBACK",
+                error_class=rb_c_err.__class__.__name__,
+                error_message=str(rb_c_err),
+                db_transaction_state=rb_term_db_state,
+                compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
+                fence_id=fence.fence_id,
+            )
+
         RecoveryAuthService.record_failure_audit(
             db=db,
             provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
             failure_stage="POST_COMMIT_READBACK",
             error_class=readback_err.__class__.__name__,
             error_message=str(readback_err),
-            db_transaction_state="COMMITTED_PRIMARY_PRESERVED",
+            db_transaction_state=rb_term_db_state,
             compensation_status="RETAINED_OBJECT_PRIMARY_DATA_PRESERVED",
             fence_id=fence.fence_id,
         )
+        if rb_term_commit_err is not None:
+            raise ViduRecoveryError(
+                f"Terminal fence commit failed after readback error ({sanitize_error_message(str(rb_term_commit_err))}); "
+                f"primary error: {sanitize_error_message(str(readback_err))}"
+            ) from readback_err
         raise
 
     # 8. All verifications passed: persist out-of-band marker and CONSUMED_SUCCESS
+    AuthoritativeExternalExecutionRegister.record_consumed(
+        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+        auth_nonce=auth_payload.auth_nonce,
+    )
     try:
         marker_bytes = json.dumps({
             "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,

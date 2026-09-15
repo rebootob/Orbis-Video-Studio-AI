@@ -865,16 +865,40 @@ class ViduExistingJobRecoveryService:
                 if body is None:
                     raise ViduRecoveryError(f"Storage get_object response missing Body stream for '{bucket}/{key}'")
 
+                import concurrent.futures
+
                 chunk_size = 64 * 1024
                 deadline = start_time + max_duration_seconds
 
                 while True:
-                    if time.monotonic() > deadline:
+                    remaining_time = deadline - time.monotonic()
+                    if remaining_time <= 0:
                         raise ViduRecoveryError(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s")
-                    try:
-                        chunk = body.read(chunk_size)
-                    except Exception as read_err:
-                        raise ViduRecoveryError(f"Storage stream read failure: {read_err}") from read_err
+
+                    # Enforce timeout using bounded executor primitive to interrupt blocking body.read()
+                    chunk_timeout = min(remaining_time, 10.0)
+                    chunk = None
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(body.read, chunk_size)
+                        try:
+                            chunk = future.result(timeout=chunk_timeout)
+                        except concurrent.futures.TimeoutError as te:
+                            if hasattr(body, "close"):
+                                try:
+                                    body.close()
+                                except Exception:
+                                    pass
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            raise ViduRecoveryError(
+                                f"Storage stream read blocked and timed out after {chunk_timeout}s"
+                            ) from te
+                        except Exception as read_err:
+                            if hasattr(body, "close"):
+                                try:
+                                    body.close()
+                                except Exception:
+                                    pass
+                            raise ViduRecoveryError(f"Storage stream read failure: {read_err}") from read_err
 
                     # Verify deadline again after read completes (prevents slow EOF / blocking read overrun)
                     if time.monotonic() > deadline:

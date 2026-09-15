@@ -207,6 +207,126 @@ class CanonicalAuthPayload(BaseModel):
         return hashlib.sha256(self.to_canonical_json()).hexdigest()
 
 
+class AuthoritativeExternalExecutionRegister:
+    """Authoritative execution register maintained outside the DB and Object Storage restore sets.
+
+    Per Gate A contract: enforces an out-of-band reconciliation check against durable accepted
+    execution evidence outside the restored snapshot before any network I/O is permitted.
+    """
+
+    @classmethod
+    def get_register_path(cls) -> Optional[str]:
+        import os
+        return os.environ.get("EXTERNAL_EXECUTION_REGISTER_PATH")
+
+    @classmethod
+    def check_and_assert_freshness(cls, provider_job_id: str, auth_nonce: str) -> None:
+        """Verify external evidence outside DB and storage before any network I/O.
+
+        Fails closed if evidence is missing, unattested, or indicates prior dispatch/consumption.
+        """
+        import os
+        reg_path = cls.get_register_path()
+        env_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", None)
+
+        # 1. Mandatory requirement: Must have attested external evidence source
+        if not reg_path and env_consumed is None:
+            raise AuthRevokedError(
+                "Authoritative external execution register is missing: neither EXTERNAL_EXECUTION_REGISTER_PATH "
+                "nor OUT_OF_BAND_CONSUMED_EVIDENCE is configured outside the DB/storage restore set (fail-closed)"
+            )
+
+        # 2. Check freshness attestation
+        if env_consumed is not None:
+            if os.environ.get("OUT_OF_BAND_CONSUMED_ATTESTED", "").lower() != "true":
+                raise AuthRevokedError("External consumed registry lacks mandatory freshness attestation (OUT_OF_BAND_CONSUMED_ATTESTED != 'true')")
+
+        if reg_path:
+            if os.environ.get("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "").lower() != "true":
+                raise AuthRevokedError("Authoritative external execution register lacks mandatory freshness attestation (EXTERNAL_EXECUTION_REGISTER_ATTESTED != 'true')")
+
+        # 3. Check environment registry entries if present
+        if env_consumed:
+            consumed_set = {x.strip() for x in env_consumed.split(",") if x.strip()}
+            if auth_nonce in consumed_set or provider_job_id in consumed_set:
+                raise AuthReplayError(
+                    f"Authoritative external register confirms provider_job_id '{provider_job_id}' "
+                    f"or nonce '{auth_nonce}' was previously dispatched or consumed outside DB/storage restore set; second GET rejected"
+                )
+
+        # 4. Check file register if present
+        if reg_path and os.path.exists(reg_path):
+            try:
+                with open(reg_path, "r", encoding="utf-8") as f:
+                    reg_data = json.load(f)
+            except Exception as e:
+                raise AuthRevokedError(
+                    f"Failed to read authoritative external execution register from '{reg_path}': {e} (fail-closed)"
+                ) from e
+
+            dispatched_jobs = reg_data.get("dispatched_jobs", [])
+            dispatched_nonces = reg_data.get("dispatched_nonces", [])
+            consumed_jobs = reg_data.get("consumed_jobs", [])
+            consumed_nonces = reg_data.get("consumed_nonces", [])
+
+            if provider_job_id in dispatched_jobs or provider_job_id in consumed_jobs:
+                raise AuthReplayError(
+                    f"Authoritative external register at '{reg_path}' confirms provider_job_id '{provider_job_id}' "
+                    f"was previously dispatched or consumed outside DB/storage restore set; second GET rejected"
+                )
+            if auth_nonce in dispatched_nonces or auth_nonce in consumed_nonces:
+                raise AuthReplayError(
+                    f"Authoritative external register at '{reg_path}' confirms nonce '{auth_nonce}' "
+                    f"was previously consumed outside DB/storage restore set; second GET rejected"
+                )
+
+    @classmethod
+    def record_dispatch(cls, provider_job_id: str, auth_nonce: str, execution_id: str) -> None:
+        """Record pre-GET dispatch to external register before provider GET."""
+        import os
+        reg_path = cls.get_register_path()
+        if reg_path:
+            try:
+                reg_data = {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
+                if os.path.exists(reg_path):
+                    with open(reg_path, "r", encoding="utf-8") as f:
+                        reg_data = json.load(f)
+                if provider_job_id not in reg_data.setdefault("dispatched_jobs", []):
+                    reg_data["dispatched_jobs"].append(provider_job_id)
+                if auth_nonce not in reg_data.setdefault("dispatched_nonces", []):
+                    reg_data["dispatched_nonces"].append(auth_nonce)
+                with open(reg_path, "w", encoding="utf-8") as f:
+                    json.dump(reg_data, f, indent=2)
+            except Exception as exc:
+                sanitized_exc = sanitize_error_message(str(exc))
+                raise RecoveryAuthError(
+                    f"Failed to record dispatch to authoritative external execution register '{reg_path}': {sanitized_exc}"
+                ) from exc
+
+    @classmethod
+    def record_consumed(cls, provider_job_id: str, auth_nonce: str) -> None:
+        """Record terminal consumption to external register."""
+        import os
+        reg_path = cls.get_register_path()
+        if reg_path:
+            try:
+                reg_data = {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
+                if os.path.exists(reg_path):
+                    with open(reg_path, "r", encoding="utf-8") as f:
+                        reg_data = json.load(f)
+                if provider_job_id not in reg_data.setdefault("consumed_jobs", []):
+                    reg_data["consumed_jobs"].append(provider_job_id)
+                if auth_nonce not in reg_data.setdefault("consumed_nonces", []):
+                    reg_data["consumed_nonces"].append(auth_nonce)
+                with open(reg_path, "w", encoding="utf-8") as f:
+                    json.dump(reg_data, f, indent=2)
+            except Exception as exc:
+                sanitized_exc = sanitize_error_message(str(exc))
+                raise RecoveryAuthError(
+                    f"Failed to record terminal consumption to authoritative external register '{reg_path}': {sanitized_exc}"
+                ) from exc
+
+
 class RecoveryAuthService:
     """Two-phase asymmetric authorization verification."""
 
@@ -399,17 +519,25 @@ class RecoveryAuthService:
                 f"'{payload.provider_job_id}' but ProviderExecutionFence is missing"
             )
 
-        # 8. Out-of-band consumption evidence check (handles lost fence AND lost GenerationJob on restored DB)
-        oob_consumed = os.environ.get("OUT_OF_BAND_CONSUMED_EVIDENCE", "")
-        if oob_consumed:
-            if os.environ.get("OUT_OF_BAND_CONSUMED_ATTESTED", "").lower() != "true":
-                raise AuthRevokedError("External consumed registry lacks mandatory freshness attestation (OUT_OF_BAND_CONSUMED_ATTESTED != 'true')")
-            oob_set = {x.strip() for x in oob_consumed.split(",") if x.strip()}
-            if payload.auth_nonce in oob_set or payload.provider_job_id in oob_set:
-                raise AuthReplayError(
-                    f"Out-of-band consumption evidence confirms provider_job_id '{payload.provider_job_id}' "
-                    f"or nonce '{payload.auth_nonce}' was consumed in prior execution outside restored DB snapshot"
-                )
+        # 8. Restore Epoch binding validation: Token must be bound to current runtime restore epoch
+        current_epoch = os.environ.get("CURRENT_RESTORE_EPOCH", "epoch-0").strip()
+        token_epoch = getattr(payload, "restore_epoch", None)
+        if not token_epoch:
+            import re
+            m = re.search(r"(?:^|[:\-_])epoch[:\-_]?([A-Za-z0-9\-_]+)", payload.owner_evidence_anchor, re.IGNORECASE)
+            if m:
+                token_epoch = f"epoch-{m.group(1)}"
+
+        if token_epoch and token_epoch.lower() != current_epoch.lower():
+            raise AuthScopeMismatchError(
+                f"Authorization token is bound to stale restore epoch: '{token_epoch}' != current runtime epoch '{current_epoch}' (fail-closed)"
+            )
+
+        # 9. Mandatory Authoritative External Execution Register Check (Decoupled from DB/Storage restore set)
+        AuthoritativeExternalExecutionRegister.check_and_assert_freshness(
+            provider_job_id=payload.provider_job_id,
+            auth_nonce=payload.auth_nonce,
+        )
 
         if storage_provider is not None:
             b_names = [

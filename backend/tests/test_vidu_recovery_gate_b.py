@@ -64,11 +64,15 @@ from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
 
 # Fixture for isolated SQLite test database
 @pytest.fixture(autouse=True)
-def setup_auth_env(monkeypatch):
+def setup_auth_env(monkeypatch, tmp_path):
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
     monkeypatch.setenv("VIDU_GENERATION_ENABLED", "false")
     monkeypatch.setenv("VIDU_RECOVERY_GET_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
+    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-0")
+    reg_file = str(tmp_path / "test_execution_register.json")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", reg_file)
 
 
 @pytest.fixture
@@ -1130,11 +1134,11 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
 # ==============================================================================
 # Scenario 28: Restored Snapshot Lacking BOTH Rows Prevents Second GET
 # ==============================================================================
-def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(test_db, mock_storage, auth_keys):
-    """Restored DB lacking both ProviderExecutionFence and GenerationJob detects out-of-band artifact and prevents 2nd GET."""
+def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(test_db, mock_storage, auth_keys, monkeypatch, tmp_path):
+    """Restored DB and Storage lacking both rows and markers detects out-of-band external register and prevents 2nd GET."""
     seed, pk = auth_keys
 
-    # Subcase A: Successful execution followed by DB restore (loss of both rows)
+    # Subcase A: Actual successful execution followed by combined DB + Storage restore
     payload_a, sig_a = make_valid_auth(seed, nonce="nonce-subcase-a")
     mock_adapter_a = MockProviderAdapter()
 
@@ -1152,7 +1156,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     assert result_a["status"] == "CONSUMED_SUCCESS"
     assert mock_adapter_a.get_calls_attempted == 1
 
-    # SIMULATE RESTORED DATABASE:
+    # SIMULATE COMBINED DB AND OBJECT STORAGE RESTORE (pre-dispatch snapshot):
     test_db.query(RecoveryFailureAudit).delete()
     test_db.query(ProviderExecutionFence).delete()
     test_db.query(GenerationJob).delete()
@@ -1162,15 +1166,17 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
     test_db.query(Asset).delete()
     test_db.query(Project).delete()
     test_db.commit()
+    mock_storage._store.clear()  # Wipes all storage objects/markers to pre-dispatch snapshot!
 
     assert test_db.query(ProviderExecutionFence).count() == 0
     assert test_db.query(GenerationJob).count() == 0
+    assert len(mock_storage._store) == 0
 
-    # Re-attempt: storage marker fences/consumed/{provider_job_id}.json exists -> reject second GET!
+    # Re-attempt: external register (outside DB and storage) blocks replay -> reject second GET!
     payload_a2, sig_a2 = make_valid_auth(seed, nonce="nonce-subcase-a2")
     second_adapter = MockProviderAdapter()
 
-    with pytest.raises(AuthReplayError, match="Authoritative external execution fence detected"):
+    with pytest.raises(AuthReplayError, match="Authoritative external register"):
         execute_recovery_harness(
             db=test_db,
             auth_payload=payload_a2,
@@ -1184,48 +1190,164 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
         )
     assert second_adapter.get_calls_attempted == 0
 
-    # Subcase B: Failed/crashed execution where pre-GET external fence was persisted, followed by DB restore (loss of both rows)
-    import json
-    mock_storage._store.clear()
-    pre_get_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
-    mock_storage.put_object("orbis-media-assets", pre_get_key, json.dumps({"status": "DISPATCHED_BEFORE_GET"}).encode("utf-8"))
+    # Subcase B1: Actual Failed provider GET path followed by combined DB + Storage restore
+    fresh_reg_b1 = str(tmp_path / "ext_reg_b1.json")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b1)
 
-    payload_b, sig_b = make_valid_auth(seed, nonce="nonce-subcase-b")
-    crashed_adapter = MockProviderAdapter()
+    class FailingViduAdapter(MockProviderAdapter):
+        def __init__(self):
+            super().__init__()
+            self.get_calls_attempted = 0
+        async def check_job_status(self, provider_job_id):
+            self.get_calls_attempted += 1
+            raise ViduJobNotFoundError(f"Provider job {provider_job_id} not found on provider")
 
-    with pytest.raises(AuthReplayError, match="Authoritative external execution fence detected"):
+    failing_adapter = FailingViduAdapter()
+    payload_b1, sig_b1 = make_valid_auth(seed, nonce="nonce-subcase-b1")
+
+    with pytest.raises(ViduJobNotFoundError):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload_b,
-            signature_bytes=sig_b,
+            auth_payload=payload_b1,
+            signature_bytes=sig_b1,
             public_key_bytes=pk,
-            expected_commit_sha=payload_b.authorized_commit_sha,
+            expected_commit_sha=payload_b1.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
-            adapter=crashed_adapter,
+            adapter=failing_adapter,
             storage_provider=mock_storage,
         )
-    # ZERO second GET even after crashed/failed pre-GET dispatch!
-    assert crashed_adapter.get_calls_attempted == 0
+    assert failing_adapter.get_calls_attempted == 1
 
-    # Subcase C: Inaccessible storage during external fence check fails closed with RecoveryAuthError (not swallowed)
-    class InaccessibleStorage:
-        bucket_name = "orbis-media-assets"
-        def object_exists(self, b, k):
-            raise RuntimeError("Storage unreachable / connection timed out")
+    # SIMULATE COMBINED RESTORE AFTER FAILED GET:
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.commit()
+    mock_storage._store.clear()
 
-    with pytest.raises(RecoveryAuthError, match="Storage accessibility failure while inspecting external execution fence"):
+    # Re-attempt: external register preserves pre-GET dispatch evidence -> 0 second GET!
+    payload_b1_replay, sig_b1_replay = make_valid_auth(seed, nonce="nonce-subcase-b1-retry")
+    second_b1_adapter = MockProviderAdapter()
+
+    with pytest.raises(AuthReplayError, match="Authoritative external register"):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload_b,
-            signature_bytes=sig_b,
+            auth_payload=payload_b1_replay,
+            signature_bytes=sig_b1_replay,
             public_key_bytes=pk,
-            expected_commit_sha=payload_b.authorized_commit_sha,
+            expected_commit_sha=payload_b1_replay.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
-            adapter=crashed_adapter,
-            storage_provider=InaccessibleStorage(),
+            adapter=second_b1_adapter,
+            storage_provider=mock_storage,
         )
+    assert second_b1_adapter.get_calls_attempted == 0
+
+    # Subcase B2: Actual Crashed GET path followed by combined DB + Storage restore
+    fresh_reg_b2 = str(tmp_path / "ext_reg_b2.json")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b2)
+
+    class CrashingViduAdapter(MockProviderAdapter):
+        def __init__(self):
+            super().__init__()
+            self.get_calls_attempted = 0
+        async def check_job_status(self, provider_job_id):
+            self.get_calls_attempted += 1
+            raise RuntimeError("Hard crash / connection terminated mid-status query")
+
+    crashing_adapter = CrashingViduAdapter()
+    payload_b2, sig_b2 = make_valid_auth(seed, nonce="nonce-subcase-b2")
+
+    with pytest.raises(RuntimeError, match="Hard crash"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_b2,
+            signature_bytes=sig_b2,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_b2.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=crashing_adapter,
+            storage_provider=mock_storage,
+        )
+    assert crashing_adapter.get_calls_attempted == 1
+
+    # SIMULATE COMBINED RESTORE AFTER CRASHED GET:
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.commit()
+    mock_storage._store.clear()
+
+    # Re-attempt: external register preserves pre-GET dispatch evidence -> 0 second GET!
+    payload_b2_replay, sig_b2_replay = make_valid_auth(seed, nonce="nonce-subcase-b2-retry")
+    second_b2_adapter = MockProviderAdapter()
+
+    with pytest.raises(AuthReplayError, match="Authoritative external register"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_b2_replay,
+            signature_bytes=sig_b2_replay,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_b2_replay.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=second_b2_adapter,
+            storage_provider=mock_storage,
+        )
+    assert second_b2_adapter.get_calls_attempted == 0
+
+    # Subcase C: Inaccessible or missing external register fails closed with AuthRevokedError
+    monkeypatch.delenv("EXTERNAL_EXECUTION_REGISTER_PATH", raising=False)
+    monkeypatch.delenv("OUT_OF_BAND_CONSUMED_EVIDENCE", raising=False)
+    payload_c, sig_c = make_valid_auth(seed, nonce="nonce-subcase-c")
+    blocked_adapter = MockProviderAdapter()
+
+    with pytest.raises(AuthRevokedError, match="Authoritative external execution register is missing"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_c,
+            signature_bytes=sig_c,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_c.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=blocked_adapter,
+            storage_provider=mock_storage,
+        )
+    assert blocked_adapter.get_calls_attempted == 0
+
+    # Subcase D: Stale Restore Epoch token rejection after restore
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", str(tmp_path / "ext_reg_d.json"))
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
+    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-1")  # Runtime advanced to epoch-1
+
+    now = datetime.now(timezone.utc)
+    epoch0_payload = CanonicalAuthPayload(
+        authorized_commit_sha=payload_a.authorized_commit_sha,
+        task_id=TARGET_TASK_ID,
+        provider_job_id=TARGET_PROVIDER_JOB_ID,
+        runtime_target="UAT-COMPOSE-PERSISTENT",
+        owner_evidence_anchor="telegram:msg:152428:epoch-0:run1",
+        issued_at=now - timedelta(minutes=5),
+        expires_at=now + timedelta(minutes=55),
+        auth_nonce=str(uuid.uuid4()),
+    )
+    epoch0_sig = ed25519_sign(epoch0_payload.to_canonical_json(), seed)
+
+    epoch_blocked_adapter = MockProviderAdapter()
+    with pytest.raises(AuthScopeMismatchError, match="Authorization token is bound to stale restore epoch"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=epoch0_payload,
+            signature_bytes=epoch0_sig,
+            public_key_bytes=pk,
+            expected_commit_sha=epoch0_payload.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=epoch_blocked_adapter,
+            storage_provider=mock_storage,
+        )
+    assert epoch_blocked_adapter.get_calls_attempted == 0
 
 
 # ==============================================================================
@@ -1268,7 +1390,7 @@ def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed
     monkeypatch.setenv("OUT_OF_BAND_CONSUMED_ATTESTED", "true")
     monkeypatch.setenv("OUT_OF_BAND_CONSUMED_EVIDENCE", f"{TARGET_HISTORICAL_PROVIDER_JOB_ID},other-job")
 
-    with pytest.raises(AuthReplayError, match="Out-of-band consumption evidence confirms"):
+    with pytest.raises(AuthReplayError, match="(Out-of-band consumption evidence|Authoritative external register) confirms"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
             payload=payload,
@@ -1396,10 +1518,10 @@ def test_scenario_32_storage_streaming_oversize_stream_aborts_during_transfer():
 
 
 # ==============================================================================
-# Scenario 33: Audit Write Failure Stops Fail-Closed on DB Stage
+# Scenario 33: Audit Write Failure Stops Fail-Closed Across DB Stages
 # ==============================================================================
 def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, mock_storage, auth_keys, monkeypatch):
-    """When autonomous failure audit writing fails during a DB stage, AuditWriteFailureError is raised fail-closed with sanitized message."""
+    """When autonomous failure audit writing fails during DB stages, AuditWriteFailureError is raised fail-closed."""
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
 
@@ -1408,9 +1530,7 @@ def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, 
 
     monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", failing_record_failure_audit)
 
-    # Trigger a Phase 2 failure (e.g. revoked nonce) which triggers record_failure_audit
-    revocation_list = [payload.auth_nonce]
-
+    # 1. Trigger on Phase 2 failure (revocation check)
     with pytest.raises(AuditWriteFailureError, match="Failed to record autonomous failure audit"):
         execute_recovery_harness(
             db=test_db,
@@ -1419,10 +1539,40 @@ def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, 
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
-            revocation_list=revocation_list,
+            revocation_list=[payload.auth_nonce],
             mock_mode=True,
             storage_provider=mock_storage,
         )
+
+    # 2. Trigger on Offline Reconciliation failure
+    with pytest.raises(AuditWriteFailureError, match="Failed to record autonomous failure audit"):
+        execute_recovery_harness(
+            db=test_db,
+            offline_reconcile=True,
+            storage_provider=mock_storage,
+        )
+
+    # 3. Trigger on FENCE_TRANSITION_GET_IN_FLIGHT failure
+    payload2, sig2 = make_valid_auth(seed, nonce="nonce-get-inflight-audit-fail")
+    orig_commit = test_db.commit
+    def failing_commit():
+        raise RuntimeError("Injected DB commit failure on pre-GET transition")
+
+    test_db.commit = failing_commit
+    try:
+        with pytest.raises(AuditWriteFailureError, match="Failed to record autonomous failure audit"):
+            execute_recovery_harness(
+                db=test_db,
+                auth_payload=payload2,
+                signature_bytes=sig2,
+                public_key_bytes=pk,
+                expected_commit_sha=payload2.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                storage_provider=mock_storage,
+            )
+    finally:
+        test_db.commit = orig_commit
 
 
 # ==============================================================================
@@ -1458,12 +1608,51 @@ def test_scenario_34_phase1_failure_strictly_zero_db_io(test_db, mock_storage, a
 
 
 # ==============================================================================
-# Scenario 35: SDK Stream Timeout and Slow EOF Transfer Bounds
+# Scenario 35: SDK Stream Timeout, Blocked Read Interruption, and Transfer Bounds
 # ==============================================================================
-def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
-    """Streaming transfer exceeding deadline or suffering slow EOF must be aborted and Body closed."""
+def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds(monkeypatch):
+    """Streaming transfer exceeding deadline or suffering slow EOF/blocked read must be interrupted and Body closed."""
     import time
+    from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 
+    # Subcase A: Blocked body.read() is interrupted by transfer deadline primitive
+    class BlockedBodyStreamClient:
+        def __init__(self):
+            self.body_closed = False
+
+        def head_object(self, Bucket, Key):
+            return {"ContentLength": 1000, "ETag": '"etag-blocked"'}
+
+        def get_object(self, Bucket, Key):
+            client_self = self
+            class BlockedBody:
+                def read(self, amt=64*1024):
+                    # Simulate indefinitely blocked socket read
+                    time.sleep(2.0)
+                    return b"data"
+                def close(self):
+                    client_self.body_closed = True
+
+            return {"Body": BlockedBody(), "ContentLength": 1000, "ETag": '"etag-blocked"'}
+
+    class MockBlockedStorageWrapper:
+        def __init__(self):
+            self.client = BlockedBodyStreamClient()
+
+    blocked_wrapper = MockBlockedStorageWrapper()
+    # Deadline 0.05s interrupts blocked body.read()
+    with pytest.raises(ViduRecoveryError, match="Storage stream read blocked and timed out"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=blocked_wrapper,
+            bucket="orbis-media-assets",
+            key="assets/blocked.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+            max_duration_seconds=0.05,
+        )
+    assert blocked_wrapper.client.body_closed is True
+
+    # Subcase B: Slow EOF transfer bounds
     class SlowBodyStreamClient:
         def __init__(self):
             self.body_closed = False
@@ -1480,7 +1669,6 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
                     self.call_count += 1
                     if self.call_count == 1:
                         return b"A" * 100
-                    # Simulate hanging / slow EOF
                     time.sleep(0.05)
                     return b""
                 def close(self):
@@ -1488,20 +1676,211 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
 
             return {"Body": SlowBody(), "ContentLength": 1000, "ETag": '"etag-slow"'}
 
-    class MockStorageWrapper:
+    class MockSlowStorageWrapper:
         def __init__(self):
             self.client = SlowBodyStreamClient()
 
-    wrapper = MockStorageWrapper()
-    # Set max_duration_seconds to very small value (0.01s)
-    with pytest.raises(ViduRecoveryError, match="Storage stream transfer exceeded timeout"):
+    slow_wrapper = MockSlowStorageWrapper()
+    with pytest.raises(ViduRecoveryError, match="Storage stream.*timed out"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=wrapper,
+            storage=slow_wrapper,
             bucket="orbis-media-assets",
             key="assets/slow.mp4",
             expected_size=1000,
             expected_sha256="any-hash",
             max_duration_seconds=0.01,
         )
+    assert slow_wrapper.client.body_closed is True
 
-    assert wrapper.client.body_closed is True
+    # Subcase C: SDK Connect Timeout during get_object
+    class ConnectTimeoutStorageWrapper:
+        class Client:
+            def head_object(self, Bucket, Key):
+                return {"ContentLength": 1000, "ETag": '"etag-conn"'}
+            def get_object(self, Bucket, Key):
+                raise ConnectTimeoutError(endpoint_url="http://storage.internal")
+        client = Client()
+
+    with pytest.raises(ViduRecoveryError, match="Failed to initiate stream retrieval"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=ConnectTimeoutStorageWrapper(),
+            bucket="orbis-media-assets",
+            key="assets/conn.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+        )
+
+    # Subcase D: SDK Read Timeout during body read
+    class ReadTimeoutBodyStreamClient:
+        def __init__(self):
+            self.body_closed = False
+        def head_object(self, Bucket, Key):
+            return {"ContentLength": 1000, "ETag": '"etag-read"'}
+        def get_object(self, Bucket, Key):
+            client_self = self
+            class ReadTimeoutBody:
+                def read(self, amt=64*1024):
+                    raise ReadTimeoutError(endpoint_url="http://storage.internal")
+                def close(self):
+                    client_self.body_closed = True
+            return {"Body": ReadTimeoutBody(), "ContentLength": 1000, "ETag": '"etag-read"'}
+
+    class MockReadTimeoutWrapper:
+        def __init__(self):
+            self.client = ReadTimeoutBodyStreamClient()
+
+    read_timeout_wrapper = MockReadTimeoutWrapper()
+    with pytest.raises(ViduRecoveryError, match="Storage stream read failure"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=read_timeout_wrapper,
+            bucket="orbis-media-assets",
+            key="assets/read_timeout.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+        )
+    assert read_timeout_wrapper.client.body_closed is True
+
+
+# ==============================================================================
+# Scenario 36: Pre-GET Fence Rollback Failure Audited Truthfully
+# ==============================================================================
+def test_scenario_36_pre_get_rollback_failure_audited_truthfully(test_db, mock_storage, auth_keys, monkeypatch):
+    """When rollback fails during pre-GET fence transition, audit records ROLLBACK_FAILED truthfully."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    orig_commit = test_db.commit
+    orig_rollback = test_db.rollback
+
+    commit_count = [0]
+    def selective_commit():
+        commit_count[0] += 1
+        if commit_count[0] == 2:  # 1: claim fence, 2: pre-GET fence transition
+            raise RuntimeError("Injected pre-GET fence commit failure")
+        return orig_commit()
+
+    rollback_count = [0]
+    def selective_rollback():
+        rollback_count[0] += 1
+        if rollback_count[0] == 1:  # pre-GET transition rollback
+            raise RuntimeError("Injected pre-GET fence rollback failure")
+        return orig_rollback()
+
+    test_db.commit = selective_commit
+    test_db.rollback = selective_rollback
+
+    try:
+        with pytest.raises(RuntimeError, match="Injected pre-GET fence"):
+            execute_recovery_harness(
+                db=test_db,
+                auth_payload=payload,
+                signature_bytes=sig,
+                public_key_bytes=pk,
+                expected_commit_sha=payload.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                storage_provider=mock_storage,
+            )
+    finally:
+        test_db.commit = orig_commit
+        test_db.rollback = orig_rollback
+
+    # Verify that the failure audit recorded ROLLBACK_FAILED truthfully
+    audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="FENCE_TRANSITION_GET_IN_FLIGHT").first()
+    assert audit is not None
+    assert audit.db_transaction_state == "ROLLBACK_FAILED"
+
+
+# ==============================================================================
+# Scenario 37: Recovery Terminal Transition Commit Failure Audited and Propagated
+# ==============================================================================
+def test_scenario_37_recovery_terminal_transition_commit_failure_audited(test_db, mock_storage, auth_keys, monkeypatch):
+    """When recovery execution fails and committing CONSUMED_TERMINAL_FAILURE also fails, transition audit is written and failure is propagated fail-closed."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    # Force recovery failure during recover_existing_job
+    def failing_recovery(*args, **kwargs):
+        raise RuntimeError("Primary recovery execution failed")
+
+    monkeypatch.setattr(ViduExistingJobRecoveryService, "recover_existing_job", failing_recovery)
+
+    # Allow initial commit (fence claim and pre-GET), but fail subsequent commit on terminal transition
+    commit_call_count = [0]
+    orig_commit = test_db.commit
+
+    def selective_commit():
+        commit_call_count[0] += 1
+        if commit_call_count[0] >= 3:  # 1: claim, 2: in_flight, 3: terminal
+            raise RuntimeError("Injected terminal commit failure")
+        return orig_commit()
+
+    test_db.commit = selective_commit
+    try:
+        with pytest.raises(ViduRecoveryError, match="Terminal fence commit failed after recovery failure"):
+            execute_recovery_harness(
+                db=test_db,
+                auth_payload=payload,
+                signature_bytes=sig,
+                public_key_bytes=pk,
+                expected_commit_sha=payload.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                storage_provider=mock_storage,
+            )
+    finally:
+        test_db.commit = orig_commit
+
+    # Verify transition failure audit exists with FENCE_TRANSITION_TERMINAL
+    audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="FENCE_TRANSITION_TERMINAL").first()
+    assert audit is not None
+    assert audit.error_class == "RuntimeError"
+    assert "Injected terminal commit failure" in audit.error_message
+
+
+# ==============================================================================
+# Scenario 38: Readback Terminal Transition Commit Failure Audited and Propagated
+# ==============================================================================
+def test_scenario_38_readback_terminal_transition_commit_failure_audited(test_db, mock_storage, auth_keys, monkeypatch):
+    """When readback verification fails and committing CONSUMED_TERMINAL_FAILURE also fails, transition audit is written and failure is propagated fail-closed."""
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+
+    # Force readback failure during stream_verify_storage_object
+    def failing_stream_verify(*args, **kwargs):
+        raise ViduRecoveryError("Read-back verification failed: stream verification failure")
+
+    monkeypatch.setattr(ViduExistingJobRecoveryService, "stream_verify_storage_object", failing_stream_verify)
+
+    # Fail the terminal commit specifically when setting CONSUMED_TERMINAL_FAILURE after readback error
+    orig_commit = test_db.commit
+
+    def selective_commit():
+        # Inspect open transactions or state on test_db
+        fence_obj = test_db.query(ProviderExecutionFence).filter_by(provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID).first()
+        if fence_obj and fence_obj.status == "CONSUMED_TERMINAL_FAILURE" and not getattr(selective_commit, "failed_once", False):
+            selective_commit.failed_once = True
+            raise RuntimeError("Injected readback terminal commit failure")
+        return orig_commit()
+
+    test_db.commit = selective_commit
+    try:
+        with pytest.raises(ViduRecoveryError, match="Terminal fence commit failed after readback error"):
+            execute_recovery_harness(
+                db=test_db,
+                auth_payload=payload,
+                signature_bytes=sig,
+                public_key_bytes=pk,
+                expected_commit_sha=payload.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                storage_provider=mock_storage,
+            )
+    finally:
+        test_db.commit = orig_commit
+
+    # Verify transition failure audit exists with FENCE_TRANSITION_TERMINAL_READBACK
+    audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="FENCE_TRANSITION_TERMINAL_READBACK").first()
+    assert audit is not None
+    assert audit.error_class == "RuntimeError"
+    assert "Injected readback terminal commit failure" in audit.error_message

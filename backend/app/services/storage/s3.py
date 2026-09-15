@@ -21,9 +21,17 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
         self.region_name = region_name
         self.use_ssl = use_ssl
 
+        import os
+        connect_timeout = float(os.environ.get("STORAGE_CONNECT_TIMEOUT_SECONDS", "5.0"))
+        read_timeout = float(os.environ.get("STORAGE_READ_TIMEOUT_SECONDS", "10.0"))
+        max_retries = int(os.environ.get("STORAGE_MAX_RETRIES", "2"))
+
         config = Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            retries={"max_attempts": max_retries, "mode": "standard"},
         )
 
         self.client = boto3.client(
