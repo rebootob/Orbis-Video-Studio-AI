@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Post-Review 5204565590 Corrective Hardening (R5)
+> Updated: Post-Review 5205357344 Corrective Hardening (R5)
 
 ---
 
@@ -15,43 +15,42 @@
 - **Authorized Base Main**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-R5`
 - **Current Gate**: Gate B (Execution Harness, Standalone Schema & Failure Matrix)
-- **Gate B Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW` (Addressing Review 5204565590: CHANGES REQUIRED)
+- **Gate B Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW` (Addressing Review 5205357344: CHANGES REQUIRED)
 - **Next Gate**: `CHATGPT_INDEPENDENT_REVIEW` (Hermes STOP condition enforced; Gate B is NOT marked PASS/VERIFIED until independent review completes)
 - **Gate C & REC1-RUN1**: `STRICTLY NOT AUTHORIZED / BLOCKED`
 
 ---
 
-## 2. Review 5204565590 Blocker Resolution Summary
+## 2. Review 5205357344 Blocker Resolution Summary
 
-1. **Wired Independently Discovered Resource Identities into Production Calls**:
-   - Resolved real database connection URL/identity and object storage endpoint/bucket identity.
-   - Replaced path heuristics with real directory/mount canonical resolution (`os.path.realpath`) and common-ancestor traversal checks.
-   - Passed verified identities into `check_and_assert_freshness`, `claim_pre_get_dispatch`, and `record_consumed` across production harness paths.
-   - Rejects any register path sharing directory tree, mount, or restore set with DB or storage.
+1. **Genuine Supported Transport Deadline & Cancellation Path**:
+   - Implemented `_execute_with_transport_cancellation` protecting `head_object`, `get_object`, and `body.read`.
+   - Completely eliminated test-only `read_with_timeout` method; production calls standard `body.read(chunk_sz)`.
+   - Tested truly non-returning `body.read` that blocks indefinitely until transport cancellation aborts the underlying socket stream.
+   - Proved bounded elapsed completion ($\le 0.6$s), underlying operation termination, zero surviving worker threads, and Body cleanup (**Scenario 35**).
+   - Slow-EOF transfer bounds cancelled pre-emptively without cooperative sleep waits; hung `head_object` bounded and aborted.
 
-2. **Crash-Durable Pre-GET Claim with Verification**:
-   - Temporary file write + `f.flush()` + `os.fsync()`.
-   - Atomic replacement (`os.replace`).
-   - Parent directory `os.fsync()` after replacement.
-   - Read-back verification (durable acknowledgement) before authorizing provider GET.
-   - Verified through step-by-step injected failures: file fsync, replace CAS, directory fsync, and durable ack read-back failure (**VERIFIED in Scenario 40**).
+2. **Crash Durability Fails Closed**:
+   - Parent directory fsync fails closed (does NOT swallow directory-fsync errors) on supported/required platforms.
+   - Failures injected directly into actual `os.fsync` and `os.replace` stages (file data fsync, atomic replace CAS, parent directory fsync, durable ack readback), without replacing the writer function (**Scenario 40**).
+   - Proved that no GET is authorized after each durability failure.
 
-3. **Genuine Transport-Level Request Cancellation**:
-   - Replaced daemon worker thread wait wrappers with direct transport/socket timeout cancellation.
-   - Uses underlying socket `settimeout` and stream termination to abort blocked transfers.
-   - Asserts elapsed bound, complete Body stream cleanup, and zero surviving operations/threads (**VERIFIED in Scenario 35**).
+3. **Exact Trusted External-Register Identity & Topology Binding**:
+   - Enforced mandatory `TRUSTED_EXTERNAL_REGISTER_DIR` binding fail-closed.
+   - Derived actual local storage roots directly from real `storage_identity` and `storage_provider`.
+   - Completely removed filename heuristics as security proof.
+   - Replaced path heuristics with real directory/mount canonical resolution (`os.path.realpath`) and mount/device comparison.
+   - Validated neutral path names, symlinks, mount/device comparisons, and same-restore-set collisions through `execute_recovery_harness`.
 
-4. **Complete Autonomous Audit Coverage**:
-   - External dispatch registration failure handling with truthful transition commit/rollback recording.
-   - External record_consumed lock/write/fsync/replace failure auditing.
-   - Fail-closed propagation of `AuditWriteFailureError` on audit write failure for both paths, while preserving primary cause (**VERIFIED in Scenario 41**).
+4. **Distinct Sanitized Durable Audits for Terminal Transition Failures**:
+   - Added distinct `EXTERNAL_DISPATCH_TERMINAL_TRANSITION` audit record when terminal commit/rollback fails after dispatch claim failure.
+   - Added distinct `EXTERNAL_RECORD_CONSUMED_TERMINAL_TRANSITION` audit record when terminal commit/rollback fails after record_consumed failure.
+   - Tested `AuditWriteFailureError` fail-closed propagation through both real harness paths (**Scenario 41**).
 
-5. **Truthful Status & Document Alignment**:
-   - Acceptance matrix status:
-     * Scenarios 1-24, 26-41: **VERIFIED**
-     * Scenario 25: **NOT PROVEN / DEFERRED TO GATE C** (Live cloud snapshot restore verification).
-   - Synchronized all control documents: `ACTIVE_TASK.md`, `CURRENT_STATE.md`, `CHAT_HANDOFF.md`, `NEXT_CHAT_PROMPT.md`, and `P4_WP020_LIVE_R5_VIDU2_REC1_HARNESS1.md`.
-   - Gate B status maintained as `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (AWAITING CHATGPT INDEPENDENT REVIEW)`.
+5. **Truthful Status & Acceptance Matrix**:
+   - Scenarios 35, 40, and 41 fully proven through real production paths.
+   - Scenario 25 correctly remains **NOT PROVEN / DEFERRED TO GATE C**.
+   - Zero-provider invariants strictly preserved.
 
 ---
 

@@ -32,6 +32,7 @@ from app.services.recovery_auth import (
     RecoveryAuthService,
     TARGET_PROVIDER_JOB_ID,
     TARGET_TASK_ID,
+    resolve_canonical_resource_identities,
     sanitize_error_message,
 )
 from app.services.storage import ObjectStorageProvider, get_storage_provider
@@ -189,8 +190,7 @@ def execute_recovery_harness(
     asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
 
-    actual_db_id = str(getattr(db.bind, "url", "")) if hasattr(db, "bind") and db.bind else ""
-    actual_storage_id = f"{getattr(storage, 'endpoint_url', '')}/{bucket_name}"
+    actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage)
 
     # Write authoritative external pre-GET dispatch fence to storage and external register BEFORE issuing any provider GET
     try:
@@ -230,6 +230,16 @@ def execute_recovery_harness(
         )
         if claim_term_commit_err is not None:
             sanitized_tc = sanitize_error_message(str(claim_term_commit_err))
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="EXTERNAL_DISPATCH_TERMINAL_TRANSITION",
+                error_class=claim_term_commit_err.__class__.__name__,
+                error_message=f"Terminal transition commit failure ({sanitized_tc}); primary error: {sanitized_ext_err}",
+                db_transaction_state=ext_rb_state,
+                compensation_status="NOT_APPLICABLE",
+                fence_id=fence.fence_id if fence else None,
+            )
             raise RecoveryAuthError(
                 f"Terminal fence commit failed after external dispatch registration failure ({sanitized_tc}); "
                 f"primary error: {sanitized_ext_err}"
@@ -486,6 +496,16 @@ def execute_recovery_harness(
         )
         if rc_term_commit_err is not None:
             sanitized_tc = sanitize_error_message(str(rc_term_commit_err))
+            RecoveryAuthService.record_failure_audit(
+                db=db,
+                provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+                failure_stage="EXTERNAL_RECORD_CONSUMED_TERMINAL_TRANSITION",
+                error_class=rc_term_commit_err.__class__.__name__,
+                error_message=f"Terminal transition commit failure ({sanitized_tc}); primary error: {sanitized_rc_err}",
+                db_transaction_state=rc_db_state,
+                compensation_status="NOT_APPLICABLE",
+                fence_id=fence.fence_id if fence else None,
+            )
             raise RecoveryAuthError(
                 f"Terminal fence commit failed after external record_consumed failure ({sanitized_tc}); "
                 f"primary error: {sanitized_rc_err}"

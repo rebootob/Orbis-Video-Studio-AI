@@ -230,8 +230,24 @@ class AuthoritativeExternalExecutionRegister:
         return reg_path
 
     @classmethod
-    def validate_register_topology(cls, reg_path: str, db_identity: str = "", storage_identity: str = "") -> None:
-        """Validate that register topology is trusted and decoupled from DB and Storage."""
+    def is_directory_fsync_supported(cls, reg_dir: str) -> bool:
+        """Determine platform/filesystem directory fsync capability before authorization."""
+        env_override = os.environ.get("DIRECTORY_FSYNC_SUPPORTED")
+        if env_override is not None:
+            return env_override.strip().lower() in ("true", "1", "yes")
+        if os.name == "posix":
+            return True
+        return os.environ.get("DIRECTORY_FSYNC_REQUIRED", "").strip().lower() in ("true", "1")
+
+    @classmethod
+    def validate_register_topology(
+        cls,
+        reg_path: str,
+        db_identity: str = "",
+        storage_identity: str = "",
+        storage_provider: typing.Any = None,
+    ) -> None:
+        """Validate that register topology is trusted and decoupled from DB and Storage without heuristic proofs."""
         topology_attested = os.environ.get("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "").strip().lower() == "true"
         freshness_attested = os.environ.get("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "").strip().lower() == "true"
         if not topology_attested or not freshness_attested:
@@ -242,16 +258,21 @@ class AuthoritativeExternalExecutionRegister:
 
         norm_path = os.path.realpath(os.path.abspath(reg_path))
 
-        # 1. Allowed external register path binding if configured
-        allowed_prefix = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
-        if allowed_prefix:
-            norm_allowed = os.path.realpath(os.path.abspath(allowed_prefix))
-            if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
-                raise AuthRuntimeMismatchError(
-                    f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
-                )
+        # 1. Allowed external register binding (mandatory trusted binding)
+        trusted_dir = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
+        if not trusted_dir:
+            raise AuthRevokedError(
+                "Mandatory trusted external register directory binding is missing "
+                "(TRUSTED_EXTERNAL_REGISTER_DIR must be set, fail-closed)"
+            )
+        norm_allowed = os.path.realpath(os.path.abspath(trusted_dir))
+        if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
+            raise AuthRuntimeMismatchError(
+                f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
+            )
 
         # 2. Real path / mount decoupling from DB restore set
+        db_dir = None
         if db_identity:
             clean_db = db_identity
             for prefix in ("sqlite:///", "sqlite://", "sqlite:"):
@@ -260,46 +281,71 @@ class AuthoritativeExternalExecutionRegister:
                     break
             if clean_db and clean_db != ":memory:":
                 db_real = os.path.realpath(os.path.abspath(clean_db))
-                db_dir = os.path.dirname(db_real)
-                if norm_path == db_real or norm_path == db_dir or norm_path.startswith(db_dir + os.sep):
+                db_dir = os.path.dirname(db_real) if (os.path.isfile(db_real) or not os.path.isdir(db_real)) else db_real
+                if norm_path == db_real or norm_path == db_dir or norm_path.startswith(db_dir + os.sep) or db_dir.startswith(norm_path + os.sep):
                     raise AuthRuntimeMismatchError(
                         f"External execution register path '{norm_path}' cannot reside inside DB directory/file '{db_dir}' (topology collision)"
                     )
 
-        # 3. Real path / mount decoupling from Storage restore set
-        # Check actual storage provider local directories if local/mock storage is used
-        from app.core.config import settings
+        # 3. Real path / mount decoupling from Storage restore set (derived directly from real identities)
         storage_roots = []
+        if storage_identity:
+            clean_s = storage_identity.strip()
+            if clean_s.startswith("file://"):
+                clean_s = clean_s[7:]
+            if os.path.isabs(clean_s) or os.path.exists(clean_s):
+                storage_roots.append(os.path.realpath(os.path.abspath(clean_s)))
+            if "://" in clean_s:
+                path_part = clean_s.split("://", 1)[1]
+                if os.path.isabs(path_part) or os.path.exists(path_part):
+                    storage_roots.append(os.path.realpath(os.path.abspath(path_part)))
+
+        if storage_provider is not None:
+            for attr in ("base_dir", "root_dir", "_base_path", "storage_dir", "bucket_dir", "local_dir"):
+                val = getattr(storage_provider, attr, None)
+                if val and isinstance(val, (str, bytes, os.PathLike)):
+                    storage_roots.append(os.path.realpath(os.path.abspath(str(val))))
+
+        from app.core.config import settings
         local_store_root = getattr(settings, "LOCAL_STORAGE_DIR", None) or os.environ.get("LOCAL_STORAGE_DIR", "")
         if local_store_root:
-            storage_roots.append(local_store_root)
+            storage_roots.append(os.path.realpath(os.path.abspath(local_store_root)))
         storage_bucket_dir = os.environ.get("STORAGE_BUCKET_DIR", "")
         if storage_bucket_dir:
-            storage_roots.append(storage_bucket_dir)
-
-        # Also inspect storage_identity if it contains local path indicators
-        if storage_identity and (storage_identity.startswith("mock://") or "file://" in storage_identity):
-            # parse possible path
-            parts = storage_identity.split("://", 1)[-1].split("/")
-            bucket_candidate = parts[-1] if parts else ""
-            if bucket_candidate:
-                storage_bucket_env = os.environ.get("OBJECT_STORAGE_BUCKET_DIR", "")
-                if storage_bucket_env:
-                    storage_roots.append(storage_bucket_env)
+            storage_roots.append(os.path.realpath(os.path.abspath(storage_bucket_dir)))
+        storage_bucket_env = os.environ.get("OBJECT_STORAGE_BUCKET_DIR", "")
+        if storage_bucket_env:
+            storage_roots.append(os.path.realpath(os.path.abspath(storage_bucket_env)))
 
         for s_root in storage_roots:
             if s_root:
                 s_real = os.path.realpath(os.path.abspath(s_root))
-                if norm_path == s_real or norm_path.startswith(s_real + os.sep):
+                if norm_path == s_real or norm_path.startswith(s_real + os.sep) or s_real.startswith(norm_path + os.sep):
                     raise AuthRuntimeMismatchError(
-                        f"External execution register path '{norm_path}' cannot reside inside storage bucket directory '{s_real}' (topology collision)"
+                        f"External execution register path '{norm_path}' cannot reside inside storage restore set directory '{s_real}' (topology collision)"
                     )
 
-        # String heuristic check as second-layer guard
-        if "storage" in norm_path.lower() and "bucket" in norm_path.lower():
-            raise AuthRuntimeMismatchError(
-                f"External execution register path '{norm_path}' cannot reside inside storage bucket directory"
-            )
+        # 4. Strict mount / device decoupling if required
+        require_distinct_mount = os.environ.get("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT", "").strip().lower() == "true"
+        if require_distinct_mount:
+            reg_check_path = norm_path if os.path.exists(norm_path) else os.path.dirname(norm_path)
+            if os.path.exists(reg_check_path):
+                reg_stat = os.stat(reg_check_path)
+                reg_dev = getattr(reg_stat, "st_dev", None)
+                if reg_dev is not None:
+                    if db_dir and os.path.exists(db_dir):
+                        db_stat = os.stat(db_dir)
+                        if getattr(db_stat, "st_dev", None) == reg_dev:
+                            raise AuthRuntimeMismatchError(
+                                f"External execution register mount (dev={reg_dev}) collides with DB mount (dev={getattr(db_stat, 'st_dev', None)}); distinct mount required"
+                            )
+                    for s_root in storage_roots:
+                        if s_root and os.path.exists(s_root):
+                            s_stat = os.stat(s_root)
+                            if getattr(s_stat, "st_dev", None) == reg_dev:
+                                raise AuthRuntimeMismatchError(
+                                    f"External execution register mount (dev={reg_dev}) collides with storage mount (dev={getattr(s_stat, 'st_dev', None)}); distinct mount required"
+                                )
 
     @classmethod
     def _read_register_unlocked(cls, reg_path: str) -> dict:
@@ -359,23 +405,42 @@ class AuthoritativeExternalExecutionRegister:
             # Atomic swap / replace
             os.replace(tmp_path, reg_path)
 
-            # Directory durability acknowledgement: fsync parent directory on supported platforms
-            try:
-                if hasattr(os, "O_DIRECTORY"):
-                    dir_fd = os.open(reg_dir, os.O_RDONLY | os.O_DIRECTORY)
-                else:
-                    dir_fd = os.open(reg_dir, os.O_RDONLY)
+            # Directory durability acknowledgement: fsync parent directory on supported platforms (fail-closed)
+            if cls.is_directory_fsync_supported(reg_dir):
+                dir_fd = None
                 try:
+                    open_flags = os.O_RDONLY
+                    if hasattr(os, "O_DIRECTORY"):
+                        open_flags |= os.O_DIRECTORY
+                    dir_fd = os.open(reg_dir, open_flags)
                     os.fsync(dir_fd)
+                except Exception as d_err:
+                    raise RecoveryAuthError(
+                        f"Parent directory fsync failed for '{reg_dir}': {sanitize_error_message(str(d_err))}"
+                    ) from d_err
                 finally:
-                    os.close(dir_fd)
-            except Exception:
-                # Windows or filesystems where directory fd fsync is not allowed
-                pass
+                    if dir_fd is not None:
+                        try:
+                            os.close(dir_fd)
+                        except Exception:
+                            pass
 
-            # Final acknowledgement verification: assert file exists and is readable
+            # Final acknowledgement verification: assert file exists, is readable and contains written state
             if not os.path.exists(reg_path):
                 raise RecoveryAuthError(f"Durable acknowledgement failure: external register '{reg_path}' missing after atomic write")
+            ack_data = cls._read_register_unlocked(reg_path)
+            for j in reg_data.get("dispatched_jobs", []):
+                if j not in ack_data.get("dispatched_jobs", []):
+                    raise RecoveryAuthError(f"Durable acknowledgement failure: dispatched_job '{j}' not found in '{reg_path}'")
+            for n in reg_data.get("dispatched_nonces", []):
+                if n not in ack_data.get("dispatched_nonces", []):
+                    raise RecoveryAuthError(f"Durable acknowledgement failure: dispatched_nonce '{n}' not found in '{reg_path}'")
+            for cj in reg_data.get("consumed_jobs", []):
+                if cj not in ack_data.get("consumed_jobs", []):
+                    raise RecoveryAuthError(f"Durable acknowledgement failure: consumed_job '{cj}' not found in '{reg_path}'")
+            for cn in reg_data.get("consumed_nonces", []):
+                if cn not in ack_data.get("consumed_nonces", []):
+                    raise RecoveryAuthError(f"Durable acknowledgement failure: consumed_nonce '{cn}' not found in '{reg_path}'")
         finally:
             try:
                 if os.path.exists(tmp_path):

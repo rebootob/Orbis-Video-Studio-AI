@@ -803,53 +803,118 @@ class ViduExistingJobRecoveryService:
         3. Object-version consistency: validates that object size and ETag have not mutated between HEAD and GET.
         4. Incremental 64KB hashing directly from network/storage stream.
         """
+        import socket
+        import threading
         import time
 
+        def _abort_stream(body_obj):
+            """Abort underlying transport socket and close stream to cancel any in-flight read."""
+            if hasattr(body_obj, "close"):
+                try:
+                    body_obj.close()
+                except Exception:
+                    pass
+            sock = None
+            if hasattr(body_obj, "_raw_stream") and hasattr(body_obj._raw_stream, "sock"):
+                sock = body_obj._raw_stream.sock
+            elif hasattr(body_obj, "_sock"):
+                sock = body_obj._sock
+            elif hasattr(body_obj, "sock"):
+                sock = body_obj.sock
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
+        def _execute_with_transport_cancellation(func, timeout_seconds: float, desc: str, abort_action=None):
+            """Execute a network/storage operation with strict transport deadline and cancellation.
+
+            Guarantees:
+            1. Execution is bounded by timeout_seconds.
+            2. On timeout, triggers abort_action() to terminate the underlying transport socket/connection.
+            3. Joins the worker thread ensuring zero surviving background operations.
+            4. Fails closed with ViduRecoveryError.
+            """
+            result = [None]
+            exc = [None]
+            done = threading.Event()
+
+            def worker():
+                try:
+                    result[0] = func()
+                except Exception as e:
+                    exc[0] = e
+                finally:
+                    done.set()
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+
+            if not done.wait(timeout_seconds):
+                if abort_action:
+                    try:
+                        abort_action()
+                    except Exception:
+                        pass
+                t.join(timeout=0.4)
+                if t.is_alive():
+                    logger.error("Transport cancellation failed to terminate worker for %s", desc)
+                raise ViduRecoveryError(f"{desc} timed out after {timeout_seconds}s (transport deadline enforced)")
+
+            if exc[0]:
+                raise exc[0]
+            return result[0]
+
         def _read_chunk_with_transport_cancellation(body_stream, chunk_sz: int, timeout_sec: float) -> bytes:
-            """Read a single chunk with socket/transport level cancellation and guaranteed body termination."""
+            """Read a single chunk with socket-level timeout configuration, bounded by transport deadline."""
             raw_sock = None
             orig_timeout = None
             if hasattr(body_stream, "_raw_stream") and hasattr(body_stream._raw_stream, "sock") and body_stream._raw_stream.sock:
                 raw_sock = body_stream._raw_stream.sock
+            elif hasattr(body_stream, "_sock") and body_stream._sock:
+                raw_sock = body_stream._sock
+            elif hasattr(body_stream, "sock") and body_stream.sock:
+                raw_sock = body_stream.sock
+
+            if raw_sock and hasattr(raw_sock, "gettimeout") and hasattr(raw_sock, "settimeout"):
                 try:
                     orig_timeout = raw_sock.gettimeout()
                     raw_sock.settimeout(timeout_sec)
                 except Exception:
                     pass
 
-            t_start = time.monotonic()
-            try:
-                # If the underlying body is a mock or custom object supporting cancel
-                if hasattr(body_stream, "read_with_timeout"):
-                    return body_stream.read_with_timeout(chunk_sz, timeout_sec)
+            def _abort():
+                _abort_stream(body_stream)
 
-                data = body_stream.read(chunk_sz)
-                if time.monotonic() - t_start > timeout_sec:
-                    raise ViduRecoveryError(
-                        f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
-                    )
-                return data
-            except Exception as read_ex:
-                # Terminate underlying connection and close stream immediately
-                if hasattr(body_stream, "close"):
-                    try:
-                        body_stream.close()
-                    except Exception:
-                        pass
-                if raw_sock:
-                    try:
-                        raw_sock.close()
-                    except Exception:
-                        pass
-                if isinstance(read_ex, ViduRecoveryError):
+            def _read_direct():
+                t_chunk_start = time.monotonic()
+                try:
+                    data = body_stream.read(chunk_sz)
+                    if time.monotonic() - t_chunk_start > timeout_sec:
+                        raise ViduRecoveryError(
+                            f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
+                        )
+                    return data
+                except Exception as read_ex:
+                    _abort()
+                    if isinstance(read_ex, ViduRecoveryError):
+                        raise
+                    if "timed out" in str(read_ex).lower() or isinstance(read_ex, (TimeoutError, socket.timeout)):
+                        raise ViduRecoveryError(
+                            f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
+                        ) from read_ex
                     raise
-                if "timed out" in str(read_ex).lower() or isinstance(read_ex, TimeoutError):
-                    raise ViduRecoveryError(
-                        f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
-                    ) from read_ex
-                raise
+
+            try:
+                return _execute_with_transport_cancellation(
+                    _read_direct,
+                    timeout_seconds=timeout_sec,
+                    desc=f"Storage stream chunk read ({chunk_sz} bytes)",
+                    abort_action=_abort,
+                )
             finally:
-                if raw_sock and orig_timeout is not None:
+                if raw_sock and orig_timeout is not None and hasattr(raw_sock, "settimeout"):
                     try:
                         raw_sock.settimeout(orig_timeout)
                     except Exception:
@@ -860,8 +925,23 @@ class ViduExistingJobRecoveryService:
         head_etag = None
 
         if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
+            def _call_head():
+                return storage.client.head_object(Bucket=bucket, Key=key)
+
+            def _abort_head():
+                if hasattr(storage.client, "close"):
+                    try:
+                        storage.client.close()
+                    except Exception:
+                        pass
+
             try:
-                head = storage.client.head_object(Bucket=bucket, Key=key)
+                head = _execute_with_transport_cancellation(
+                    _call_head,
+                    timeout_seconds=5.0,
+                    desc=f"Storage metadata access for '{bucket}/{key}'",
+                    abort_action=_abort_head,
+                )
                 head_len = head.get("ContentLength")
                 head_etag = head.get("ETag")
             except Exception as h_err:
@@ -895,8 +975,23 @@ class ViduExistingJobRecoveryService:
         start_time = time.monotonic()
 
         if hasattr(storage, "client") and hasattr(storage.client, "get_object"):
+            def _call_get():
+                return storage.client.get_object(Bucket=bucket, Key=key)
+
+            def _abort_get():
+                if hasattr(storage.client, "close"):
+                    try:
+                        storage.client.close()
+                    except Exception:
+                        pass
+
             try:
-                response = storage.client.get_object(Bucket=bucket, Key=key)
+                response = _execute_with_transport_cancellation(
+                    _call_get,
+                    timeout_seconds=min(max_duration_seconds, 10.0),
+                    desc=f"Storage stream retrieval for '{bucket}/{key}'",
+                    abort_action=_abort_get,
+                )
             except Exception as get_err:
                 if isinstance(get_err, ViduRecoveryError):
                     raise

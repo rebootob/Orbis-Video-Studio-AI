@@ -75,6 +75,8 @@ def setup_auth_env(monkeypatch, tmp_path):
     monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "true")
     reg_file = str(tmp_path / "trusted_external_register.json")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", reg_file)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", reg_file)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
 
@@ -1631,6 +1633,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
         def __init__(self):
             self.closed = False
             self.timeout_set = None
+            self._abort_event = threading.Event()
 
         def settimeout(self, t):
             self.timeout_set = t
@@ -1640,6 +1643,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
 
         def close(self):
             self.closed = True
+            self._abort_event.set()
 
     class NonReturningBody:
         def __init__(self):
@@ -1647,9 +1651,10 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
             self._raw_stream = type("RawStream", (), {"sock": self._sock})()
             self.body_closed = False
 
-        def read_with_timeout(self, amt, timeout_sec):
-            time.sleep(timeout_sec + 0.05)
-            raise TimeoutError("Socket receive timed out (simulated transport interruption)")
+        def read(self, amt=64*1024):
+            # Truly non-returning read: blocks indefinitely until transport is closed/aborted
+            self._sock._abort_event.wait()
+            raise ConnectionResetError("Transport socket closed by cancellation deadline")
 
         def close(self):
             self.body_closed = True
@@ -1675,7 +1680,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
 
     wrapper = MockNonReturningStorageWrapper()
     t_start = time.monotonic()
-    with pytest.raises(ViduRecoveryError, match="Storage stream read blocked and timed out"):
+    with pytest.raises(ViduRecoveryError, match="Storage stream.*timed out"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
             storage=wrapper,
             bucket="orbis-media-assets",
@@ -1690,7 +1695,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
     assert wrapper.body._sock.closed is True  # Transport socket closed
     assert threading.active_count() <= threads_before  # Zero surviving threads/operations
 
-    # Subcase B: Slow EOF transfer bounds
+    # Subcase B: Slow EOF transfer bounds interrupted pre-emptively
     class SlowBodyStreamClient:
         def __init__(self):
             self.body_closed = False
@@ -1703,14 +1708,19 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
             class SlowBody:
                 def __init__(self):
                     self.call_count = 0
+                    self._abort_event = threading.Event()
+
                 def read(self, amt=64*1024):
                     self.call_count += 1
                     if self.call_count == 1:
                         return b"A" * 100
-                    time.sleep(0.05)
+                    # Blocks waiting for transport cancellation rather than sleeping
+                    self._abort_event.wait(timeout=10.0)
                     return b""
+
                 def close(self):
                     client_self.body_closed = True
+                    self._abort_event.set()
 
             return {"Body": SlowBody(), "ContentLength": 1000, "ETag": '"etag-slow"'}
 
@@ -1777,6 +1787,36 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
             expected_sha256="any-hash",
         )
     assert read_timeout_wrapper.client.body_closed is True
+
+    # Subcase E: Non-returning head_object call bounded and aborted
+    class HungHeadClient:
+        def __init__(self):
+            self.closed = False
+            self._abort_event = threading.Event()
+
+        def head_object(self, Bucket, Key):
+            self._abort_event.wait()
+            raise ConnectionResetError("Transport aborted")
+
+        def close(self):
+            self.closed = True
+            self._abort_event.set()
+
+    class MockHungHeadWrapper:
+        def __init__(self):
+            self.client = HungHeadClient()
+
+    hung_head_wrapper = MockHungHeadWrapper()
+    with pytest.raises(ViduRecoveryError, match="Storage metadata access.*timed out"):
+        ViduExistingJobRecoveryService.stream_verify_storage_object(
+            storage=hung_head_wrapper,
+            bucket="orbis-media-assets",
+            key="assets/hung_head.mp4",
+            expected_size=1000,
+            expected_sha256="any-hash",
+        )
+    assert hung_head_wrapper.client.closed is True
+    assert threading.active_count() <= threads_before
 
 
 # ==============================================================================
@@ -1970,6 +2010,7 @@ def test_scenario_39_mandatory_signed_restore_epoch_and_freshness(auth_keys, mon
 # ==============================================================================
 def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monkeypatch):
     """External register requires mandatory writable path, topology validation, atomic claims, crash safety, and real identities."""
+    import os
     import threading
 
     # Subcase A: Empty environment / no writable register fails closed
@@ -1977,32 +2018,62 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     with pytest.raises(AuthRevokedError, match="Mandatory authoritative external execution register is missing"):
         AuthoritativeExternalExecutionRegister.check_and_assert_freshness("job-1", "nonce-1")
 
-    # Subcase B: Untrusted topology (inside SQLite DB directory)
+    # Subcase B: Untrusted topology (inside SQLite DB directory) with neutral filename
     db_file = str(tmp_path / "app.db")
-    colliding_reg = str(tmp_path / "app.db.register.json")
+    colliding_reg = str(tmp_path / "neutral_audit_ledger.json")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", colliding_reg)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
     with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside DB directory"):
         AuthoritativeExternalExecutionRegister.validate_register_topology(colliding_reg, db_identity=f"sqlite:///{db_file}")
 
-    # Subcase C: Untrusted topology (inside storage bucket path)
-    bucket_dir = tmp_path / "storage_bucket"
+    # Subcase C: Untrusted topology (inside storage bucket path) with neutral filename (no heuristic)
+    bucket_dir = tmp_path / "isolated_store"
     bucket_dir.mkdir(parents=True, exist_ok=True)
-    bucket_colliding_reg = str(bucket_dir / "register.json")
-    with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage bucket directory"):
-        AuthoritativeExternalExecutionRegister.validate_register_topology(bucket_colliding_reg, storage_identity=str(bucket_dir))
+    neutral_reg = str(bucket_dir / "neutral_registry.dat")
+    with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage restore set directory"):
+        AuthoritativeExternalExecutionRegister.validate_register_topology(neutral_reg, storage_identity=str(bucket_dir))
 
-    # Subcase D: Unattested topology fails closed
+    # Subcase D: Symlink collision resolution to storage root
+    safe_dir = tmp_path / "safe_ext"
+    safe_dir.mkdir(parents=True, exist_ok=True)
+    symlink_reg = str(safe_dir / "symlink_ledger.json")
+    target_in_bucket = str(bucket_dir / "target_store.json")
+    with open(target_in_bucket, "w") as f:
+        f.write("{}")
+    try:
+        os.symlink(target_in_bucket, symlink_reg)
+        symlink_supported = True
+    except (OSError, NotImplementedError):
+        symlink_supported = False
+
+    if symlink_supported:
+        monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
+        with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage restore set directory"):
+            AuthoritativeExternalExecutionRegister.validate_register_topology(symlink_reg, storage_identity=str(bucket_dir))
+
+    # Subcase E: Mount/device collision check
+    isolated_db_dir = tmp_path / "db_store"
+    isolated_db_dir.mkdir(parents=True, exist_ok=True)
+    db_file_e = str(isolated_db_dir / "app.db")
+
+    monkeypatch.setenv("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT", "true")
     valid_dir = tmp_path / "external_register_dir"
     valid_dir.mkdir(parents=True, exist_ok=True)
     valid_reg = str(valid_dir / "trusted_external_ledger.json")
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(valid_dir))
+    with pytest.raises(AuthRuntimeMismatchError, match="distinct mount required"):
+        AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg, db_identity=f"sqlite:///{db_file_e}")
+    monkeypatch.delenv("EXTERNAL_REGISTER_REQUIRE_DISTINCT_MOUNT", raising=False)
+
+    # Subcase F: Unattested topology fails closed
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", valid_reg)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "false")
     with pytest.raises(AuthRevokedError, match="lacks mandatory topology/freshness attestation"):
         AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg)
 
-    # Subcase E: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
+    # Subcase G: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
     results = []
 
@@ -2028,26 +2099,28 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
 
     assert sorted(results) == ["REPLAY_BLOCKED", "SUCCESS"]
 
-    # Subcase F: Injected step-by-step failures during atomic write/fsync/replace
-    orig_write = AuthoritativeExternalExecutionRegister._write_atomic_and_release
+    # Subcase H: Injected failures into ACTUAL os.fsync/os.replace stages without replacing writer
+    orig_fsync = os.fsync
+    orig_replace = os.replace
 
-    # Step 1: File fsync failure
-    def failing_file_fsync(reg_path, fd, lock_path, reg_data):
-        raise OSError("Injected file fsync failure before replace")
+    # Step 1: File data fsync failure
+    def failing_file_fsync(fd):
+        raise OSError("Injected file data fsync failure")
 
-    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_write_atomic_and_release", failing_file_fsync)
-    with pytest.raises(OSError, match="Injected file fsync failure before replace"):
+    monkeypatch.setattr(os, "fsync", failing_file_fsync)
+    with pytest.raises(OSError, match="Injected file data fsync failure"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id="crash-job-1",
             auth_nonce="crash-nonce-1",
             execution_id="exec-crash-1",
         )
 
-    # Step 2: Atomic replace failure
-    def failing_replace(reg_path, fd, lock_path, reg_data):
+    # Step 2: Atomic replace CAS failure
+    monkeypatch.setattr(os, "fsync", orig_fsync)
+    def failing_replace_cas(src, dst):
         raise OSError("Injected atomic replace CAS failure")
 
-    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_write_atomic_and_release", failing_replace)
+    monkeypatch.setattr(os, "replace", failing_replace_cas)
     with pytest.raises(OSError, match="Injected atomic replace CAS failure"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id="crash-job-2",
@@ -2055,25 +2128,35 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
             execution_id="exec-crash-2",
         )
 
-    # Step 3: Directory fsync failure
-    def failing_dir_fsync(reg_path, fd, lock_path, reg_data):
-        raise OSError("Injected directory fsync failure after replace")
+    # Step 3: Parent directory fsync failure (MUST fail closed and not be swallowed)
+    monkeypatch.setattr(os, "replace", orig_replace)
+    monkeypatch.setenv("DIRECTORY_FSYNC_SUPPORTED", "true")
+    fsync_calls = [0]
 
-    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_write_atomic_and_release", failing_dir_fsync)
-    with pytest.raises(OSError, match="Injected directory fsync failure after replace"):
+    def failing_parent_dir_fsync(fd):
+        fsync_calls[0] += 1
+        if fsync_calls[0] > 1:
+            # First fsync is file data, second fsync is directory handle
+            raise OSError("Injected directory fsync failure after replace")
+        return orig_fsync(fd)
+
+    # On Windows where os.open on directory is PermissionError, os.open or os.fsync triggers failure
+    monkeypatch.setattr(os, "fsync", failing_parent_dir_fsync)
+    with pytest.raises(RecoveryAuthError, match="Parent directory fsync failed"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id="crash-job-3",
             auth_nonce="crash-nonce-3",
             execution_id="exec-crash-3",
         )
+    monkeypatch.delenv("DIRECTORY_FSYNC_SUPPORTED", raising=False)
 
     # Step 4: Durable acknowledgement read-back failure
-    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_write_atomic_and_release", orig_write)
+    monkeypatch.setattr(os, "fsync", orig_fsync)
     def failing_ack(reg_path):
-        return {"records": {}}
+        return {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
 
     monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "_read_register_unlocked", failing_ack)
-    with pytest.raises(RecoveryAuthError, match="Durable acknowledgement failed"):
+    with pytest.raises(RecoveryAuthError, match="Durable acknowledgement failure"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id="crash-job-4",
             auth_nonce="crash-nonce-4",
@@ -2086,12 +2169,14 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
 # ==============================================================================
 def test_scenario_41_external_dispatch_registration_failure_audited(test_db, mock_storage, auth_keys, monkeypatch):
     """When external register claim or record_consumed fails, failure audit is recorded and errors are preserved."""
+    import json
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
     mock_provider = MockProviderAdapter()
 
     orig_record_audit = RecoveryAuthService.record_failure_audit
     orig_claim_dispatch = AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch
+    orig_record_consumed = AuthoritativeExternalExecutionRegister.record_consumed
 
     # Subcase A: AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch failure
     def failing_dispatch(*args, **kwargs):
@@ -2124,23 +2209,18 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
     assert audit.db_transaction_state == "COMMITTED_TERMINAL"
 
     # Subcase B: Dispatch failure combined with DB terminal commit failure
-    # Reset DB state and use fresh nonce to avoid replay
     test_db.query(RecoveryFailureAudit).delete()
     test_db.query(ProviderExecutionFence).delete()
     test_db.commit()
 
     payload_b, sig_b = make_valid_auth(seed)
 
-    # In execute_recovery_harness, step 5 claims pre-get dispatch, and if that fails,
-    # it commits CONSUMED_TERMINAL_FAILURE. If commit fails THERE, the error must still be caught.
-    # We monkeypatch db.commit ONLY during the terminal commit step:
     orig_commit = test_db.commit
     commit_call_count = [0]
 
     def selective_failing_commit():
         commit_call_count[0] += 1
         if commit_call_count[0] > 1:
-            # First commit is Phase 2 CLAIMED_PENDING_GET, second commit is CONSUMED_TERMINAL_FAILURE
             raise OperationalError("COMMIT_FAIL", {}, Exception("Injected terminal commit failure"))
         return orig_commit()
 
@@ -2158,6 +2238,14 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             storage_provider=mock_storage,
         )
     test_db.commit = orig_commit
+
+    # Assert distinct terminal transition failure audit is recorded alongside primary audit
+    dispatch_audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="EXTERNAL_DISPATCH_REGISTRATION").first()
+    assert dispatch_audit is not None
+    term_audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="EXTERNAL_DISPATCH_TERMINAL_TRANSITION").first()
+    assert term_audit is not None
+    assert "Injected terminal commit failure" in term_audit.error_message
+    assert "Injected external ledger claim lock failure" in term_audit.error_message
 
     # Subcase C: Audit write failure during external dispatch registration failure
     test_db.query(RecoveryFailureAudit).delete()
@@ -2187,14 +2275,6 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
     test_db.query(ProviderExecutionFence).delete()
     test_db.commit()
 
-    # Re-apply environment variables needed for valid execution
-    monkeypatch.setenv("CURRENT_RESTORE_EPOCH", "epoch-0")
-    monkeypatch.setenv("RESTORE_EPOCH_ATTESTED", "true")
-    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
-    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS", "")
-    monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
-
-    # Restore unpatched methods
     monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", orig_record_audit)
     monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "claim_pre_get_dispatch", orig_claim_dispatch)
 
@@ -2205,7 +2285,6 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
 
     monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "record_consumed", failing_consumed)
 
-    # In mock mode, harness will proceed past verification to step 8 record_consumed
     with pytest.raises(RecoveryAuthError, match="Injected external register record_consumed fsync failure"):
         execute_recovery_harness(
             db=test_db,
@@ -2223,3 +2302,81 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
     assert consumed_audit is not None
     assert consumed_audit.error_class == "RecoveryAuthError"
     assert "Injected external register record_consumed fsync failure" in consumed_audit.error_message
+    assert consumed_audit.db_transaction_state == "COMMITTED_TERMINAL"
+
+    # Subcase E: record_consumed failure combined with DB terminal commit failure
+    test_db.query(GenerationJob).delete()
+    test_db.query(Asset).delete()
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.commit()
+
+    if hasattr(mock_storage, "_store"):
+        mock_storage._store.clear()
+
+    reg_path = AuthoritativeExternalExecutionRegister.get_register_path()
+    with open(reg_path, "w", encoding="utf-8") as f:
+        json.dump({"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}, f)
+
+    payload_e, sig_e = make_valid_auth(seed)
+    failing_rc_flag = [False]
+
+    def failing_consumed_e(*args, **kwargs):
+        failing_rc_flag[0] = True
+        raise RecoveryAuthError("Injected external register record_consumed fsync failure")
+
+    monkeypatch.setattr(AuthoritativeExternalExecutionRegister, "record_consumed", failing_consumed_e)
+
+    def selective_failing_commit_e():
+        if failing_rc_flag[0]:
+            failing_rc_flag[0] = False
+            raise OperationalError("COMMIT_FAIL", {}, Exception("Injected terminal commit failure after record_consumed"))
+        return orig_commit()
+
+    test_db.commit = selective_failing_commit_e
+    with pytest.raises(RecoveryAuthError, match="Injected external register record_consumed fsync failure"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_e,
+            signature_bytes=sig_e,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_e.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+    test_db.commit = orig_commit
+
+    # Assert distinct terminal transition audit for record_consumed
+    rc_term_audit = test_db.query(RecoveryFailureAudit).filter_by(failure_stage="EXTERNAL_RECORD_CONSUMED_TERMINAL_TRANSITION").first()
+    assert rc_term_audit is not None
+    assert "Injected terminal commit failure after record_consumed" in rc_term_audit.error_message
+
+    # Subcase F: record_consumed failure + audit write failure
+    test_db.query(GenerationJob).delete()
+    test_db.query(Asset).delete()
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.commit()
+
+    if hasattr(mock_storage, "_store"):
+        mock_storage._store.clear()
+
+    with open(reg_path, "w", encoding="utf-8") as f:
+        json.dump({"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}, f)
+
+    payload_f, sig_f = make_valid_auth(seed)
+    monkeypatch.setattr(RecoveryAuthService, "record_failure_audit", failing_record_audit)
+    with pytest.raises(AuditWriteFailureError, match="Injected DB audit table disk full failure"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_f,
+            signature_bytes=sig_f,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_f.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
