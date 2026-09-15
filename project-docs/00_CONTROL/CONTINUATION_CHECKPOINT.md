@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Post-Review 5204217914 Corrective Hardening (R5)
+> Updated: Post-Review 5204565590 Corrective Hardening (R5)
 
 ---
 
@@ -15,44 +15,42 @@
 - **Authorized Base Main**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-R5`
 - **Current Gate**: Gate B (Execution Harness, Standalone Schema & Failure Matrix)
-- **Gate B Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW` (Addressing Review 5204217914: CHANGES REQUIRED)
+- **Gate B Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW` (Addressing Review 5204565590: CHANGES REQUIRED)
 - **Next Gate**: `CHATGPT_INDEPENDENT_REVIEW` (Hermes STOP condition enforced; Gate B is NOT marked PASS/VERIFIED until independent review completes)
 - **Gate C & REC1-RUN1**: `STRICTLY NOT AUTHORIZED / BLOCKED`
 
 ---
 
-## 2. Review 5204217914 Blocker Resolution Summary
+## 2. Review 5204565590 Blocker Resolution Summary
 
-1. **Explicit REQUIRED `restore_epoch` & Independent Freshness**:
-   - Added `restore_epoch: str` as an explicit REQUIRED field in `CanonicalAuthPayload` with no default, included in canonical JSON serialization and Ed25519 signing.
-   - Sourced current runtime restore epoch independently via `RecoveryAuthService.get_current_runtime_restore_epoch()`.
-   - Missing `CURRENT_RESTORE_EPOCH` or missing attestation `RESTORE_EPOCH_ATTESTED="true"` fails closed with `AuthRevokedError` before provider GET.
-   - Tokens with missing, empty, or stale `restore_epoch` fail closed with `AuthScopeMismatchError` before provider GET.
-   - Verified across all missing, stale, unattested, and matching epoch cases (**VERIFIED in Scenario 39**).
+1. **Wired Independently Discovered Resource Identities into Production Calls**:
+   - Resolved real database connection URL/identity and object storage endpoint/bucket identity.
+   - Replaced path heuristics with real directory/mount canonical resolution (`os.path.realpath`) and common-ancestor traversal checks.
+   - Passed verified identities into `check_and_assert_freshness`, `claim_pre_get_dispatch`, and `record_consumed` across production harness paths.
+   - Rejects any register path sharing directory tree, mount, or restore set with DB or storage.
 
-2. **Authoritative External Register with Atomic Durable Claim & Topology Validation**:
-   - Replaced no-op/read-only authorization with a mandatory atomic durable pre-GET claim in `AuthoritativeExternalExecutionRegister`.
-   - Disallowed empty-environment / read-only execution: missing `EXTERNAL_EXECUTION_REGISTER_PATH` fails closed with `AuthRevokedError` before provider GET.
-   - Added trusted topology validation (`EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED="true"`): rejects register paths residing inside database directories or object storage bucket directories with `AuthRuntimeMismatchError`.
-   - Implemented cross-platform atomic lock (`O_CREAT | O_EXCL`), temporary file write, `f.flush()`, `os.fsync()`, and atomic replace (`os.replace()`).
-   - Verified concurrency (2 simultaneous claims -> exactly 1 wins, second blocked with `AuthReplayError`), topology rejection, write/flush crash failure, and combined DB+storage wipe (**VERIFIED in Scenarios 28 and 40**).
+2. **Crash-Durable Pre-GET Claim with Verification**:
+   - Temporary file write + `f.flush()` + `os.fsync()`.
+   - Atomic replacement (`os.replace`).
+   - Parent directory `os.fsync()` after replacement.
+   - Read-back verification (durable acknowledgement) before authorizing provider GET.
+   - Verified through step-by-step injected failures: file fsync, replace CAS, directory fsync, and durable ack read-back failure (**VERIFIED in Scenario 40**).
 
-3. **Genuinely Bounded / Cancellable Storage Transfer**:
-   - Replaced `ThreadPoolExecutor` context manager (whose `__exit__` blocks until threads finish) with a non-blocking daemon worker thread pattern.
-   - Applied transport-level deadlines to `head_object` (5s), `get_object` (10s), and `body.read()` (chunk-level deadline).
-   - Configured botocore `Config` connect timeout (5s), read timeout (10s), and max retries (2) in `S3CompatibleObjectStorageProvider`.
-   - Proved bounded elapsed completion (< 0.6s) and response `body.close()` execution for an indefinitely non-returning `body.read()`, without hanging the test suite (**VERIFIED in Scenario 35**).
+3. **Genuine Transport-Level Request Cancellation**:
+   - Replaced daemon worker thread wait wrappers with direct transport/socket timeout cancellation.
+   - Uses underlying socket `settimeout` and stream termination to abort blocked transfers.
+   - Asserts elapsed bound, complete Body stream cleanup, and zero surviving operations/threads (**VERIFIED in Scenario 35**).
 
-4. **Isolated Sanitized Autonomous Audit for External Dispatch Registration Failure**:
-   - Wrapped `AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch` in an isolated audited `try/except` block in `vidu_recovery_harness.py`.
-   - On claim failure: transitions fence to `CONSUMED_TERMINAL_FAILURE` in DB, truthfully records rollback state (`COMMITTED_TERMINAL`/`ROLLBACK_FAILED`), writes a durable failure audit with `failure_stage="EXTERNAL_DISPATCH_REGISTRATION"`, and preserves zero provider GET calls.
-   - If audit table write fails, `AuditWriteFailureError` propagates fail-closed (**VERIFIED in Scenario 41**).
+4. **Complete Autonomous Audit Coverage**:
+   - External dispatch registration failure handling with truthful transition commit/rollback recording.
+   - External record_consumed lock/write/fsync/replace failure auditing.
+   - Fail-closed propagation of `AuditWriteFailureError` on audit write failure for both paths, while preserving primary cause (**VERIFIED in Scenario 41**).
 
 5. **Truthful Status & Document Alignment**:
-   - Acceptance matrix expanded to 41 scenarios:
-     * Scenarios 1-24, 26-41: **VERIFIED (PASSED)**
-     * Scenario 25: **NOT PROVEN / DEFERRED TO GATE C** (Live cloud backup/restore verification is explicitly not proven in Gate B and deferred to Gate C).
-   - Synchronized all control documents: `ACTIVE_TASK.md`, `CURRENT_STATE.md`, `DOCUMENT_INDEX.md`, `CHAT_HANDOFF.md`, `NEXT_CHAT_PROMPT.md`, `WORK_PACKAGES.md`, and `P4_WP020_LIVE_R5_VIDU2_REC1_HARNESS1.md`.
+   - Acceptance matrix status:
+     * Scenarios 1-24, 26-41: **VERIFIED**
+     * Scenario 25: **NOT PROVEN / DEFERRED TO GATE C** (Live cloud snapshot restore verification).
+   - Synchronized all control documents: `ACTIVE_TASK.md`, `CURRENT_STATE.md`, `CHAT_HANDOFF.md`, `NEXT_CHAT_PROMPT.md`, and `P4_WP020_LIVE_R5_VIDU2_REC1_HARNESS1.md`.
    - Gate B status maintained as `IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (AWAITING CHATGPT INDEPENDENT REVIEW)`.
 
 ---

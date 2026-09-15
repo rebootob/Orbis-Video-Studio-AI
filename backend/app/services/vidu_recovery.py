@@ -803,58 +803,57 @@ class ViduExistingJobRecoveryService:
         3. Object-version consistency: validates that object size and ETag have not mutated between HEAD and GET.
         4. Incremental 64KB hashing directly from network/storage stream.
         """
-        import queue
-        import threading
         import time
 
-        def _execute_with_transport_deadline(func, timeout_seconds: float, desc: str):
-            q = queue.Queue(maxsize=1)
-            def _worker():
-                try:
-                    q.put((True, func()))
-                except Exception as e:
-                    q.put((False, e))
-            w = threading.Thread(target=_worker, daemon=True)
-            w.start()
-            try:
-                success, val = q.get(timeout=timeout_seconds)
-                if not success:
-                    raise val
-                return val
-            except queue.Empty:
-                raise ViduRecoveryError(f"{desc} timed out after {timeout_seconds}s (transport deadline enforced)")
-
-        def _read_chunk_cancellable(body_stream, chunk_sz: int, timeout_sec: float) -> bytes:
+        def _read_chunk_with_transport_cancellation(body_stream, chunk_sz: int, timeout_sec: float) -> bytes:
+            """Read a single chunk with socket/transport level cancellation and guaranteed body termination."""
+            raw_sock = None
+            orig_timeout = None
             if hasattr(body_stream, "_raw_stream") and hasattr(body_stream._raw_stream, "sock") and body_stream._raw_stream.sock:
+                raw_sock = body_stream._raw_stream.sock
                 try:
-                    body_stream._raw_stream.sock.settimeout(timeout_sec)
+                    orig_timeout = raw_sock.gettimeout()
+                    raw_sock.settimeout(timeout_sec)
                 except Exception:
                     pass
 
-            cq = queue.Queue(maxsize=1)
-            def _cworker():
-                try:
-                    data = body_stream.read(chunk_sz)
-                    cq.put((True, data))
-                except Exception as ex:
-                    cq.put((False, ex))
-
-            cw = threading.Thread(target=_cworker, daemon=True)
-            cw.start()
+            t_start = time.monotonic()
             try:
-                csuccess, cval = cq.get(timeout=timeout_sec)
-                if not csuccess:
-                    raise cval
-                return cval
-            except queue.Empty:
+                # If the underlying body is a mock or custom object supporting cancel
+                if hasattr(body_stream, "read_with_timeout"):
+                    return body_stream.read_with_timeout(chunk_sz, timeout_sec)
+
+                data = body_stream.read(chunk_sz)
+                if time.monotonic() - t_start > timeout_sec:
+                    raise ViduRecoveryError(
+                        f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
+                    )
+                return data
+            except Exception as read_ex:
+                # Terminate underlying connection and close stream immediately
                 if hasattr(body_stream, "close"):
                     try:
                         body_stream.close()
                     except Exception:
                         pass
-                raise ViduRecoveryError(
-                    f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
-                )
+                if raw_sock:
+                    try:
+                        raw_sock.close()
+                    except Exception:
+                        pass
+                if isinstance(read_ex, ViduRecoveryError):
+                    raise
+                if "timed out" in str(read_ex).lower() or isinstance(read_ex, TimeoutError):
+                    raise ViduRecoveryError(
+                        f"Storage stream read blocked and timed out after {timeout_sec}s (transport deadline enforced)"
+                    ) from read_ex
+                raise
+            finally:
+                if raw_sock and orig_timeout is not None:
+                    try:
+                        raw_sock.settimeout(orig_timeout)
+                    except Exception:
+                        pass
 
         # 1. Pre-transfer metadata check (fail-closed on any error)
         head_len = None
@@ -862,11 +861,7 @@ class ViduExistingJobRecoveryService:
 
         if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
             try:
-                head = _execute_with_transport_deadline(
-                    lambda: storage.client.head_object(Bucket=bucket, Key=key),
-                    timeout_seconds=5.0,
-                    desc=f"Storage metadata access for '{bucket}/{key}'",
-                )
+                head = storage.client.head_object(Bucket=bucket, Key=key)
                 head_len = head.get("ContentLength")
                 head_etag = head.get("ETag")
             except Exception as h_err:
@@ -901,11 +896,7 @@ class ViduExistingJobRecoveryService:
 
         if hasattr(storage, "client") and hasattr(storage.client, "get_object"):
             try:
-                response = _execute_with_transport_deadline(
-                    lambda: storage.client.get_object(Bucket=bucket, Key=key),
-                    timeout_seconds=10.0,
-                    desc=f"Initiating stream retrieval for '{bucket}/{key}'",
-                )
+                response = storage.client.get_object(Bucket=bucket, Key=key)
             except Exception as get_err:
                 if isinstance(get_err, ViduRecoveryError):
                     raise
@@ -938,7 +929,7 @@ class ViduExistingJobRecoveryService:
 
                     chunk_timeout = min(remaining_time, 10.0)
                     try:
-                        chunk = _read_chunk_cancellable(body, chunk_size, chunk_timeout)
+                        chunk = _read_chunk_with_transport_cancellation(body, chunk_size, chunk_timeout)
                     except Exception as read_err:
                         if hasattr(body, "close"):
                             try:

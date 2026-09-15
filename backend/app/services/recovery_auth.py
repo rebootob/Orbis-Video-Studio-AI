@@ -240,19 +240,74 @@ class AuthoritativeExternalExecutionRegister:
                 "(EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED and EXTERNAL_EXECUTION_REGISTER_ATTESTED must be 'true')"
             )
 
-        norm_path = os.path.abspath(os.path.normpath(reg_path))
+        norm_path = os.path.realpath(os.path.abspath(reg_path))
 
-        # Disallow register from residing inside DB or storage paths
-        if db_identity and db_identity.lower().startswith("sqlite:///"):
-            db_file = os.path.abspath(os.path.normpath(db_identity[len("sqlite:///"):]))
-            if norm_path == db_file or norm_path.startswith(os.path.dirname(db_file)):
+        # 1. Allowed external register path binding if configured
+        allowed_prefix = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
+        if allowed_prefix:
+            norm_allowed = os.path.realpath(os.path.abspath(allowed_prefix))
+            if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
                 raise AuthRuntimeMismatchError(
-                    f"External execution register path '{norm_path}' cannot reside inside DB directory (topology collision)"
+                    f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
                 )
+
+        # 2. Real path / mount decoupling from DB restore set
+        if db_identity:
+            clean_db = db_identity
+            for prefix in ("sqlite:///", "sqlite://", "sqlite:"):
+                if clean_db.lower().startswith(prefix):
+                    clean_db = clean_db[len(prefix):]
+                    break
+            if clean_db and clean_db != ":memory:":
+                db_real = os.path.realpath(os.path.abspath(clean_db))
+                db_dir = os.path.dirname(db_real)
+                if norm_path == db_real or norm_path == db_dir or norm_path.startswith(db_dir + os.sep):
+                    raise AuthRuntimeMismatchError(
+                        f"External execution register path '{norm_path}' cannot reside inside DB directory/file '{db_dir}' (topology collision)"
+                    )
+
+        # 3. Real path / mount decoupling from Storage restore set
+        # Check actual storage provider local directories if local/mock storage is used
+        from app.core.config import settings
+        storage_roots = []
+        local_store_root = getattr(settings, "LOCAL_STORAGE_DIR", None) or os.environ.get("LOCAL_STORAGE_DIR", "")
+        if local_store_root:
+            storage_roots.append(local_store_root)
+        storage_bucket_dir = os.environ.get("STORAGE_BUCKET_DIR", "")
+        if storage_bucket_dir:
+            storage_roots.append(storage_bucket_dir)
+
+        # Also inspect storage_identity if it contains local path indicators
+        if storage_identity and (storage_identity.startswith("mock://") or "file://" in storage_identity):
+            # parse possible path
+            parts = storage_identity.split("://", 1)[-1].split("/")
+            bucket_candidate = parts[-1] if parts else ""
+            if bucket_candidate:
+                storage_bucket_env = os.environ.get("OBJECT_STORAGE_BUCKET_DIR", "")
+                if storage_bucket_env:
+                    storage_roots.append(storage_bucket_env)
+
+        for s_root in storage_roots:
+            if s_root:
+                s_real = os.path.realpath(os.path.abspath(s_root))
+                if norm_path == s_real or norm_path.startswith(s_real + os.sep):
+                    raise AuthRuntimeMismatchError(
+                        f"External execution register path '{norm_path}' cannot reside inside storage bucket directory '{s_real}' (topology collision)"
+                    )
+
+        # String heuristic check as second-layer guard
         if "storage" in norm_path.lower() and "bucket" in norm_path.lower():
             raise AuthRuntimeMismatchError(
                 f"External execution register path '{norm_path}' cannot reside inside storage bucket directory"
             )
+
+    @classmethod
+    def _read_register_unlocked(cls, reg_path: str) -> dict:
+        """Read external register without acquiring exclusive lock."""
+        if not os.path.exists(reg_path):
+            return {"dispatched_jobs": [], "dispatched_nonces": [], "consumed_jobs": [], "consumed_nonces": []}
+        with open(reg_path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     @classmethod
     def _acquire_lock_and_read(cls, reg_path: str):
@@ -291,15 +346,36 @@ class AuthoritativeExternalExecutionRegister:
 
     @classmethod
     def _write_atomic_and_release(cls, reg_path: str, fd: int, lock_path: str, reg_data: dict) -> None:
-        """Atomic write via temporary file, flush, fsync, os.replace, and release lock."""
+        """Atomic write via temporary file, flush, fsync, os.replace, parent directory fsync, and release lock."""
         import time
+        reg_dir = os.path.dirname(os.path.abspath(reg_path))
         tmp_path = f"{reg_path}.tmp.{os.getpid()}.{time.time_ns()}"
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(reg_data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
+
+            # Atomic swap / replace
             os.replace(tmp_path, reg_path)
+
+            # Directory durability acknowledgement: fsync parent directory on supported platforms
+            try:
+                if hasattr(os, "O_DIRECTORY"):
+                    dir_fd = os.open(reg_dir, os.O_RDONLY | os.O_DIRECTORY)
+                else:
+                    dir_fd = os.open(reg_dir, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except Exception:
+                # Windows or filesystems where directory fd fsync is not allowed
+                pass
+
+            # Final acknowledgement verification: assert file exists and is readable
+            if not os.path.exists(reg_path):
+                raise RecoveryAuthError(f"Durable acknowledgement failure: external register '{reg_path}' missing after atomic write")
         finally:
             try:
                 if os.path.exists(tmp_path):
@@ -314,14 +390,20 @@ class AuthoritativeExternalExecutionRegister:
                 pass
 
     @classmethod
-    def check_and_assert_freshness(cls, provider_job_id: str, auth_nonce: str) -> None:
+    def check_and_assert_freshness(
+        cls,
+        provider_job_id: str,
+        auth_nonce: str,
+        db_identity: str = "",
+        storage_identity: str = "",
+    ) -> None:
         """Verify external evidence outside DB and storage before any network I/O.
 
         Requires a valid, writable external register path with attested topology.
         Empty environment or read-only mode fails closed.
         """
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path)
+        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -349,10 +431,17 @@ class AuthoritativeExternalExecutionRegister:
                 pass
 
     @classmethod
-    def claim_pre_get_dispatch(cls, provider_job_id: str, auth_nonce: str, execution_id: str) -> None:
+    def claim_pre_get_dispatch(
+        cls,
+        provider_job_id: str,
+        auth_nonce: str,
+        execution_id: str,
+        db_identity: str = "",
+        storage_identity: str = "",
+    ) -> None:
         """Atomically claim pre-GET dispatch fence with durable fsync before provider GET."""
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path)
+        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -375,6 +464,16 @@ class AuthoritativeExternalExecutionRegister:
             dispatched_jobs.append(provider_job_id)
             dispatched_nonces.append(auth_nonce)
             cls._write_atomic_and_release(reg_path, fd, lock_path, reg_data)
+
+            # Durable acknowledgement read-back verification
+            ack_data = cls._read_register_unlocked(reg_path)
+            if (
+                provider_job_id not in ack_data.get("dispatched_jobs", [])
+                or auth_nonce not in ack_data.get("dispatched_nonces", [])
+            ):
+                raise RecoveryAuthError(
+                    f"Durable acknowledgement failed: claim for job '{provider_job_id}' / nonce '{auth_nonce}' not persisted to '{reg_path}'"
+                )
         except Exception:
             try:
                 os.close(fd)
@@ -390,10 +489,16 @@ class AuthoritativeExternalExecutionRegister:
         cls.claim_pre_get_dispatch(provider_job_id, auth_nonce, execution_id)
 
     @classmethod
-    def record_consumed(cls, provider_job_id: str, auth_nonce: str) -> None:
+    def record_consumed(
+        cls,
+        provider_job_id: str,
+        auth_nonce: str,
+        db_identity: str = "",
+        storage_identity: str = "",
+    ) -> None:
         """Atomically record terminal consumption to external register."""
         reg_path = cls.get_register_path()
-        cls.validate_register_topology(reg_path)
+        cls.validate_register_topology(reg_path, db_identity=db_identity, storage_identity=storage_identity)
 
         fd, lock_path, reg_data = cls._acquire_lock_and_read(reg_path)
         try:
@@ -659,6 +764,8 @@ class RecoveryAuthService:
         AuthoritativeExternalExecutionRegister.check_and_assert_freshness(
             provider_job_id=payload.provider_job_id,
             auth_nonce=payload.auth_nonce,
+            db_identity=actual_db_id,
+            storage_identity=actual_storage_id,
         )
 
         if storage_provider is not None:

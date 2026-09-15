@@ -189,22 +189,29 @@ def execute_recovery_harness(
     asset_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://video-generation/{job_uuid}")
     project_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"orbis://vidu-recovery/project/{TARGET_HISTORICAL_PROVIDER_JOB_ID}")
 
+    actual_db_id = str(getattr(db.bind, "url", "")) if hasattr(db, "bind") and db.bind else ""
+    actual_storage_id = f"{getattr(storage, 'endpoint_url', '')}/{bucket_name}"
+
     # Write authoritative external pre-GET dispatch fence to storage and external register BEFORE issuing any provider GET
     try:
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
             auth_nonce=auth_payload.auth_nonce,
             execution_id=exec_id,
+            db_identity=actual_db_id,
+            storage_identity=actual_storage_id,
         )
     except Exception as ext_err:
         sanitized_ext_err = sanitize_error_message(str(ext_err))
         ext_rb_state = "UNKNOWN"
+        claim_term_commit_err = None
         try:
             fence.status = "CONSUMED_TERMINAL_FAILURE"
             fence.updated_at = utc_now()
             db.commit()
             ext_rb_state = "COMMITTED_TERMINAL"
-        except Exception:
+        except Exception as c_err:
+            claim_term_commit_err = c_err
             try:
                 db.rollback()
                 ext_rb_state = "ROLLED_BACK"
@@ -221,6 +228,12 @@ def execute_recovery_harness(
             compensation_status="NOT_APPLICABLE",
             fence_id=fence.fence_id if fence else None,
         )
+        if claim_term_commit_err is not None:
+            sanitized_tc = sanitize_error_message(str(claim_term_commit_err))
+            raise RecoveryAuthError(
+                f"Terminal fence commit failed after external dispatch registration failure ({sanitized_tc}); "
+                f"primary error: {sanitized_ext_err}"
+            ) from ext_err
         raise
 
     pre_get_marker_key = f"fences/in_flight/{TARGET_HISTORICAL_PROVIDER_JOB_ID}.json"
@@ -437,10 +450,48 @@ def execute_recovery_harness(
         raise
 
     # 8. All verifications passed: persist out-of-band marker and CONSUMED_SUCCESS
-    AuthoritativeExternalExecutionRegister.record_consumed(
-        provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
-        auth_nonce=auth_payload.auth_nonce,
-    )
+    try:
+        AuthoritativeExternalExecutionRegister.record_consumed(
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            auth_nonce=auth_payload.auth_nonce,
+            db_identity=actual_db_id,
+            storage_identity=actual_storage_id,
+        )
+    except Exception as rec_cons_err:
+        sanitized_rc_err = sanitize_error_message(str(rec_cons_err))
+        rc_db_state = "UNKNOWN"
+        rc_term_commit_err = None
+        try:
+            fence.status = "CONSUMED_TERMINAL_FAILURE"
+            fence.updated_at = utc_now()
+            db.commit()
+            rc_db_state = "COMMITTED_TERMINAL"
+        except Exception as c_err:
+            rc_term_commit_err = c_err
+            try:
+                db.rollback()
+                rc_db_state = "ROLLED_BACK"
+            except Exception:
+                rc_db_state = "ROLLBACK_FAILED"
+
+        RecoveryAuthService.record_failure_audit(
+            db=db,
+            provider_job_id=TARGET_HISTORICAL_PROVIDER_JOB_ID,
+            failure_stage="EXTERNAL_RECORD_CONSUMED",
+            error_class=rec_cons_err.__class__.__name__,
+            error_message=sanitized_rc_err,
+            db_transaction_state=rc_db_state,
+            compensation_status="NOT_APPLICABLE",
+            fence_id=fence.fence_id if fence else None,
+        )
+        if rc_term_commit_err is not None:
+            sanitized_tc = sanitize_error_message(str(rc_term_commit_err))
+            raise RecoveryAuthError(
+                f"Terminal fence commit failed after external record_consumed failure ({sanitized_tc}); "
+                f"primary error: {sanitized_rc_err}"
+            ) from rec_cons_err
+        raise
+
     try:
         marker_bytes = json.dumps({
             "provider_job_id": TARGET_HISTORICAL_PROVIDER_JOB_ID,
