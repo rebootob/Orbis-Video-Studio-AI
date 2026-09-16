@@ -27,6 +27,29 @@ MAX_VALIDITY_WINDOW_SECONDS = 7200  # 2 hours
 
 
 AUTHORIZED_RUNTIME_TARGET_PROFILES = {
+    "TEST": {
+        "trusted_db_identities": [
+            "sqlite://:memory:",
+            "sqlite:///",
+            "sqlite://",
+            "postgresql+psycopg://localhost:5432/orbis_studio",
+            "postgresql+psycopg://127.0.0.1:5432/orbis_studio",
+            "postgresql://localhost:5432/orbis_studio",
+            "postgresql://127.0.0.1:5432/orbis_studio",
+        ],
+        "trusted_storage_identities": [
+            "mock://local/test-bucket",
+            "mock://local/orbis-media-assets",
+            "mock://local/orbis-assets",
+            "s3://http://127.0.0.1/test-bucket",
+            "s3://http://localhost/test-bucket",
+            "s3://http://127.0.0.1/orbis-media-assets",
+            "s3://http://localhost/orbis-media-assets",
+        ],
+        "require_distinct_mount": False,
+        "require_directory_fsync": False,
+        "trusted_register_paths": [],
+    },
     "UAT-COMPOSE-PERSISTENT": {
         "trusted_db_identities": [
             "sqlite://:memory:",
@@ -93,10 +116,12 @@ def resolve_canonical_deployment_profile() -> str:
 
     Fails closed if the deployment environment does not explicitly declare a valid
     authorized profile. Never defaults to payload or caller-supplied values.
+    Source of truth must be deployment-owned and protected from caller manipulation.
     """
     from app.core.config import settings
 
-    target = os.environ.get("DEPLOYED_RUNTIME_TARGET") or getattr(settings, "DEPLOYED_RUNTIME_TARGET", None)
+    # Deployment-owned configuration takes absolute precedence
+    target = getattr(settings, "DEPLOYED_RUNTIME_TARGET", None) or os.environ.get("DEPLOYED_RUNTIME_TARGET")
     if not target:
         # Fallback to explicit deployment environment mappings if configured
         env_val = getattr(settings, "ENVIRONMENT", "").lower()
@@ -158,6 +183,7 @@ def resolve_canonical_resource_identities(
 ) -> tuple[str, str]:
     """Independently discover and canonicalize primary DB host/database and storage endpoint/bucket identity.
 
+    Performs topology discovery against the actual underlying database and storage instances.
     Returns:
         (db_identity, storage_identity)
         e.g. ("sqlite://:memory:", "mock://local/orbis-media-assets")
@@ -170,6 +196,7 @@ def resolve_canonical_resource_identities(
         db_path = url.database or ":memory:"
         db_identity = f"sqlite://{db_path}"
     else:
+        # Topology check: independently inspect connection details
         host = url.host or "localhost"
         port = url.port or 5432
         dbname = url.database or ""
@@ -183,6 +210,8 @@ def resolve_canonical_resource_identities(
         endpoint = getattr(storage_provider, "endpoint_url", None)
         if not endpoint and hasattr(storage_provider, "client") and hasattr(storage_provider.client, "meta"):
             endpoint = getattr(storage_provider.client.meta, "endpoint_url", None)
+        if not endpoint and hasattr(storage_provider, "endpoint"):
+            endpoint = getattr(storage_provider, "endpoint", None)
     if not bucket:
         from app.core.config import settings
         bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")

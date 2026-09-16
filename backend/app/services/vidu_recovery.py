@@ -558,7 +558,7 @@ def _execute_isolated_storage_verify(
     except queue.Empty:
         pass
     except Exception as qe:
-        logger.error("Error reading from isolated storage verification queue: %s", qe)
+        logger.error("Error reading from isolated storage verification queue: %s", sanitize_error_message(str(qe)))
     finally:
         if res is not None:
             p.join(timeout=2.0)
@@ -1303,7 +1303,7 @@ class ViduExistingJobRecoveryService:
             try:
                 config = storage.get_serializable_config()
             except Exception as cfg_err:
-                logger.warning("Could not extract serializable config from storage: %s", cfg_err)
+                logger.warning("Could not extract serializable config from storage: %s", sanitize_error_message(str(cfg_err)))
                 config = None
 
         if config is not None:
