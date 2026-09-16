@@ -91,7 +91,7 @@ def execute_recovery_harness(
     signature_bytes: Optional[bytes] = None,
     public_key_bytes: Optional[bytes] = None,
     expected_commit_sha: Optional[str] = None,
-    actual_runtime_target: str = "UAT-COMPOSE-PERSISTENT",
+    actual_runtime_target: Optional[str] = None,
     execution_id: Optional[str] = None,
     adapter: Optional[IVideoGenerationProviderAdapter] = None,
     storage_provider: Optional[ObjectStorageProvider] = None,
@@ -105,6 +105,12 @@ def execute_recovery_harness(
 
     Returns dict with execution summary and status.
     """
+    if actual_runtime_target is None:
+        if auth_payload is not None:
+            actual_runtime_target = auth_payload.runtime_target
+        else:
+            actual_runtime_target = "UAT-COMPOSE-PERSISTENT"
+
     exec_id = execution_id or f"rec1-exec-{uuid.uuid4().hex[:12]}"
     now = current_time or utc_now()
 

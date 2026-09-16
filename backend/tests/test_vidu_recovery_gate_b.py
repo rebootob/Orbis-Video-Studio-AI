@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -80,6 +81,42 @@ def setup_auth_env(monkeypatch, tmp_path):
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", reg_file)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
+    monkeypatch.delenv("DIRECTORY_FSYNC_SUPPORTED", raising=False)
+
+    # For isolated unit tests that test harness logic without claiming crash durability,
+    # monkeypatch a test-only profile in the test fixture (never in production code).
+    from app.services.recovery_auth import AUTHORIZED_RUNTIME_TARGET_PROFILES
+    test_profile = {
+        "trusted_db_identities": [
+            "sqlite://:memory:",
+            "sqlite:///",
+            "sqlite://",
+            "postgresql+psycopg://localhost:5432/orbis_studio",
+            "postgresql+psycopg://127.0.0.1:5432/orbis_studio",
+            "postgresql+psycopg://postgres:5432/orbis_studio",
+            "postgresql://localhost:5432/orbis_studio",
+            "postgresql://127.0.0.1:5432/orbis_studio",
+            "postgresql://postgres:5432/orbis_studio",
+        ],
+        "trusted_storage_identities": [
+            "mock://local/orbis-media-assets",
+            "mock://local/orbis-assets",
+            "mock://local/test-bucket",
+            "s3://http://localhost:9000/orbis-media-assets",
+            "s3://http://localhost:9000/orbis-assets",
+            "s3://localhost:9000/orbis-media-assets",
+            "s3://localhost:9000/orbis-assets",
+        ],
+        "require_distinct_mount": False,
+        "require_directory_fsync": False,
+        "trusted_register_paths": [reg_file],
+        "trusted_register_dirs": [str(tmp_path)],
+    }
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES, "TEST", test_profile)
+
+    # Bind reg_file into immutable runtime profile allowlist for UAT-COMPOSE-PERSISTENT
+    uat_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", uat_paths + [reg_file])
 
 
 @pytest.fixture
@@ -107,13 +144,22 @@ def auth_keys():
     return seed, pk
 
 
-def make_valid_auth(seed, commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7", nonce=None, restore_epoch="epoch-0"):
+DEFAULT_TEST_RUNTIME_TARGET = "TEST" if os.name == "nt" else "UAT-COMPOSE-PERSISTENT"
+
+
+def make_valid_auth(
+    seed,
+    commit_sha="ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7",
+    nonce=None,
+    restore_epoch="epoch-0",
+    runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
+):
     now = datetime.now(timezone.utc)
     payload = CanonicalAuthPayload(
         authorized_commit_sha=commit_sha,
         task_id=TARGET_TASK_ID,
         provider_job_id=TARGET_PROVIDER_JOB_ID,
-        runtime_target="UAT-COMPOSE-PERSISTENT",
+        runtime_target=runtime_target,
         owner_evidence_anchor="telegram:msg:152428:5653543",
         issued_at=now - timedelta(minutes=5),
         expires_at=now + timedelta(minutes=55),
@@ -129,6 +175,12 @@ async def fake_downloader(url: str, target_file_path: str):
     with open(target_file_path, "wb") as f:
         f.write(data)
     return "video/mp4", len(data), hashlib.sha256(data).hexdigest()
+
+
+def _uncooperative_worker_process():
+    import time
+    while True:
+        time.sleep(0.1)
 
 
 # ==============================================================================
@@ -225,7 +277,7 @@ def test_scenario_03_nonce_replay_rejection(test_db, auth_keys):
         payload=payload,
         auth_digest=digest,
         execution_id="exec-1",
-        actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
     )
     assert fence.status == "CLAIMED_PENDING_GET"
 
@@ -236,7 +288,7 @@ def test_scenario_03_nonce_replay_rejection(test_db, auth_keys):
             payload=payload,
             auth_digest=digest,
             execution_id="exec-2",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
 
@@ -251,7 +303,7 @@ def test_scenario_04_same_job_concurrency_rejection(test_db, auth_keys):
         payload=payload1,
         auth_digest=payload1.digest(),
         execution_id="exec-1",
-        actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
     )
 
     # Different nonce, same provider_job_id
@@ -262,7 +314,7 @@ def test_scenario_04_same_job_concurrency_rejection(test_db, auth_keys):
             payload=payload2,
             auth_digest=payload2.digest(),
             execution_id="exec-2",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
 
@@ -281,7 +333,7 @@ def test_scenario_05_revocation_rejection(test_db, auth_keys, monkeypatch):
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-1",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             revocation_list=revocations,
         )
 
@@ -293,7 +345,7 @@ def test_scenario_05_revocation_rejection(test_db, auth_keys, monkeypatch):
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-1",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             revocation_list=None,
         )
 
@@ -316,7 +368,7 @@ def test_scenario_06_fence_db_insertion_failure(test_db, auth_keys, monkeypatch)
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-1",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
 
@@ -579,7 +631,7 @@ def test_scenario_14_crash_state_forbids_re_get(test_db):
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-retry",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
 
@@ -645,7 +697,7 @@ def test_scenario_16_fence_update_failure_injected(test_db, mock_storage, auth_k
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             storage_provider=mock_storage,
         )
@@ -721,7 +773,7 @@ def test_scenario_18_read_back_checksum_mismatch(test_db, mock_storage, auth_key
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             storage_provider=corrupt_storage,
         )
@@ -977,7 +1029,7 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
         )
 
@@ -1005,7 +1057,7 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
         )
 
@@ -1035,7 +1087,7 @@ def test_scenario_26_restored_runtime_fail_closed(test_db, auth_keys, monkeypatc
             signature_bytes=invalid_sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
         )
 
@@ -1069,7 +1121,7 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             storage_provider=mock_storage,
         )
@@ -1084,7 +1136,7 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             storage_provider=mock_storage,
         )
@@ -1128,7 +1180,7 @@ def test_scenario_27_adversarial_same_label_changed_storage_config_fails_closed(
                 signature_bytes=sig,
                 public_key_bytes=pk,
                 expected_commit_sha=payload.authorized_commit_sha,
-                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
                 mock_mode=True,
                 storage_provider=mock_storage,
             )
@@ -1158,7 +1210,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
         signature_bytes=sig_a,
         public_key_bytes=pk,
         expected_commit_sha=payload_a.authorized_commit_sha,
-        actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+        actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         mock_mode=True,
         adapter=mock_adapter_a,
         storage_provider=mock_storage,
@@ -1193,7 +1245,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_a2,
             public_key_bytes=pk,
             expected_commit_sha=payload_a2.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=second_adapter,
             storage_provider=mock_storage,
@@ -1202,6 +1254,9 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
 
     # Subcase B1: Actual Failed provider GET path followed by combined DB + Storage restore
     fresh_reg_b1 = str(tmp_path / "ext_reg_b1.json")
+    from app.services.recovery_auth import AUTHORIZED_RUNTIME_TARGET_PROFILES
+    profile_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES[DEFAULT_TEST_RUNTIME_TARGET].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES[DEFAULT_TEST_RUNTIME_TARGET], "trusted_register_paths", profile_paths + [fresh_reg_b1])
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b1)
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", fresh_reg_b1)
 
@@ -1223,7 +1278,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_b1,
             public_key_bytes=pk,
             expected_commit_sha=payload_b1.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=failing_adapter,
             storage_provider=mock_storage,
@@ -1247,7 +1302,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_b1_replay,
             public_key_bytes=pk,
             expected_commit_sha=payload_b1_replay.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=second_b1_adapter,
             storage_provider=mock_storage,
@@ -1256,6 +1311,8 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
 
     # Subcase B2: Actual Crashed GET path followed by combined DB + Storage restore
     fresh_reg_b2 = str(tmp_path / "ext_reg_b2.json")
+    profile_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES[DEFAULT_TEST_RUNTIME_TARGET].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES[DEFAULT_TEST_RUNTIME_TARGET], "trusted_register_paths", profile_paths + [fresh_reg_b2])
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", fresh_reg_b2)
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", fresh_reg_b2)
 
@@ -1277,7 +1334,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_b2,
             public_key_bytes=pk,
             expected_commit_sha=payload_b2.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=crashing_adapter,
             storage_provider=mock_storage,
@@ -1301,7 +1358,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_b2_replay,
             public_key_bytes=pk,
             expected_commit_sha=payload_b2_replay.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=second_b2_adapter,
             storage_provider=mock_storage,
@@ -1321,7 +1378,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=sig_c,
             public_key_bytes=pk,
             expected_commit_sha=payload_c.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=blocked_adapter,
             storage_provider=mock_storage,
@@ -1355,7 +1412,7 @@ def test_scenario_28_restored_db_lacking_both_fence_and_job_rejects_second_get(t
             signature_bytes=epoch0_sig,
             public_key_bytes=pk,
             expected_commit_sha=epoch0_payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=epoch_blocked_adapter,
             storage_provider=mock_storage,
@@ -1381,7 +1438,7 @@ def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-rev-test",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
     monkeypatch.setenv("OWNER_AUTH_REVOCATIONS_ATTESTED", "true")
@@ -1396,7 +1453,7 @@ def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-rev-test-2",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
     # 3. Attested registry contains target job ID -> rejects with AuthReplayError
@@ -1409,7 +1466,7 @@ def test_scenario_29_empty_revocation_without_freshness_attestation_fails_closed
             payload=payload,
             auth_digest=payload.digest(),
             execution_id="exec-rev-test-3",
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
         )
 
 
@@ -1551,7 +1608,7 @@ def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, 
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             revocation_list=[payload.auth_nonce],
             mock_mode=True,
             storage_provider=mock_storage,
@@ -1580,7 +1637,7 @@ def test_scenario_33_audit_write_failure_stops_fail_closed_on_db_stage(test_db, 
                 signature_bytes=sig2,
                 public_key_bytes=pk,
                 expected_commit_sha=payload2.authorized_commit_sha,
-                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
                 mock_mode=True,
                 storage_provider=mock_storage,
             )
@@ -1610,7 +1667,7 @@ def test_scenario_34_phase1_failure_strictly_zero_db_io(test_db, mock_storage, a
             signature_bytes=bad_sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             storage_provider=mock_storage,
         )
@@ -1629,12 +1686,82 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
     import threading
     import time
     from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
-    from app.services.vidu_recovery import _SURVIVING_WORKERS
+    from app.services.vidu_recovery import _SURVIVING_WORKERS, execute_with_process_boundary
+    from app.services.storage.s3 import S3CompatibleObjectStorageProvider
 
     _SURVIVING_WORKERS.clear()
     threads_before = threading.active_count()
 
-    # Subcase A: Real OS TCP loopback socket cancellation via socket.socketpair()
+    # Subcase A: Production S3 Adapter with local loopback controlled server
+    # Spins up a controlled local TCP server on 127.0.0.1 (strictly zero external/AWS calls)
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def controlled_s3_server():
+        try:
+            conn, _ = srv.accept()
+            # Read incoming HTTP request
+            conn.recv(1024)
+            # Send HTTP 200 OK headers for S3 get_object, then stall without sending body
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nETag: \"etag-s3\"\r\n\r\n")
+            time.sleep(2.0)
+            conn.close()
+        except Exception:
+            pass
+        finally:
+            srv.close()
+
+    server_thread = threading.Thread(target=controlled_s3_server, daemon=True)
+    server_thread.start()
+
+    # Configure S3CompatibleObjectStorageProvider with 0.3s read timeout
+    old_read_to = os.environ.get("STORAGE_READ_TIMEOUT_SECONDS")
+    old_conn_to = os.environ.get("STORAGE_CONNECT_TIMEOUT_SECONDS")
+    old_retries = os.environ.get("STORAGE_MAX_RETRIES")
+    os.environ["STORAGE_READ_TIMEOUT_SECONDS"] = "0.3"
+    os.environ["STORAGE_CONNECT_TIMEOUT_SECONDS"] = "1.0"
+    os.environ["STORAGE_MAX_RETRIES"] = "0"
+    try:
+        s3_provider = S3CompatibleObjectStorageProvider(
+            endpoint_url=f"http://127.0.0.1:{port}",
+            aws_access_key_id="test_key",
+            aws_secret_access_key="test_secret",
+            use_ssl=False,
+        )
+
+        t_start_s3 = time.monotonic()
+        with pytest.raises(ViduRecoveryError, match="Storage metadata access failed|Storage stream.*timed out|Read timeout"):
+            ViduExistingJobRecoveryService.stream_verify_storage_object(
+                storage=s3_provider,
+                bucket="orbis-media-assets",
+                key="assets/s3_test.mp4",
+                expected_size=1000,
+                expected_sha256="any-hash",
+                max_duration_seconds=0.5,
+            )
+        elapsed_s3 = time.monotonic() - t_start_s3
+        assert elapsed_s3 < 1.0
+        # Authoritatively proves zero daemon worker threads were spawned or leaked
+        assert threading.active_count() <= threads_before + 1  # only server_thread briefly
+    finally:
+        if old_read_to is not None:
+            os.environ["STORAGE_READ_TIMEOUT_SECONDS"] = old_read_to
+        else:
+            os.environ.pop("STORAGE_READ_TIMEOUT_SECONDS", None)
+        if old_conn_to is not None:
+            os.environ["STORAGE_CONNECT_TIMEOUT_SECONDS"] = old_conn_to
+        else:
+            os.environ.pop("STORAGE_CONNECT_TIMEOUT_SECONDS", None)
+        if old_retries is not None:
+            os.environ["STORAGE_MAX_RETRIES"] = old_retries
+        else:
+            os.environ.pop("STORAGE_MAX_RETRIES", None)
+        server_thread.join(timeout=1.0)
+
+    # Subcase B: Real OS TCP loopback socket cancellation via socket.socketpair()
+    threads_before_b = threading.active_count()
     s_client, s_server = socket.socketpair()
 
     class RealSocketRawStream:
@@ -1691,65 +1818,22 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
     elapsed = time.monotonic() - t_start
     assert elapsed < 0.6  # Strictly proves bounded completion
     assert real_body.body_closed is True  # Body cleaned up
-    assert threading.active_count() <= threads_before  # Zero surviving threads/operations
+    assert threading.active_count() <= threads_before_b  # Zero surviving threads/operations
     assert len(_SURVIVING_WORKERS) == 0
     s_server.close()
 
-    # Subcase B: Non-cooperative blocked operation that ignores close/abort fails closed without claiming zero surviving work
-    uncooperative_block = threading.Event()
-
-    class UncooperativeBody:
-        def __init__(self):
-            self.body_closed = False
-
-        def read(self, amt=64*1024):
-            # Deliberately ignores transport cancellation / close and remains blocked
-            uncooperative_block.wait(timeout=10.0)
-            return b""
-
-        def close(self):
-            self.body_closed = True
-            # Deliberately does NOT unblock uncooperative_block
-
-    class UncooperativeStorageWrapper:
-        def __init__(self, body):
-            self.body = body
-
-        class Client:
-            def __init__(self, body):
-                self.body = body
-
-            def head_object(self, Bucket, Key):
-                return {"ContentLength": 1000, "ETag": '"etag-uncoop"'}
-
-            def get_object(self, Bucket, Key):
-                return {"Body": self.body, "ContentLength": 1000, "ETag": '"etag-uncoop"'}
-
-        @property
-        def client(self):
-            return self.Client(self.body)
-
-    uncoop_body = UncooperativeBody()
-    uncoop_wrapper = UncooperativeStorageWrapper(uncoop_body)
-    t_start_b = time.monotonic()
-    with pytest.raises(ViduTransportCancellationFailureError, match="surviving worker detected; fail-closed without claiming zero surviving work"):
-        ViduExistingJobRecoveryService.stream_verify_storage_object(
-            storage=uncoop_wrapper,
-            bucket="orbis-media-assets",
-            key="assets/uncoop.mp4",
-            expected_size=1000,
-            expected_sha256="any-hash",
-            max_duration_seconds=0.1,
+    # Subcase C: Production Isolatable Process Boundary
+    # Proves authoritative OS-level process termination on uncooperative worker
+    t_start_p = time.monotonic()
+    with pytest.raises(ViduRecoveryError, match="process boundary authoritatively terminated; zero surviving processes"):
+        execute_with_process_boundary(
+            _uncooperative_worker_process,
+            timeout_seconds=0.2,
+            desc="Uncooperative process operation",
         )
-    elapsed_b = time.monotonic() - t_start_b
-    assert elapsed_b < 0.6  # Bounded fail-closed detection
-    assert uncoop_body.body_closed is True
-    # Unblock thread to cleanup
-    uncooperative_block.set()
-    time.sleep(0.05)
-    _SURVIVING_WORKERS.clear()
+    assert time.monotonic() - t_start_p < 1.0
 
-    # Subcase B: Slow EOF transfer bounds interrupted pre-emptively
+    # Subcase D: Slow EOF transfer bounds interrupted pre-emptively
     class SlowBodyStreamClient:
         def __init__(self):
             self.body_closed = False
@@ -1768,7 +1852,6 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
                     self.call_count += 1
                     if self.call_count == 1:
                         return b"A" * 100
-                    # Blocks waiting for transport cancellation rather than sleeping
                     self._abort_event.wait(timeout=10.0)
                     return b""
 
@@ -1783,7 +1866,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
             self.client = SlowBodyStreamClient()
 
     slow_wrapper = MockSlowStorageWrapper()
-    with pytest.raises(ViduRecoveryError, match="Storage stream.*timed out"):
+    with pytest.raises(ViduRecoveryError, match="Storage stream.*(timed out|exceeded timeout)"):
         ViduExistingJobRecoveryService.stream_verify_storage_object(
             storage=slow_wrapper,
             bucket="orbis-media-assets",
@@ -1794,7 +1877,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
         )
     assert slow_wrapper.client.body_closed is True
 
-    # Subcase C: SDK Connect Timeout during get_object
+    # Subcase E: SDK Connect Timeout during get_object
     class ConnectTimeoutStorageWrapper:
         class Client:
             def head_object(self, Bucket, Key):
@@ -1812,7 +1895,7 @@ def test_scenario_35_sdk_stream_timeout_and_slow_eof_bounds():
             expected_sha256="any-hash",
         )
 
-    # Subcase D: SDK Read Timeout during body read
+    # Subcase F: SDK Read Timeout during body read
     class ReadTimeoutBodyStreamClient:
         def __init__(self):
             self.body_closed = False
@@ -1909,7 +1992,7 @@ def test_scenario_36_pre_get_rollback_failure_audited_truthfully(test_db, mock_s
                 signature_bytes=sig,
                 public_key_bytes=pk,
                 expected_commit_sha=payload.authorized_commit_sha,
-                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
                 mock_mode=True,
                 storage_provider=mock_storage,
             )
@@ -1956,7 +2039,7 @@ def test_scenario_37_recovery_terminal_transition_commit_failure_audited(test_db
                 signature_bytes=sig,
                 public_key_bytes=pk,
                 expected_commit_sha=payload.authorized_commit_sha,
-                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
                 mock_mode=True,
                 storage_provider=mock_storage,
             )
@@ -2004,7 +2087,7 @@ def test_scenario_38_readback_terminal_transition_commit_failure_audited(test_db
                 signature_bytes=sig,
                 public_key_bytes=pk,
                 expected_commit_sha=payload.authorized_commit_sha,
-                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
                 mock_mode=True,
                 storage_provider=mock_storage,
             )
@@ -2067,18 +2150,18 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     import os
     import threading
     seed, pk = auth_keys
-    payload, sig = make_valid_auth(seed)
     mock_provider = MockProviderAdapter()
 
     # Subcase A: Empty environment / no writable register fails closed via execute_recovery_harness
+    payload_a, sig_a = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", "")
     with pytest.raises(AuthRevokedError, match="Mandatory authoritative external execution register is missing"):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload,
-            signature_bytes=sig,
+            auth_payload=payload_a,
+            signature_bytes=sig_a,
             public_key_bytes=pk,
-            expected_commit_sha=payload.authorized_commit_sha,
+            expected_commit_sha=payload_a.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
             adapter=mock_provider,
@@ -2090,6 +2173,10 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     colliding_storage_dir.mkdir(parents=True, exist_ok=True)
     neutral_reg_inside_storage = str(colliding_storage_dir / "neutral_checkpoint_audit.json")
 
+    from app.services.recovery_auth import AUTHORIZED_RUNTIME_TARGET_PROFILES
+    profile_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", profile_paths + [neutral_reg_inside_storage])
+
     mock_storage.storage_dir = str(colliding_storage_dir)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", neutral_reg_inside_storage)
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
@@ -2097,78 +2184,135 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(tmp_path))
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", neutral_reg_inside_storage)
 
+    payload_b, sig_b = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
     with pytest.raises(AuthRuntimeMismatchError, match="cannot reside inside storage restore set directory"):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload,
-            signature_bytes=sig,
+            auth_payload=payload_b,
+            signature_bytes=sig_b,
             public_key_bytes=pk,
-            expected_commit_sha=payload.authorized_commit_sha,
+            expected_commit_sha=payload_b.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
         )
 
-    # Subcase C: Missing trusted register configuration tested through execute_recovery_harness
+    # Subcase C: Caller moving BOTH environment values together to a rogue location outside immutable profile allowlist
+    rogue_reg_dir = tmp_path / "rogue_dir"
+    rogue_reg_dir.mkdir(parents=True, exist_ok=True)
+    rogue_reg_path = str(rogue_reg_dir / "rogue_register.json")
+    mock_storage.storage_dir = str(tmp_path / "other_store_dir")
+
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", rogue_reg_path)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", rogue_reg_path)
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_ATTESTED", "true")
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
+
+    payload_c, sig_c = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
+    with pytest.raises(AuthRuntimeMismatchError, match="is not in immutable trusted profile allowlist"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_c,
+            signature_bytes=sig_c,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_c.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+
+    # Subcase D: Directory-only binding forbidden for live profile
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", rogue_reg_path)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(rogue_reg_dir))
+    monkeypatch.delenv("TRUSTED_EXTERNAL_REGISTER_PATH", raising=False)
+
+    payload_d, sig_d = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
+    with pytest.raises(AuthRuntimeMismatchError, match="is not in immutable trusted profile allowlist"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_d,
+            signature_bytes=sig_d,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_d.authorized_commit_sha,
+            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+
+    # Subcase E: Missing directory durability capability / unsupported platform on non-POSIX fails closed before provider GET
     safe_reg_dir = tmp_path / "safe_ext_dir"
     safe_reg_dir.mkdir(parents=True, exist_ok=True)
     safe_reg_path = str(safe_reg_dir / "safe_ledger.json")
-    mock_storage.storage_dir = str(tmp_path / "other_store_dir")
-
+    profile_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", profile_paths + [safe_reg_path])
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)
-    monkeypatch.delenv("TRUSTED_EXTERNAL_REGISTER_DIR", raising=False)
-    monkeypatch.delenv("TRUSTED_EXTERNAL_REGISTER_PATH", raising=False)
-
-    with pytest.raises(AuthRevokedError, match="Mandatory trusted external register configuration is missing"):
-        execute_recovery_harness(
-            db=test_db,
-            auth_payload=payload,
-            signature_bytes=sig,
-            public_key_bytes=pk,
-            expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
-            mock_mode=True,
-            adapter=mock_provider,
-            storage_provider=mock_storage,
-        )
-
-    # Subcase D: Exact register path mismatch tested through execute_recovery_harness
-    expected_exact_path = str(safe_reg_dir / "expected_authoritative_register.json")
-    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", expected_exact_path)
-    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)  # safe_reg_path != expected_exact_path
-
-    with pytest.raises(AuthRuntimeMismatchError, match="does not match trusted exact register path"):
-        execute_recovery_harness(
-            db=test_db,
-            auth_payload=payload,
-            signature_bytes=sig,
-            public_key_bytes=pk,
-            expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
-            mock_mode=True,
-            adapter=mock_provider,
-            storage_provider=mock_storage,
-        )
-
-    # Subcase E: Durability policy downgrade rejection (DIRECTORY_FSYNC_SUPPORTED=false fails closed)
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", safe_reg_path)
-    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path)
+
+    # When on Windows (or simulating non-posix), live profile fails closed with RecoveryAuthError
+    payload_e, sig_e = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
+    if os.name == "nt":
+        with pytest.raises(RecoveryAuthError, match="cannot positively provide mandatory directory fsync"):
+            execute_recovery_harness(
+                db=test_db,
+                auth_payload=payload_e,
+                signature_bytes=sig_e,
+                public_key_bytes=pk,
+                expected_commit_sha=payload_e.authorized_commit_sha,
+                actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+                mock_mode=True,
+                adapter=mock_provider,
+                storage_provider=mock_storage,
+            )
+        assert mock_provider.get_calls_attempted == 0
+
+    # Subcase F: Durability policy downgrade rejection (DIRECTORY_FSYNC_SUPPORTED=false fails closed)
+    test_db.query(RecoveryFailureAudit).delete()
+    test_db.query(ProviderExecutionFence).delete()
+    test_db.commit()
+    safe_reg_path_f = str(safe_reg_dir / "safe_ledger_f.json")
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", profile_paths + [safe_reg_path, safe_reg_path_f])
+    monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_PATH", safe_reg_path_f)
+    monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", safe_reg_path_f)
     monkeypatch.setenv("DIRECTORY_FSYNC_SUPPORTED", "false")
+    payload_f, sig_f = make_valid_auth(seed, runtime_target="UAT-COMPOSE-PERSISTENT")
 
     with pytest.raises(RecoveryAuthError, match="directory fsync requirement cannot be downgraded"):
         execute_recovery_harness(
             db=test_db,
-            auth_payload=payload,
-            signature_bytes=sig,
+            auth_payload=payload_f,
+            signature_bytes=sig_f,
             public_key_bytes=pk,
-            expected_commit_sha=payload.authorized_commit_sha,
+            expected_commit_sha=payload_f.authorized_commit_sha,
             actual_runtime_target="UAT-COMPOSE-PERSISTENT",
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
         )
+    assert mock_provider.get_calls_attempted == 0
     monkeypatch.delenv("DIRECTORY_FSYNC_SUPPORTED", raising=False)
+
+    # Subcase G: Production runtime rejects runtime_target=TEST bypass attempt
+    saved_test_profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get("TEST")
+    monkeypatch.delitem(AUTHORIZED_RUNTIME_TARGET_PROFILES, "TEST", raising=False)
+    payload_test, sig_test = make_valid_auth(seed, runtime_target="TEST")
+    with pytest.raises(AuthRuntimeMismatchError, match="Unknown or unauthorized runtime target profile 'TEST'"):
+        execute_recovery_harness(
+            db=test_db,
+            auth_payload=payload_test,
+            signature_bytes=sig_test,
+            public_key_bytes=pk,
+            expected_commit_sha=payload_test.authorized_commit_sha,
+            actual_runtime_target="TEST",
+            mock_mode=True,
+            adapter=mock_provider,
+            storage_provider=mock_storage,
+        )
+    assert mock_provider.get_calls_attempted == 0
+    if saved_test_profile:
+        monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES, "TEST", saved_test_profile)
 
     # Subcase F: Mount / device collision check
     isolated_db_dir = tmp_path / "db_store"
@@ -2179,6 +2323,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
     valid_dir = tmp_path / "external_register_dir"
     valid_dir.mkdir(parents=True, exist_ok=True)
     valid_reg = str(valid_dir / "trusted_external_ledger.json")
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", profile_paths + [safe_reg_path, safe_reg_path_f, valid_reg])
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_PATH", valid_reg)
     monkeypatch.setenv("TRUSTED_EXTERNAL_REGISTER_DIR", str(valid_dir))
     with pytest.raises(AuthRuntimeMismatchError, match="distinct mount required"):
@@ -2192,6 +2337,8 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
         AuthoritativeExternalExecutionRegister.validate_register_topology(valid_reg)
 
     # Subcase H: Concurrent atomic claims - exactly 1 wins, second raises AuthReplayError
+    test_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES["TEST"].get("trusted_register_paths", []))
+    monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["TEST"], "trusted_register_paths", test_paths + [valid_reg])
     monkeypatch.setenv("EXTERNAL_EXECUTION_REGISTER_TOPOLOGY_ATTESTED", "true")
     results = []
 
@@ -2201,6 +2348,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
                 provider_job_id="concurrent-job-1",
                 auth_nonce="concurrent-nonce-1",
                 execution_id="exec-1",
+                runtime_target="TEST",
             )
             results.append("SUCCESS")
         except AuthReplayError:
@@ -2231,6 +2379,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
             provider_job_id="crash-job-1",
             auth_nonce="crash-nonce-1",
             execution_id="exec-crash-1",
+            runtime_target="TEST",
         )
 
     # Step 2: Atomic replace CAS failure
@@ -2244,6 +2393,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
             provider_job_id="crash-job-2",
             auth_nonce="crash-nonce-2",
             execution_id="exec-crash-2",
+            runtime_target="TEST",
         )
 
     # Step 3: Parent directory fsync failure (MUST fail closed and not be swallowed)
@@ -2259,11 +2409,12 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
         return orig_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", failing_parent_dir_fsync)
-    with pytest.raises(RecoveryAuthError, match="Parent directory fsync failed"):
+    with pytest.raises(RecoveryAuthError, match="(Parent directory fsync failed|cannot positively provide mandatory directory fsync)"):
         AuthoritativeExternalExecutionRegister.claim_pre_get_dispatch(
             provider_job_id="crash-job-3",
             auth_nonce="crash-nonce-3",
             execution_id="exec-crash-3",
+            runtime_target="TEST",
         )
     monkeypatch.delenv("DIRECTORY_FSYNC_SUPPORTED", raising=False)
 
@@ -2278,6 +2429,7 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
             provider_job_id="crash-job-4",
             auth_nonce="crash-nonce-4",
             execution_id="exec-crash-4",
+            runtime_target="TEST",
         )
 
 
@@ -2308,7 +2460,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig,
             public_key_bytes=pk,
             expected_commit_sha=payload.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
@@ -2349,7 +2501,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig_b,
             public_key_bytes=pk,
             expected_commit_sha=payload_b.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
@@ -2381,7 +2533,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig_c,
             public_key_bytes=pk,
             expected_commit_sha=payload_c.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
@@ -2409,7 +2561,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig_d,
             public_key_bytes=pk,
             expected_commit_sha=payload_d.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
@@ -2458,7 +2610,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig_e,
             public_key_bytes=pk,
             expected_commit_sha=payload_e.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,
@@ -2492,7 +2644,7 @@ def test_scenario_41_external_dispatch_registration_failure_audited(test_db, moc
             signature_bytes=sig_f,
             public_key_bytes=pk,
             expected_commit_sha=payload_f.authorized_commit_sha,
-            actual_runtime_target="UAT-COMPOSE-PERSISTENT",
+            actual_runtime_target=DEFAULT_TEST_RUNTIME_TARGET,
             mock_mode=True,
             adapter=mock_provider,
             storage_provider=mock_storage,

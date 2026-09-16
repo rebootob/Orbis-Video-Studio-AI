@@ -284,15 +284,26 @@ class AuthoritativeExternalExecutionRegister:
 
     @classmethod
     def is_directory_fsync_required(cls, reg_dir: str, runtime_target: str = "UAT-COMPOSE-PERSISTENT") -> bool:
-        """Determine platform/filesystem directory fsync capability, failing closed on downgrade."""
+        """Determine platform/filesystem directory fsync capability, failing closed if capability cannot be positively provided."""
         profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(runtime_target, {})
         profile_requires_fsync = profile.get("require_directory_fsync", False)
         env_override = os.environ.get("DIRECTORY_FSYNC_SUPPORTED")
 
         # Policy downgrade rejection
-        if (profile_requires_fsync or os.name == "posix") and env_override is not None and env_override.strip().lower() in ("false", "0", "no"):
+        if profile_requires_fsync and env_override is not None and env_override.strip().lower() in ("false", "0", "no"):
             raise RecoveryAuthError(
                 f"Durability policy violation: directory fsync requirement cannot be downgraded for '{runtime_target}' (fail-closed)"
+            )
+
+        if profile_requires_fsync:
+            if env_override is not None and env_override.strip().lower() in ("true", "1", "yes"):
+                return True
+            if os.name == "posix":
+                return True
+            # Non-POSIX or unsupported capability without positive proof -> FAIL CLOSED
+            raise RecoveryAuthError(
+                f"Durability policy violation: platform '{os.name}' cannot positively provide mandatory directory fsync "
+                f"required by profile '{runtime_target}' (fail-closed)"
             )
 
         if env_override is not None and env_override.strip().lower() in ("true", "1", "yes"):
@@ -326,30 +337,63 @@ class AuthoritativeExternalExecutionRegister:
 
         norm_path = os.path.realpath(os.path.abspath(reg_path))
 
-        # 1. Exact authoritative register and directory binding
-        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(runtime_target, {})
-        trusted_exact_path = os.environ.get("TRUSTED_EXTERNAL_REGISTER_PATH", "").strip()
-        trusted_dir = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
+        # 1. Exact authoritative register binding against immutable runtime profile allowlist
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES.get(runtime_target)
+        if profile is None:
+            raise AuthRevokedError(f"Unauthorized runtime target profile '{runtime_target}' (fail-closed)")
 
-        if not trusted_exact_path and not trusted_dir:
-            raise AuthRevokedError(
-                "Mandatory trusted external register configuration is missing "
-                "(TRUSTED_EXTERNAL_REGISTER_PATH or TRUSTED_EXTERNAL_REGISTER_DIR must be set, fail-closed)"
-            )
+        is_live_profile = profile.get("require_persistent_db", False) or runtime_target in ("UAT-COMPOSE-PERSISTENT", "PRODUCTION")
+        profile_allowed_paths = [os.path.realpath(os.path.abspath(p)) for p in profile.get("trusted_register_paths", [])]
+        trusted_exact_env = os.environ.get("TRUSTED_EXTERNAL_REGISTER_PATH", "").strip()
+        trusted_dir_env = os.environ.get("TRUSTED_EXTERNAL_REGISTER_DIR", "").strip()
 
-        if trusted_exact_path:
-            norm_trusted_exact = os.path.realpath(os.path.abspath(trusted_exact_path))
-            if norm_path != norm_trusted_exact:
-                raise AuthRuntimeMismatchError(
-                    f"External execution register path '{norm_path}' does not match trusted exact register path '{norm_trusted_exact}'"
+        if is_live_profile:
+            if not profile_allowed_paths:
+                raise AuthRevokedError(
+                    f"Configuration error: live profile '{runtime_target}' lacks immutable trusted_register_paths allowlist (fail-closed)"
                 )
-
-        if trusted_dir:
-            norm_allowed = os.path.realpath(os.path.abspath(trusted_dir))
-            if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
+            if norm_path not in profile_allowed_paths:
                 raise AuthRuntimeMismatchError(
-                    f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
+                    f"External execution register path '{norm_path}' is not in immutable trusted profile allowlist "
+                    f"{profile_allowed_paths} for live runtime target '{runtime_target}' (fail-closed)"
                 )
+            # Live profile requires exact binding: directory-only binding without exact match is rejected
+            if trusted_dir_env and not trusted_exact_env and norm_path not in profile_allowed_paths:
+                raise AuthRuntimeMismatchError(
+                    f"Directory-only register binding is forbidden for live profile '{runtime_target}'; exact path binding required (fail-closed)"
+                )
+            if trusted_exact_env:
+                norm_env_exact = os.path.realpath(os.path.abspath(trusted_exact_env))
+                if norm_env_exact != norm_path:
+                    raise AuthRuntimeMismatchError(
+                        f"External execution register path '{norm_path}' does not match TRUSTED_EXTERNAL_REGISTER_PATH '{norm_env_exact}'"
+                    )
+                if norm_env_exact not in profile_allowed_paths:
+                    raise AuthRuntimeMismatchError(
+                        f"Environment TRUSTED_EXTERNAL_REGISTER_PATH '{norm_env_exact}' is not in immutable trusted profile allowlist {profile_allowed_paths}"
+                    )
+        else:
+            # Ephemeral / mock profile binding
+            if not trusted_exact_env and not trusted_dir_env and not profile_allowed_paths:
+                raise AuthRevokedError(
+                    "Mandatory trusted external register configuration is missing (fail-closed)"
+                )
+            if trusted_exact_env:
+                norm_trusted_exact = os.path.realpath(os.path.abspath(trusted_exact_env))
+                if norm_path != norm_trusted_exact:
+                    raise AuthRuntimeMismatchError(
+                        f"External execution register path '{norm_path}' does not match trusted exact register path '{norm_trusted_exact}'"
+                    )
+            if profile_allowed_paths and norm_path not in profile_allowed_paths:
+                raise AuthRuntimeMismatchError(
+                    f"External execution register path '{norm_path}' is not in profile allowed paths {profile_allowed_paths}"
+                )
+            if trusted_dir_env:
+                norm_allowed = os.path.realpath(os.path.abspath(trusted_dir_env))
+                if norm_path != norm_allowed and not norm_path.startswith(norm_allowed + os.sep):
+                    raise AuthRuntimeMismatchError(
+                        f"External execution register path '{norm_path}' is outside trusted register directory '{norm_allowed}'"
+                    )
 
         # 2. Real path / mount decoupling from DB restore set
         db_dir = None

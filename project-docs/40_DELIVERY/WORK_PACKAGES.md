@@ -442,6 +442,26 @@ A future bounded Vidu credit-generation probe is NOT authorized by R5-PRE1-CLOSE
 
 No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execution does not exist and is not authorized.
 
+
+---
+
+### P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1 — Gate B Implementation (NO-PROVIDER)
+
+- **Dedicated Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
+- **Dedicated PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
+- **Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
+- **Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW`
+- **Invariant Rules**:
+  - `WP020 = ACTIVE / NOT CLOSED`
+  - `Core V1 = 19/20 (95%)`
+  - `Release = NOT DECLARED`
+  - `REAL PROVIDER CALLS = 0`
+  - `PAID CALLS = 0`
+  - `Historical Generation POST = 1 (Run 34569728383 / Job 995880130565918720) = IMMUTABLE / NEVER RERUN`
+  - `Scenario 25 = NOT PROVEN / DEFERRED TO GATE C`
+  - `Scenario 35 = PARTIAL / NOT PROVEN`
+  - `Scenario 40 = PARTIAL / NOT PROVEN`
+
 ---
 
 ## 6. Post-Core V1 / V1.x — Not Part of WP020 by Default

@@ -46,7 +46,7 @@ PREV6_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56
 PREV7_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
 PREV7_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 
-GATE_B_STATUS = IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (REVIEW 5212985727: CHANGES REQUIRED -> R6 CORRECTIVE RESOLVED)
+GATE_B_STATUS = IN PROGRESS / CORRECTIVE IMPLEMENTED / IN REVIEW (REVIEWS 5217143749 & 5217264161: CHANGES REQUIRED -> R6 CORRECTIVE RESOLVED)
 ROUTED_CHECKPOINT = project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md
 GATE_C_STATUS = PROPOSED / NOT AUTHORIZED / NOT STARTED
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
@@ -56,8 +56,8 @@ ACCEPTANCE MATRIX (41 SCENARIOS) TRUTH STATUS
 ================================================================================
 SCENARIOS_VERIFIED = 38
 SCENARIO_25 = NOT PROVEN / DEFERRED TO GATE C
-SCENARIO_35 = PARTIAL / NOT PROVEN (Real socket transport cancellation & uncooperative fail-closed implemented; awaiting independent review)
-SCENARIO_40 = PARTIAL / NOT PROVEN (Production harness topology wiring & non-downgradeable durability implemented; awaiting independent review)
+SCENARIO_35 = PARTIAL / NOT PROVEN (Process boundary isolation & OS termination lifecycle implemented; awaiting independent review)
+SCENARIO_40 = PARTIAL / NOT PROVEN (Exact profile register binding & fail-closed Windows durability implemented; awaiting independent review)
 
 ================================================================================
 TOOLING & READINESS INVARIANTS

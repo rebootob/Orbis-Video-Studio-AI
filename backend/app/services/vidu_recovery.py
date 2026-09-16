@@ -118,6 +118,51 @@ class ViduRecoveryResult:
     idempotent_reused: bool = False
 
 
+def _process_boundary_worker(target_fn, args, kwargs, result_queue):
+    try:
+        res = target_fn(*args, **(kwargs or {}))
+        result_queue.put((True, res))
+    except Exception as e:
+        result_queue.put((False, e))
+
+
+def execute_with_process_boundary(target_fn, args=(), kwargs=None, timeout_seconds=5.0, desc="Process operation"):
+    """Execute an operation inside an isolatable process boundary with authoritative OS termination.
+
+    Guarantees:
+    1. Execution runs in an isolated process.
+    2. Strictly bounded by timeout_seconds.
+    3. On timeout, authoritatively terminates/kills the child process and verifies is_alive() is False.
+    4. Zero surviving child processes or threads.
+    5. Fails closed with ViduRecoveryError.
+    """
+    import multiprocessing
+    ctx = multiprocessing.get_context()
+    q = ctx.Queue()
+    p = ctx.Process(target=_process_boundary_worker, args=(target_fn, args, kwargs or {}, q))
+    p.start()
+    p.join(timeout=timeout_seconds)
+    if p.is_alive():
+        logger.warning("Process boundary deadline exceeded for %s; terminating child process", desc)
+        p.terminate()
+        p.join(timeout=0.3)
+        if p.is_alive():
+            logger.error("Process boundary child did not terminate on SIGTERM; sending SIGKILL for %s", desc)
+            p.kill()
+            p.join(timeout=0.3)
+        assert not p.is_alive(), f"Child process {p.pid} could not be killed (fail-closed)"
+        raise ViduRecoveryError(
+            f"{desc} timed out after {timeout_seconds}s (process boundary authoritatively terminated; zero surviving processes)"
+        )
+
+    if q.empty():
+        raise ViduRecoveryError(f"{desc} terminated unexpectedly without returning a result (exitcode={p.exitcode})")
+    success, val = q.get_nowait()
+    if not success:
+        raise val
+    return val
+
+
 class ViduExistingJobRecoveryService:
     @classmethod
     def validate_authorized_job_id(cls, provider_job_id: str) -> None:
@@ -850,7 +895,7 @@ class ViduExistingJobRecoveryService:
                 except Exception:
                     pass
 
-        def _execute_with_transport_cancellation(func, timeout_seconds: float, desc: str, abort_action=None):
+        def _execute_with_transport_cancellation(func, timeout_seconds: float, desc: str, abort_action=None, use_process: bool = False):
             """Execute a network/storage operation with strict transport deadline and cancellation.
 
             Guarantees:
@@ -860,6 +905,9 @@ class ViduExistingJobRecoveryService:
                fails closed without claiming zero surviving operations and halts to prevent unbounded daemon accumulation.
             4. Fails closed with ViduRecoveryError or ViduTransportCancellationFailureError.
             """
+            if use_process:
+                return execute_with_process_boundary(func, timeout_seconds=timeout_seconds, desc=desc)
+
             surviving_active = [w for w in _SURVIVING_WORKERS if w.is_alive()]
             if surviving_active:
                 raise ViduTransportCancellationFailureError(
@@ -967,11 +1015,22 @@ class ViduExistingJobRecoveryService:
                 return storage.client.head_object(Bucket=bucket, Key=key)
 
             def _abort_head():
-                if hasattr(storage.client, "close"):
-                    try:
-                        storage.client.close()
-                    except Exception:
-                        pass
+                if hasattr(storage, "client"):
+                    if hasattr(storage.client, "_endpoint") and hasattr(storage.client._endpoint, "http_session"):
+                        try:
+                            storage.client._endpoint.http_session.close()
+                        except Exception:
+                            pass
+                        try:
+                            if hasattr(storage.client._endpoint.http_session, "_pool_manager"):
+                                storage.client._endpoint.http_session._pool_manager.clear()
+                        except Exception:
+                            pass
+                    if hasattr(storage.client, "close"):
+                        try:
+                            storage.client.close()
+                        except Exception:
+                            pass
 
             try:
                 head = _execute_with_transport_cancellation(
@@ -1017,11 +1076,22 @@ class ViduExistingJobRecoveryService:
                 return storage.client.get_object(Bucket=bucket, Key=key)
 
             def _abort_get():
-                if hasattr(storage.client, "close"):
-                    try:
-                        storage.client.close()
-                    except Exception:
-                        pass
+                if hasattr(storage, "client"):
+                    if hasattr(storage.client, "_endpoint") and hasattr(storage.client._endpoint, "http_session"):
+                        try:
+                            storage.client._endpoint.http_session.close()
+                        except Exception:
+                            pass
+                        try:
+                            if hasattr(storage.client._endpoint.http_session, "_pool_manager"):
+                                storage.client._endpoint.http_session._pool_manager.clear()
+                        except Exception:
+                            pass
+                    if hasattr(storage.client, "close"):
+                        try:
+                            storage.client.close()
+                        except Exception:
+                            pass
 
             try:
                 response = _execute_with_transport_cancellation(
