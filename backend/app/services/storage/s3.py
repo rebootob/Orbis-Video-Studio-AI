@@ -18,6 +18,8 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
         use_ssl: bool = False,
     ):
         self.endpoint_url = endpoint_url
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
         self.use_ssl = use_ssl
 
@@ -43,6 +45,18 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
             use_ssl=use_ssl,
             config=config,
         )
+
+    def get_serializable_config(self) -> dict:
+        """Return minimal serializable configuration for process-isolated workers.
+
+        Credentials are never serialized; the child worker resolves them from trusted environment/provider chain.
+        """
+        return {
+            "type": "s3",
+            "endpoint_url": self.endpoint_url,
+            "region_name": self.region_name,
+            "use_ssl": self.use_ssl,
+        }
 
     def ensure_bucket_exists(self, bucket: str) -> None:
         try:

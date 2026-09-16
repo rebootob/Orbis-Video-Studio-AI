@@ -105,11 +105,37 @@ def execute_recovery_harness(
 
     Returns dict with execution summary and status.
     """
-    if actual_runtime_target is None:
-        if auth_payload is not None:
-            actual_runtime_target = auth_payload.runtime_target
-        else:
-            actual_runtime_target = "UAT-COMPOSE-PERSISTENT"
+    # Resolve immutable deployment profile from trusted configuration (fail-closed)
+    from app.services.recovery_auth import resolve_canonical_deployment_profile, AuthRuntimeMismatchError, AUTHORIZED_RUNTIME_TARGET_PROFILES
+    resolved_profile = resolve_canonical_deployment_profile()
+
+    # Reject mismatch between payload runtime target and actual runtime target
+    if auth_payload is not None and actual_runtime_target is not None and auth_payload.runtime_target != actual_runtime_target:
+        raise AuthRuntimeMismatchError(
+            f"Runtime target mismatch: authorized '{auth_payload.runtime_target}' != actual '{actual_runtime_target}'"
+        )
+
+    # Reject unknown or unauthorized runtime target profiles
+    if actual_runtime_target is not None and actual_runtime_target not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
+        raise AuthRuntimeMismatchError(
+            f"Unknown or unauthorized runtime target profile '{actual_runtime_target}' (fail-closed)"
+        )
+    if auth_payload is not None and auth_payload.runtime_target not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
+        raise AuthRuntimeMismatchError(
+            f"Unknown or unauthorized runtime target profile '{auth_payload.runtime_target}' (fail-closed)"
+        )
+
+    # Reject any mismatch between caller/payload and the immutable deployment profile
+    if actual_runtime_target is not None and actual_runtime_target != resolved_profile:
+        raise AuthRuntimeMismatchError(
+            f"Runtime target mismatch: explicit runtime target '{actual_runtime_target}' does not match immutable deployment profile '{resolved_profile}'"
+        )
+    if auth_payload is not None and auth_payload.runtime_target != resolved_profile:
+        raise AuthRuntimeMismatchError(
+            f"Runtime target mismatch: signed authorization payload runtime target '{auth_payload.runtime_target}' does not match immutable deployment profile '{resolved_profile}'"
+        )
+
+    actual_runtime_target = resolved_profile
 
     exec_id = execution_id or f"rec1-exec-{uuid.uuid4().hex[:12]}"
     now = current_time or utc_now()

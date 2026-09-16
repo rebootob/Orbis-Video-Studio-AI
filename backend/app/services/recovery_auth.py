@@ -88,6 +88,37 @@ AUTHORIZED_RUNTIME_TARGET_PROFILES = {
 }
 
 
+def resolve_canonical_deployment_profile() -> str:
+    """Resolve actual runtime profile from immutable trusted deployment configuration.
+
+    Fails closed if the deployment environment does not explicitly declare a valid
+    authorized profile. Never defaults to payload or caller-supplied values.
+    """
+    from app.core.config import settings
+
+    target = os.environ.get("DEPLOYED_RUNTIME_TARGET") or getattr(settings, "DEPLOYED_RUNTIME_TARGET", None)
+    if not target:
+        # Fallback to explicit deployment environment mappings if configured
+        env_val = getattr(settings, "ENVIRONMENT", "").lower()
+        if env_val == "production":
+            target = "PRODUCTION"
+        elif env_val in ("uat", "staging"):
+            target = "UAT-COMPOSE-PERSISTENT"
+
+    if not target or not str(target).strip():
+        raise RecoveryAuthError(
+            "Immutable deployment runtime target is not configured (fail-closed; set DEPLOYED_RUNTIME_TARGET)"
+        )
+
+    target_str = str(target).strip()
+    if target_str not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
+        raise AuthRuntimeMismatchError(
+            f"Configured deployment runtime target '{target_str}' is not in authorized runtime profiles (fail-closed)"
+        )
+
+    return target_str
+
+
 def resolve_canonical_storage_restore_roots(
     storage_provider: Optional[any] = None,
     storage_identity: str = "",

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
+    DEPLOYED_RUNTIME_TARGET: Optional[str] = None
     API_V1_STR: str = "/api/v1"
 
     BACKEND_CORS_ORIGINS: list[str] = [

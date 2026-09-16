@@ -24,7 +24,7 @@ def _load_contract():
 
 
 def _git_blob_sha(path: Path) -> str:
-    content = path.read_bytes()
+    content = path.read_bytes().replace(b"\x0d\x0a", b"\x0a")
     return hashlib.sha1(f"blob {len(content)}\0".encode("utf-8") + content).hexdigest()
 
 

@@ -14,14 +14,19 @@ Strict invariants:
 """
 from __future__ import annotations
 
-import logging
-import os
 import hashlib
+import logging
+import multiprocessing
+import os
+import queue
 import re
+import socket
 import tempfile
+import threading
+import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -121,46 +126,384 @@ class ViduRecoveryResult:
 def _process_boundary_worker(target_fn, args, kwargs, result_queue):
     try:
         res = target_fn(*args, **(kwargs or {}))
-        result_queue.put((True, res))
+        result_queue.put({"success": True, "result": res})
     except Exception as e:
-        result_queue.put((False, e))
+        result_queue.put({
+            "success": False,
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        })
 
 
 def execute_with_process_boundary(target_fn, args=(), kwargs=None, timeout_seconds=5.0, desc="Process operation"):
     """Execute an operation inside an isolatable process boundary with authoritative OS termination.
 
     Guarantees:
-    1. Execution runs in an isolated process.
+    1. Execution runs in an isolated process using explicit spawn context.
     2. Strictly bounded by timeout_seconds.
-    3. On timeout, authoritatively terminates/kills the child process and verifies is_alive() is False.
-    4. Zero surviving child processes or threads.
-    5. Fails closed with ViduRecoveryError.
+    3. On timeout, authoritatively terminates/kills child process and verifies dead without assert.
+    4. Cleans up Queue (close, join_thread). Never relies on Queue.empty().
+    5. Returns only primitive serializable values across process boundary.
+    6. Fails closed with ViduRecoveryError.
     """
-    import multiprocessing
-    ctx = multiprocessing.get_context()
+    ctx = multiprocessing.get_context("spawn")
     q = ctx.Queue()
     p = ctx.Process(target=_process_boundary_worker, args=(target_fn, args, kwargs or {}, q))
     p.start()
-    p.join(timeout=timeout_seconds)
-    if p.is_alive():
-        logger.warning("Process boundary deadline exceeded for %s; terminating child process", desc)
-        p.terminate()
-        p.join(timeout=0.3)
+
+    res = None
+    try:
+        res = q.get(timeout=timeout_seconds)
+    except queue.Empty:
+        pass
+    except Exception as q_err:
+        logger.error("Process boundary queue error for %s: %s", desc, q_err)
+    finally:
+        if res is not None:
+            p.join(timeout=2.0)
         if p.is_alive():
-            logger.error("Process boundary child did not terminate on SIGTERM; sending SIGKILL for %s", desc)
-            p.kill()
-            p.join(timeout=0.3)
-        assert not p.is_alive(), f"Child process {p.pid} could not be killed (fail-closed)"
+            logger.warning("Process boundary deadline exceeded for %s; terminating child process", desc)
+            p.terminate()
+            p.join(timeout=1.0)
+            if p.is_alive():
+                logger.error("Process boundary child did not terminate on SIGTERM; sending SIGKILL for %s", desc)
+                p.kill()
+                p.join(timeout=1.0)
+            if p.is_alive():
+                raise ViduRecoveryError(f"Process boundary child {p.pid} could not be killed (fail-closed)")
+
+        try:
+            q.close()
+            q.join_thread()
+        except Exception:
+            pass
+
+    if res is None:
         raise ViduRecoveryError(
             f"{desc} timed out after {timeout_seconds}s (process boundary authoritatively terminated; zero surviving processes)"
         )
 
-    if q.empty():
-        raise ViduRecoveryError(f"{desc} terminated unexpectedly without returning a result (exitcode={p.exitcode})")
-    success, val = q.get_nowait()
-    if not success:
-        raise val
-    return val
+    if not res.get("success"):
+        err_type = res.get("error_type", "ExecutionError")
+        err_msg = res.get("error_message", "Process boundary operation failed")
+        raise ViduRecoveryError(f"{desc} failed ({err_type}): {err_msg}")
+
+    return res.get("result")
+
+
+def _isolated_storage_verify_worker(
+    config: dict,
+    bucket: str,
+    key: str,
+    expected_size: int,
+    expected_sha256: str,
+    max_duration_seconds: float,
+    max_size_bytes: int,
+    result_queue,
+) -> None:
+    """Worker executed inside an isolated spawn process boundary.
+
+    Creates storage adapter inside child from serializable config.
+    Performs HEAD/GET/stream SHA-256 and size verification completely inside child.
+    Puts ONLY a small primitive dict into result_queue.
+    Never passes botocore client, socket, StreamingBody, closure, or arbitrary exception across queue.
+    Never sends secret access keys or credentials across queue.
+    """
+    start_time = time.monotonic()
+    try:
+        cfg_type = config.get("type", "")
+        if cfg_type == "s3":
+            from app.services.storage.s3 import S3CompatibleObjectStorageProvider
+            # Obtain credentials from environment / default provider chain inside child
+            storage = S3CompatibleObjectStorageProvider(
+                endpoint_url=config.get("endpoint_url"),
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("OBJECT_STORAGE_ACCESS_KEY"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("OBJECT_STORAGE_SECRET_KEY"),
+                region_name=config.get("region_name", "us-east-1"),
+                use_ssl=config.get("use_ssl", False),
+            )
+        elif cfg_type == "memory":
+            from app.services.storage.mock import InMemoryObjectStorageProvider
+            storage = InMemoryObjectStorageProvider()
+            store_data = config.get("store", {})
+            for compound_key, (val, ct) in store_data.items():
+                parts = compound_key.split("/", 1)
+                b = parts[0]
+                k = parts[1] if len(parts) > 1 else ""
+                storage._store[(b, k)] = (val, ct)
+                storage._buckets.add(b)
+        else:
+            result_queue.put({
+                "success": False,
+                "error_type": "ValueError",
+                "error_message": f"Unsupported isolated storage provider type: '{cfg_type}'",
+            })
+            return
+
+        # 1. Metadata inspection (HEAD)
+        head_etag = None
+        head_len = None
+        if hasattr(storage, "client") and hasattr(storage.client, "head_object"):
+            try:
+                head_resp = storage.client.head_object(Bucket=bucket, Key=key)
+            except Exception as head_err:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Storage metadata access failed for '{bucket}/{key}': {head_err}",
+                })
+                return
+
+            head_etag = head_resp.get("ETag")
+            head_len = head_resp.get("ContentLength", 0)
+            if head_len > max_size_bytes:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})",
+                })
+                return
+            if head_len != expected_size:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Storage size mismatch: actual {head_len} != expected {expected_size}",
+                })
+                return
+        elif hasattr(storage, "_store"):
+            item = storage._store.get((bucket, key))
+            if not item:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "KeyError",
+                    "error_message": f"Object '{key}' not found in bucket '{bucket}'",
+                })
+                return
+            raw = item[0] if isinstance(item, tuple) else item
+            raw_len = len(raw) if isinstance(raw, (bytes, bytearray)) else 0
+            head_len = raw_len
+            if raw_len > max_size_bytes:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})",
+                })
+                return
+            if raw_len != expected_size:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Storage size mismatch: actual {raw_len} != expected {expected_size}",
+                })
+                return
+        else:
+            result_queue.put({
+                "success": False,
+                "error_type": "ViduRecoveryError",
+                "error_message": f"Storage provider does not support metadata inspection for '{bucket}/{key}'",
+            })
+            return
+
+        # 2. GET and Stream verification
+        hasher = hashlib.sha256()
+        bytes_transferred = 0
+
+        if hasattr(storage, "client") and hasattr(storage.client, "get_object"):
+            try:
+                response = storage.client.get_object(Bucket=bucket, Key=key)
+            except Exception as get_err:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "ViduRecoveryError",
+                    "error_message": f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}",
+                })
+                return
+
+            body = response.get("Body")
+            try:
+                curr_etag = response.get("ETag")
+                curr_len = response.get("ContentLength")
+                if head_etag is not None and curr_etag != head_etag:
+                    result_queue.put({
+                        "success": False,
+                        "error_type": "ViduRecoveryError",
+                        "error_message": f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')",
+                    })
+                    return
+                if head_len is not None and curr_len != head_len:
+                    result_queue.put({
+                        "success": False,
+                        "error_type": "ViduRecoveryError",
+                        "error_message": f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})",
+                    })
+                    return
+
+                if body is None:
+                    result_queue.put({
+                        "success": False,
+                        "error_type": "ViduRecoveryError",
+                        "error_message": f"Storage get_object response missing Body stream for '{bucket}/{key}'",
+                    })
+                    return
+
+                chunk_size = 64 * 1024
+                deadline = start_time + max_duration_seconds
+                while True:
+                    if time.monotonic() > deadline:
+                        result_queue.put({
+                            "success": False,
+                            "error_type": "ViduRecoveryError",
+                            "error_message": f"Storage stream transfer exceeded timeout of {max_duration_seconds}s",
+                        })
+                        return
+
+                    chunk = body.read(chunk_size)
+                    if not chunk:
+                        break
+                    bytes_transferred += len(chunk)
+                    if bytes_transferred > max_size_bytes:
+                        result_queue.put({
+                            "success": False,
+                            "error_type": "ViduRecoveryError",
+                            "error_message": f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes",
+                        })
+                        return
+                    hasher.update(chunk)
+            finally:
+                if hasattr(body, "close"):
+                    try:
+                        body.close()
+                    except Exception:
+                        pass
+        elif hasattr(storage, "_store"):
+            item_now = storage._store.get((bucket, key))
+            if not item_now:
+                result_queue.put({
+                    "success": False,
+                    "error_type": "KeyError",
+                    "error_message": f"Object '{key}' disappeared during stream verification",
+                })
+                return
+            raw_now = item_now[0] if isinstance(item_now, tuple) else item_now
+            chunk_size = 64 * 1024
+            offset = 0
+            while offset < len(raw_now):
+                if time.monotonic() - start_time > max_duration_seconds:
+                    result_queue.put({
+                        "success": False,
+                        "error_type": "ViduRecoveryError",
+                        "error_message": f"Storage stream transfer exceeded timeout of {max_duration_seconds}s",
+                    })
+                    return
+                chunk = raw_now[offset : offset + chunk_size]
+                offset += len(chunk)
+                bytes_transferred += len(chunk)
+                if bytes_transferred > max_size_bytes:
+                    result_queue.put({
+                        "success": False,
+                        "error_type": "ViduRecoveryError",
+                        "error_message": f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes",
+                    })
+                    return
+                hasher.update(chunk)
+
+        # 3. Validation
+        if bytes_transferred != expected_size:
+            result_queue.put({
+                "success": False,
+                "error_type": "ViduRecoveryError",
+                "error_message": f"Storage size mismatch: transferred {bytes_transferred} != expected {expected_size}",
+            })
+            return
+
+        calc_sha256 = hasher.hexdigest()
+        if calc_sha256 != expected_sha256:
+            result_queue.put({
+                "success": False,
+                "error_type": "ViduRecoveryError",
+                "error_message": f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}",
+            })
+            return
+
+        result_queue.put({
+            "success": True,
+            "bytes_transferred": bytes_transferred,
+            "sha256": calc_sha256,
+        })
+    except Exception as e:
+        result_queue.put({
+            "success": False,
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        })
+
+
+def _execute_isolated_storage_verify(
+    config: dict,
+    bucket: str,
+    key: str,
+    expected_size: int,
+    expected_sha256: str,
+    max_duration_seconds: float = 30.0,
+    max_size_bytes: int = 50 * 1024 * 1024,
+    timeout_grace_seconds: float = 0.2,
+) -> dict:
+    """Execute storage verification inside an isolated process boundary.
+
+    Guarantees:
+    1. Uses explicit multiprocessing 'spawn' context.
+    2. Constructs adapter/client from trusted serializable configuration inside child.
+    3. Returns only primitive serializable result dict through Queue (never botocore client, socket, StreamingBody, or arbitrary exception).
+    4. Never uses Queue.empty() as authority; uses q.get(timeout=...).
+    5. Cleans up queue resources via q.close() and q.join_thread().
+    6. Verifies child termination fail-closed without assert.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    q = ctx.Queue()
+    p = ctx.Process(
+        target=_isolated_storage_verify_worker,
+        args=(config, bucket, key, expected_size, expected_sha256, max_duration_seconds, max_size_bytes, q),
+    )
+    p.start()
+
+    res = None
+    try:
+        res = q.get(timeout=max_duration_seconds + timeout_grace_seconds)
+    except queue.Empty:
+        pass
+    except Exception as qe:
+        logger.error("Error reading from isolated storage verification queue: %s", qe)
+    finally:
+        if res is not None:
+            p.join(timeout=2.0)
+        if p.is_alive():
+            logger.warning("Storage verification deadline exceeded; terminating child process %s", p.pid)
+            p.terminate()
+            p.join(timeout=1.0)
+            if p.is_alive():
+                logger.error("Child process %s did not terminate on SIGTERM; sending SIGKILL", p.pid)
+                p.kill()
+                p.join(timeout=1.0)
+            if p.is_alive():
+                raise ViduRecoveryError(f"Process boundary child {p.pid} could not be terminated (fail-closed)")
+
+        try:
+            q.close()
+            q.join_thread()
+        except Exception:
+            pass
+
+    if res is None:
+        raise ViduRecoveryError(
+            f"Storage stream transfer timed out (exceeded timeout of {max_duration_seconds}s; process boundary authoritatively terminated; zero surviving processes)"
+        )
+
+    if not res.get("success"):
+        err_msg = res.get("error_message", "Storage verification failed")
+        err_type = res.get("error_type", "ViduRecoveryError")
+        raise ViduRecoveryError(f"{err_msg} ({err_type})" if err_type not in err_msg else err_msg)
+
+    return res
 
 
 class ViduExistingJobRecoveryService:
@@ -865,7 +1208,30 @@ class ViduExistingJobRecoveryService:
         2. Bounded response streaming: byte bounds and timeouts enforced during chunk streaming.
         3. Object-version consistency: validates that object size and ETag have not mutated between HEAD and GET.
         4. Incremental 64KB hashing directly from network/storage stream.
+        5. Process-isolated verification when serializable configuration is available.
         """
+        config = None
+        if isinstance(storage, dict):
+            config = storage
+        elif hasattr(storage, "get_serializable_config"):
+            try:
+                config = storage.get_serializable_config()
+            except Exception as cfg_err:
+                logger.warning("Could not extract serializable config from storage: %s", cfg_err)
+                config = None
+
+        if config is not None:
+            _execute_isolated_storage_verify(
+                config=config,
+                bucket=bucket,
+                key=key,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+                max_duration_seconds=max_duration_seconds,
+                max_size_bytes=max_size_bytes,
+            )
+            return
+
         import socket
         import threading
         import time
