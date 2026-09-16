@@ -131,7 +131,7 @@ def _process_boundary_worker(target_fn, args, kwargs, result_queue):
         result_queue.put({
             "success": False,
             "error_type": type(e).__name__,
-            "error_message": str(e),
+            "error_message": sanitize_error_message(str(e)),
         })
 
 
@@ -191,6 +191,76 @@ def execute_with_process_boundary(target_fn, args=(), kwargs=None, timeout_secon
     return res.get("result")
 
 
+_LAST_ISOLATED_WORKER_PID: Optional[int] = None
+
+
+def sanitize_error_message(msg: Any) -> str:
+    """Sanitize error messages to prevent leakage of credentials, tokens, URLs with secrets, or DSNs."""
+    if msg is None:
+        return ""
+    text = str(msg)
+    # 1. Scheme URLs with user:pass (e.g. postgresql://user:secret@host, https://user:pass@host)
+    text = re.sub(
+        r'([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/@\s]+):([^/@\s]+)@',
+        r'\1[REDACTED_USER]:[REDACTED_SECRET]@',
+        text,
+    )
+    # 2. Raw DSN user:pass@host:port/db
+    text = re.sub(
+        r'(?<![a-zA-Z0-9+.-])([a-zA-Z0-9_.-]+):([^/@\s:]+)@([a-zA-Z0-9_.-]+:\d+/[a-zA-Z0-9_.-]+)',
+        r'[REDACTED_USER]:[REDACTED_SECRET]@\3',
+        text,
+    )
+    # 3. Sensitive query parameters and signed tokens
+    text = re.sub(
+        r'(?i)(x-amz-signature|x-amz-credential|x-amz-security-token|signature|sig|access_token|refresh_token|api[-_]?key|auth[-_]?token|password|passwd|secret)=([^&\s\'",]+)',
+        r'\1=[REDACTED]',
+        text,
+    )
+    # 4. Sensitive key-value pairs in exception messages
+    text = re.sub(
+        r'(?i)\b(aws_secret_access_key|aws_access_key_id|aws_session_token|secret_access_key|secret_key|api_key|private_key|client_secret|password|passwd)\b\s*[:=]\s*([\'"]?)([^\s,\'"]+)\2',
+        r'\1=[REDACTED]',
+        text,
+    )
+    # 5. Bearer tokens
+    text = re.sub(
+        r'(?i)\b(bearer\s+)[a-zA-Z0-9._\-]+',
+        r'\1[REDACTED]',
+        text,
+    )
+    return text
+
+
+def check_pid_surviving(pid: Optional[int]) -> bool:
+    """Independently check if a process ID is currently active in the OS kernel."""
+    if pid is None or pid <= 0:
+        return False
+    import sys
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        SYNCHRONIZE = 0x00100000
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+        if not handle:
+            return False
+        STILL_ACTIVE = 259
+        exit_code = ctypes.c_ulong()
+        try:
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return exit_code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
 def _isolated_storage_verify_worker(
     config: dict,
     bucket: str,
@@ -214,13 +284,26 @@ def _isolated_storage_verify_worker(
         cfg_type = config.get("type", "")
         if cfg_type == "s3":
             from app.services.storage.s3 import S3CompatibleObjectStorageProvider
-            # Obtain credentials from environment / default provider chain inside child
+            # Obtain credentials from config (passed across spawn boundary in memory) or environment
+            endpoint = config.get("endpoint_url")
+            region = config.get("region_name", "us-east-1")
+            use_ssl = config.get("use_ssl", False)
+            access_key = (
+                config.get("aws_access_key_id")
+                or os.environ.get("AWS_ACCESS_KEY_ID")
+                or os.environ.get("OBJECT_STORAGE_ACCESS_KEY")
+            )
+            secret_key = (
+                config.get("aws_secret_access_key")
+                or os.environ.get("AWS_SECRET_ACCESS_KEY")
+                or os.environ.get("OBJECT_STORAGE_SECRET_KEY")
+            )
             storage = S3CompatibleObjectStorageProvider(
-                endpoint_url=config.get("endpoint_url"),
-                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("OBJECT_STORAGE_ACCESS_KEY"),
-                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY") or os.environ.get("OBJECT_STORAGE_SECRET_KEY"),
-                region_name=config.get("region_name", "us-east-1"),
-                use_ssl=config.get("use_ssl", False),
+                endpoint_url=endpoint,
+                aws_access_key_id=access_key or None,
+                aws_secret_access_key=secret_key or None,
+                region_name=region,
+                use_ssl=use_ssl,
             )
         elif cfg_type == "memory":
             from app.services.storage.mock import InMemoryObjectStorageProvider
@@ -236,7 +319,7 @@ def _isolated_storage_verify_worker(
             result_queue.put({
                 "success": False,
                 "error_type": "ValueError",
-                "error_message": f"Unsupported isolated storage provider type: '{cfg_type}'",
+                "error_message": sanitize_error_message(f"Unsupported isolated storage provider type: '{cfg_type}'"),
             })
             return
 
@@ -250,7 +333,7 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Storage metadata access failed for '{bucket}/{key}': {head_err}",
+                    "error_message": sanitize_error_message(f"Storage metadata access failed for '{bucket}/{key}': {head_err}"),
                 })
                 return
 
@@ -260,14 +343,14 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})",
+                    "error_message": sanitize_error_message(f"Storage object exceeds maximum allowed size ({head_len} > {max_size_bytes})"),
                 })
                 return
             if head_len != expected_size:
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Storage size mismatch: actual {head_len} != expected {expected_size}",
+                    "error_message": sanitize_error_message(f"Storage size mismatch: actual {head_len} != expected {expected_size}"),
                 })
                 return
         elif hasattr(storage, "_store"):
@@ -276,7 +359,7 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "KeyError",
-                    "error_message": f"Object '{key}' not found in bucket '{bucket}'",
+                    "error_message": sanitize_error_message(f"Object '{key}' not found in bucket '{bucket}'"),
                 })
                 return
             raw = item[0] if isinstance(item, tuple) else item
@@ -286,21 +369,21 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})",
+                    "error_message": sanitize_error_message(f"Storage object exceeds maximum allowed size ({raw_len} > {max_size_bytes})"),
                 })
                 return
             if raw_len != expected_size:
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Storage size mismatch: actual {raw_len} != expected {expected_size}",
+                    "error_message": sanitize_error_message(f"Storage size mismatch: actual {raw_len} != expected {expected_size}"),
                 })
                 return
         else:
             result_queue.put({
                 "success": False,
                 "error_type": "ViduRecoveryError",
-                "error_message": f"Storage provider does not support metadata inspection for '{bucket}/{key}'",
+                "error_message": sanitize_error_message(f"Storage provider does not support metadata inspection for '{bucket}/{key}'"),
             })
             return
 
@@ -315,7 +398,7 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "ViduRecoveryError",
-                    "error_message": f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}",
+                    "error_message": sanitize_error_message(f"Failed to initiate stream retrieval for '{bucket}/{key}': {get_err}"),
                 })
                 return
 
@@ -327,14 +410,14 @@ def _isolated_storage_verify_worker(
                     result_queue.put({
                         "success": False,
                         "error_type": "ViduRecoveryError",
-                        "error_message": f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')",
+                        "error_message": sanitize_error_message(f"Storage object modified between HEAD and stream retrieval (ETag mismatch: '{curr_etag}' != '{head_etag}')"),
                     })
                     return
                 if head_len is not None and curr_len != head_len:
                     result_queue.put({
                         "success": False,
                         "error_type": "ViduRecoveryError",
-                        "error_message": f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})",
+                        "error_message": sanitize_error_message(f"Storage object modified between HEAD and stream retrieval (Length mismatch: {curr_len} != {head_len})"),
                     })
                     return
 
@@ -342,7 +425,7 @@ def _isolated_storage_verify_worker(
                     result_queue.put({
                         "success": False,
                         "error_type": "ViduRecoveryError",
-                        "error_message": f"Storage get_object response missing Body stream for '{bucket}/{key}'",
+                        "error_message": sanitize_error_message(f"Storage get_object response missing Body stream for '{bucket}/{key}'"),
                     })
                     return
 
@@ -353,7 +436,7 @@ def _isolated_storage_verify_worker(
                         result_queue.put({
                             "success": False,
                             "error_type": "ViduRecoveryError",
-                            "error_message": f"Storage stream transfer exceeded timeout of {max_duration_seconds}s",
+                            "error_message": sanitize_error_message(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s"),
                         })
                         return
 
@@ -365,7 +448,7 @@ def _isolated_storage_verify_worker(
                         result_queue.put({
                             "success": False,
                             "error_type": "ViduRecoveryError",
-                            "error_message": f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes",
+                            "error_message": sanitize_error_message(f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes"),
                         })
                         return
                     hasher.update(chunk)
@@ -381,7 +464,7 @@ def _isolated_storage_verify_worker(
                 result_queue.put({
                     "success": False,
                     "error_type": "KeyError",
-                    "error_message": f"Object '{key}' disappeared during stream verification",
+                    "error_message": sanitize_error_message(f"Object '{key}' disappeared during stream verification"),
                 })
                 return
             raw_now = item_now[0] if isinstance(item_now, tuple) else item_now
@@ -392,7 +475,7 @@ def _isolated_storage_verify_worker(
                     result_queue.put({
                         "success": False,
                         "error_type": "ViduRecoveryError",
-                        "error_message": f"Storage stream transfer exceeded timeout of {max_duration_seconds}s",
+                        "error_message": sanitize_error_message(f"Storage stream transfer exceeded timeout of {max_duration_seconds}s"),
                     })
                     return
                 chunk = raw_now[offset : offset + chunk_size]
@@ -402,7 +485,7 @@ def _isolated_storage_verify_worker(
                     result_queue.put({
                         "success": False,
                         "error_type": "ViduRecoveryError",
-                        "error_message": f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes",
+                        "error_message": sanitize_error_message(f"Storage stream transfer exceeded maximum budget of {max_size_bytes} bytes"),
                     })
                     return
                 hasher.update(chunk)
@@ -412,7 +495,7 @@ def _isolated_storage_verify_worker(
             result_queue.put({
                 "success": False,
                 "error_type": "ViduRecoveryError",
-                "error_message": f"Storage size mismatch: transferred {bytes_transferred} != expected {expected_size}",
+                "error_message": sanitize_error_message(f"Storage size mismatch: transferred {bytes_transferred} != expected {expected_size}"),
             })
             return
 
@@ -421,7 +504,7 @@ def _isolated_storage_verify_worker(
             result_queue.put({
                 "success": False,
                 "error_type": "ViduRecoveryError",
-                "error_message": f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}",
+                "error_message": sanitize_error_message(f"Storage checksum mismatch: actual {calc_sha256} != expected {expected_sha256}"),
             })
             return
 
@@ -434,7 +517,7 @@ def _isolated_storage_verify_worker(
         result_queue.put({
             "success": False,
             "error_type": type(e).__name__,
-            "error_message": str(e),
+            "error_message": sanitize_error_message(str(e)),
         })
 
 
@@ -465,6 +548,9 @@ def _execute_isolated_storage_verify(
         args=(config, bucket, key, expected_size, expected_sha256, max_duration_seconds, max_size_bytes, q),
     )
     p.start()
+    worker_pid = p.pid
+    global _LAST_ISOLATED_WORKER_PID
+    _LAST_ISOLATED_WORKER_PID = worker_pid
 
     res = None
     try:
@@ -1231,6 +1317,18 @@ class ViduExistingJobRecoveryService:
                 max_size_bytes=max_size_bytes,
             )
             return
+
+        # Fail-closed guard: Any real S3 provider or storage declaring get_serializable_config MUST use process isolation.
+        # Daemon-thread fallback is strictly forbidden for production S3 storage.
+        # Test mocks without serializable config (such as InMemory or Mock wrappers) use local bounded streaming.
+        is_real_s3 = (
+            "s3compatible" in storage.__class__.__name__.lower()
+            or hasattr(storage, "get_serializable_config")
+        )
+        if is_real_s3:
+            raise ViduRecoveryError(
+                "Production S3 storage requires process-isolated verification; serializable configuration could not be obtained and fallback to daemon thread is forbidden (fail-closed)"
+            )
 
         import socket
         import threading

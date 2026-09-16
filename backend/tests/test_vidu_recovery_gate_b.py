@@ -5335,6 +5335,36 @@ def _stubborn_test_worker():
 
 
 
+def _stalled_read_test_worker():
+
+    import socket
+
+    import time
+
+    s_a, s_b = socket.socketpair()
+
+    try:
+
+        s_a.recv(1024)
+
+    finally:
+
+        s_a.close()
+
+        s_b.close()
+
+
+
+def _leaking_credentials_worker():
+
+    raise RuntimeError(
+
+        "Failed accessing postgresql://user:super_secret_pw@10.0.0.5:5432/proddb?ssl=true "
+
+        "and https://admin:token_xyz123@storage.internal/bucket/file.mp4?X-Amz-Signature=abcd1234efgh"
+
+    )
+
 
 
 # ==============================================================================
@@ -5482,39 +5512,26 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
 
 
     orig_get_context = multiprocessing.get_context
+    orig_spawn_process = multiprocessing.get_context("spawn").Process
 
     def mock_get_context(method=None):
-
         c = orig_get_context("spawn")
-
         c.Process = ZombieProcess
-
         return c
 
     monkeypatch.setattr(multiprocessing, "get_context", mock_get_context)
 
-
-
     with pytest.raises(ViduRecoveryError, match="could not be terminated \\(fail-closed\\)"):
-
         _execute_isolated_storage_verify(
-
             config=config,
-
             bucket=bucket,
-
             key=key,
-
             expected_size=expected_size,
-
             expected_sha256=expected_sha256,
-
             max_duration_seconds=0.05,
-
         )
 
-
-
+    multiprocessing.get_context("spawn").Process = orig_spawn_process
     monkeypatch.setattr(multiprocessing, "get_context", orig_get_context)
 
 
@@ -5590,3 +5607,48 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
     with pytest.raises(AuthRuntimeMismatchError, match="not in authorized runtime profiles"):
 
         resolve_canonical_deployment_profile()
+
+
+
+    # Subcase H: Process-isolated stalled read worker termination with zero surviving PID
+
+    from app.services.vidu_recovery import check_pid_surviving, _LAST_ISOLATED_WORKER_PID
+
+    with pytest.raises(ViduRecoveryError, match="timed out after 0.1s.*zero surviving processes"):
+
+        execute_with_process_boundary(_stalled_read_test_worker, timeout_seconds=0.1, desc="Stalled read socket operation")
+
+    # Authoritatively verify that the child process is terminated at the OS kernel level
+    from app.services.vidu_recovery import _LAST_ISOLATED_WORKER_PID
+    if _LAST_ISOLATED_WORKER_PID is not None:
+        assert check_pid_surviving(_LAST_ISOLATED_WORKER_PID) is False
+
+
+
+    # Subcase I: Queue sanitization strictly prevents secret/token leakage across IPC boundary
+
+    from app.services.vidu_recovery import sanitize_error_message, _process_boundary_worker
+
+    # 1. Direct unit test of sanitize_error_message
+    raw_leaked_err = (
+        "Failed accessing postgresql://user:super_secret_pw@10.0.0.5:5432/proddb?ssl=true "
+        "and https://admin:token_xyz123@storage.internal/bucket/file.mp4?X-Amz-Signature=abcd1234efgh"
+    )
+    sanitized = sanitize_error_message(raw_leaked_err)
+    assert "super_secret_pw" not in sanitized
+    assert "token_xyz123" not in sanitized
+    assert "abcd1234efgh" not in sanitized
+    assert "[REDACTED_SECRET]" in sanitized or "[REDACTED_PASSWORD]" in sanitized
+    assert "[REDACTED]" in sanitized
+
+    # 2. Verify _process_boundary_worker sanitizes before enqueueing
+    test_q = multiprocessing.Queue()
+    _process_boundary_worker(_leaking_credentials_worker, (), {}, test_q)
+    q_msg = test_q.get(timeout=1.0)
+    assert q_msg["success"] is False
+    assert "super_secret_pw" not in q_msg["error_message"]
+    assert "token_xyz123" not in q_msg["error_message"]
+    assert "abcd1234efgh" not in q_msg["error_message"]
+    assert "[REDACTED_SECRET]" in q_msg["error_message"] or "[REDACTED_PASSWORD]" in q_msg["error_message"]
+
+

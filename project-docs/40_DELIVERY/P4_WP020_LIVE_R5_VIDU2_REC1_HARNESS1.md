@@ -7,7 +7,7 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEWS 5217143749 & 5217264161: CHANGES REQUIRED -> R6 CORRECTIVE IMPLEMENTED)**
+- **Gate B Implementation Status**: **IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEWS 5217143749, 5217264161 & 5221749798: R7 CORRECTIVE IMPLEMENTED)**
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -80,6 +80,12 @@ Release = NOT DECLARED
    - Durable out-of-band consumption marker persisted to storage on successful execution (`fences/consumed/{provider_job_id}.json`).
 7. **Automated Test Suite (`backend/tests/test_vidu_recovery_gate_b.py`)**:
    - 38 tests covering all 26 acceptance scenarios plus adversarial runtime mismatches, restored-DB zero-second-GET checks, empty revocation freshness attestations, storage streaming bounds and version consistency, delayed read timeouts, and Gate A Phase-1 pre-DB isolation invariants, exercising real injected failure paths through mocks and isolated SQLite DB.
+
+8. **Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization (`backend/app/services/vidu_recovery.py`)**:
+   - Enforced process isolation using `multiprocessing.get_context("spawn")` boundary for S3 object stream verification to prevent credential leakage.
+   - Added `sanitize_error_message()` ensuring sensitive credentials (URL userinfo, DB passwords, AWS signatures) are redacted prior to enqueueing or IPC transfer.
+   - Verified subprocess termination guarantees using authoritative `terminate()` -> `kill()` sequence on deadline expiry, confirmed via kernel-level `check_pid_surviving()`.
+   - Maintained fail-closed invariants: production S3 verification without serializable configuration strictly forbids thread fallback and aborts immediately.
 
 ---
 

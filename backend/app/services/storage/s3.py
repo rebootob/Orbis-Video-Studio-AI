@@ -47,15 +47,18 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
         )
 
     def get_serializable_config(self) -> dict:
-        """Return minimal serializable configuration for process-isolated workers.
+        """Return serializable configuration for process-isolated workers.
 
-        Credentials are never serialized; the child worker resolves them from trusted environment/provider chain.
+        Passes adapter connection config and credentials strictly across the isolated process
+        spawn boundary in memory without exposing secrets to queues, logs, or audit records.
         """
         return {
             "type": "s3",
             "endpoint_url": self.endpoint_url,
             "region_name": self.region_name,
             "use_ssl": self.use_ssl,
+            "aws_access_key_id": self.aws_access_key_id,
+            "aws_secret_access_key": self.aws_secret_access_key,
         }
 
     def ensure_bucket_exists(self, bucket: str) -> None:
