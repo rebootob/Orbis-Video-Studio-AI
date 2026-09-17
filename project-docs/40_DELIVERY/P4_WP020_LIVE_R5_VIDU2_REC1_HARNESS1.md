@@ -7,11 +7,10 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5230512366)**
-- **Previous PR HEAD**: `adaaa662b268516e1161e1587b7d426ffbd79b89`
-- **Implementation Commit**: `2f1c7fdb14f6093be36dc3bd1b9a165550db452b`
-- **Docs Commit**: `SYNCHRONIZED_WITH_IMPLEMENTATION_2f1c7fd`
-- **Exact PR HEAD**: `FOLLOWS_DOCS_COMMIT`
+- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231251115)**
+- **Previous PR HEAD**: `0c93351336fa4762c16cce025dc4a54fbbe777a8`
+- **Implementation Commit**: `7cd0bab1c5d5b99c9ba75dd2409de71a6216994b`
+- **Addressing Review**: `Review 5231251115`
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -140,7 +139,7 @@ Release = NOT DECLARED
 | 41 | External Dispatch Registration Failure Audited Truthfully | **PARTIAL / NOT PROVEN** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 42 | Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization | **PARTIAL / NOT PROVEN** | Module-level isolated process worker with termination guarantees and multi-layer secret redaction; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 43 | Adversarial File Policy & Physical Topology Probes | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket. |
-| 44 | Adversarial Deployment Record & Key Authority Security Suite | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for wrong record owner, wrong key owner, unsafe key parent hierarchy, unsafe record parent hierarchy, proving zero provider I/O before failure. |
+| 44 | Adversarial Deployment Record & Key Authority Security Suite | LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW | Full production-path adversarial suite: wrong record owner (UID 1001), wrong key owner (UID 1002), unsafe directory hierarchy (UID 1003), missing record fail-closed, with CountingStorageProvider proving exactly 0 head_bucket and 0 get calls prior to authority verification. |
 
 ---
 
