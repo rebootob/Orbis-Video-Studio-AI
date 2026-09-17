@@ -46,10 +46,14 @@ PREV6_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56
 PREV7_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
 PREV7_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 
-GATE_B_STATUS = CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231489147)
+GATE_B_STATUS = CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231764413)
 GATE_B_PREVIOUS_HEAD = 0c9335181ab93f2a0fc8feb26a88cae6e5bcc879
-GATE_B_IMPLEMENTATION_COMMIT = 6fc48ee5f58c7344fe38578762d3a39eef79a6db
-GATE_B_REVIEW_ADDRESSED = 5231489147
+AUTHORITY_ORDERING_CORRECTIVE_COMMIT = 7cd0bab1c5d5b99c9ba75dd2409de71a6216994b
+SCENARIO_44_TEST_EVIDENCE_COMMIT = 6fc48eecf0fd74a74d812a40bd6133a3cd8c48a0
+EVIDENCE_BASE_HEAD = 5a06529b649803e09de168c35d366abe320d77d6
+CONTROL_SYNC_COMMIT = RESOLVED AFTER COMMIT / REPORTED BY GIT
+CURRENT_REMOTE_PR_HEAD = AUTHORITATIVE FROM GITHUB PR REF AFTER CONTROL SYNC
+LATEST_REVIEW_ADDRESSED = 5231764413
 ROUTED_CHECKPOINT = project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md
 GATE_C_STATUS = PROPOSED / NOT AUTHORIZED / NOT STARTED
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
@@ -63,7 +67,7 @@ SCENARIO_40 = PARTIAL / NOT PROVEN (Exact profile register binding & fail-closed
 SCENARIO_41 = PARTIAL / NOT PROVEN (Recovery authority binding & fail-closed enforcement; awaiting independent review)
 SCENARIO_42 = PARTIAL / NOT PROVEN (Process-isolated storage worker lifecycle & multi-layer sanitization implemented; awaiting independent review)
 SCENARIO_43 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW (Adversarial test suite for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket; awaiting independent review)
-SCENARIO_44 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW (Adversarial security tests for deployment record & public key authority, parent hierarchy, root ownership, and zero provider I/O)
+SCENARIO_44 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW (Adversarial security tests proving fail-closed authority rejection before storage head_bucket, storage GET, provider GET, provider POST, and generation submission in exercised mock/local test harness path)
 
 ================================================================================
 TOOLING & READINESS INVARIANTS

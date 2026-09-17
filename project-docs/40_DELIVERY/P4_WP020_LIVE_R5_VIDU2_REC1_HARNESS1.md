@@ -7,10 +7,14 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231489147)**
+- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231764413)**
 - **Previous PR HEAD**: `0c9335181ab93f2a0fc8feb26a88cae6e5bcc879`
-- **Implementation Commit**: `6fc48ee5f58c7344fe38578762d3a39eef79a6db`
-- **Addressing Review**: `Review 5231489147`
+- **Authority Ordering Corrective Commit**: `7cd0bab1c5d5b99c9ba75dd2409de71a6216994b`
+- **Scenario 44 Test Evidence Commit**: `6fc48eecf0fd74a74d812a40bd6133a3cd8c48a0`
+- **Evidence Base Head**: `5a06529b649803e09de168c35d366abe320d77d6`
+- **Control Sync Commit**: RESOLVED AFTER COMMIT / REPORTED BY GIT
+- **Current Remote PR HEAD**: AUTHORITATIVE FROM GITHUB PR REF AFTER CONTROL SYNC
+- **Addressing Review**: `Review 5231764413`
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -26,7 +30,7 @@
   2. Defined `down_revision = "021_core_v1_subtitles"`.
   3. Confirmed canonical versions directory contained exactly 21 migration files before adding 022.
   4. Authorized aligning references in delivery/control documents while strictly preserving all schema invariants and acceptance criteria.
-- **Independent Review Correctives (Reviews 5197304334, 5197787810, & 5197967171)**: Hermes addressed all blocker groups across all independent reviews on PR #108: strictly binding test keys only to `--mock` paths, eliminating self-binding commit fallbacks, discovering and validating actual DB identity and storage buckets independently against authorized profiles, failing closed on missing revocation evidence or unverified empty revocation registries, protecting restored databases lacking both fence and job rows via out-of-band durable storage consumption markers, enforcing in-flight byte bounds and timeouts during streaming response transfer, verifying object-version consistency against initial HEAD, authoritatively retaining storage on any commit exception without keyword inference, propagating audit write failures fail-closed across all stages (offline, fence transitions, readback, post-commit), proving failure paths via actual monkeypatch/injected faults, and testing exclusions directly through production consumers (`BudgetService` and `JobDispatchService`).
+- **Independent Review Correctives (Reviews 5197304334, 5197787810, & 5197967171)**: Hermes addressed all blocker groups across all independent reviews on PR #108: strictly binding test keys only to `--mock` paths, eliminating self-binding commit fallbacks, validating actual DB identity and probe-confirmed configured endpoint + bucket identity against authorized profiles, failing closed on missing revocation evidence or unverified empty revocation registries, protecting restored databases lacking both fence and job rows via out-of-band durable storage consumption markers, enforcing in-flight byte bounds and timeouts during streaming response transfer, verifying object-version consistency against initial HEAD, authoritatively retaining storage on any commit exception without keyword inference, propagating audit write failures fail-closed across all stages (offline, fence transitions, readback, post-commit), proving failure paths via actual monkeypatch/injected faults, and testing exclusions directly through production consumers (`BudgetService` and `JobDispatchService`).
 
 ---
 
@@ -139,17 +143,23 @@ Release = NOT DECLARED
 | 41 | External Dispatch Registration Failure Audited Truthfully | **PARTIAL / NOT PROVEN** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 42 | Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization | **PARTIAL / NOT PROVEN** | Module-level isolated process worker with termination guarantees and multi-layer secret redaction; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 43 | Adversarial File Policy & Physical Topology Probes | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket. |
-| 44 | Adversarial Deployment Record & Key Authority Security Suite | LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW | Full production-path adversarial suite: wrong record owner (UID 1001), wrong record GID (1001), env var override immunity, UID 0 / GID 0 positive acceptance, record symlink rejection, wrong key owner (UID 1002), wrong key GID (1001), key symlink rejection, unsafe directory hierarchy (UID 1003), missing record fail-closed, with CountingProviderAdapter and CountingStorageProvider proving exactly 0 head_bucket, 0 get, 0 post, and 0 generation calls prior to authority verification. |
+| 44 | Adversarial Deployment Record & Key Authority Security Suite | LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW | Exercised harness path proves fail-closed authority rejection before storage head_bucket, storage GET, provider GET, provider POST, and generation submission because CountingProviderAdapter and CountingStorageProvider are wired through execute_recovery_harness() on mock/local test paths (testing UID 1001/1002/1003 rejection, UID 0 / GID 0 acceptance, symlink rejection, and missing authority fail-closed). |
 
 ---
 
 ## 6. Verification Evidence Summary
 
+### EXACT-HEAD CI EVIDENCE:
+- **Backend Tests (CI Run 35187028593)**: **SUCCESS** (`672 passed, 2 skipped`)
+- **Frontend Tests (CI Run 35187028590)**: **SUCCESS**
+- **Migrations Verification**: **SUCCESS**
+
+### LOCAL EVIDENCE:
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `47 passed` (covering all 44 scenarios including restore-safe anti-replay, transport-level cancellation, root-only authority hierarchy, probe-confirmed storage identity, and zero provider I/O invariant)
-- **Backend Full Test Suite**:
+  - `47 passed` (covering all 44 scenarios including restore-safe anti-replay, transport-level cancellation, root-only authority hierarchy, probe-confirmed storage identity, and zero provider I/O invariant on tested mock/local paths)
+- **Backend Full Test Suite (Local)**:
   - `674 passed`
-- **Frontend Test Suite (`frontend`)**:
+- **Frontend Test Suite (Local)**:
   - `52 passed`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
