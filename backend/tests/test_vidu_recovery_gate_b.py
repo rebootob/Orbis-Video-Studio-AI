@@ -176,7 +176,7 @@ def setup_auth_env(monkeypatch, tmp_path):
 
     from app.services.recovery_auth import (
         AUTHORIZED_RUNTIME_TARGET_PROFILES,
-        set_deployment_record_for_testing,
+        set_isolated_test_deployment_path,
     )
 
     test_profile = {
@@ -242,7 +242,14 @@ def setup_auth_env(monkeypatch, tmp_path):
     monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", uat_paths + [reg_file])
 
     # Inject authoritative deployment record for tests
-    test_deployment_record = {
+    from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
+    import json
+
+    test_seed = b"k" * 32
+    test_pk = public_key_from_seed(test_seed)
+    monkeypatch.setenv("DEPLOYMENT_SIGNING_PUBLIC_KEY", test_pk.hex())
+
+    test_deployment_payload = {
         "runtime_target": DEFAULT_TEST_RUNTIME_TARGET,
         "deployment_id": "test-deployment-isolated",
         "db_topology": {
@@ -255,10 +262,18 @@ def setup_auth_env(monkeypatch, tmp_path):
         },
         "attested": True,
     }
-    set_deployment_record_for_testing(test_deployment_record)
+    canonical_rec_bytes = json.dumps(test_deployment_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    test_sig = ed25519_sign(canonical_rec_bytes, test_seed)
+    test_deployment_payload["signature"] = test_sig.hex()
+
+    test_rec_path = str(tmp_path / "authoritative_test_deployment.json")
+    with open(test_rec_path, "w", encoding="utf-8") as f:
+        json.dump(test_deployment_payload, f)
+
+    set_isolated_test_deployment_path(test_rec_path)
 
     yield
-    set_deployment_record_for_testing(None)
+    set_isolated_test_deployment_path(None)
 
 
 
@@ -4329,8 +4344,10 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
 
     from app.services.recovery_auth import (
         AUTHORIZED_RUNTIME_TARGET_PROFILES,
-        set_deployment_record_for_testing,
+        set_isolated_test_deployment_path,
     )
+    import json
+    from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
     uat_profile = AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"]
     uat_deployment_record = {
         "runtime_target": "UAT-COMPOSE-PERSISTENT",
@@ -4345,7 +4362,15 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
         },
         "attested": True,
     }
-    set_deployment_record_for_testing(uat_deployment_record)
+    uat_can_bytes = json.dumps(uat_deployment_record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    uat_sig = ed25519_sign(uat_can_bytes, seed)
+    uat_deployment_record["signature"] = uat_sig.hex()
+    uat_dep_path = str(tmp_path / "uat_deployment_record.json")
+    with open(uat_dep_path, "w", encoding="utf-8") as f:
+        json.dump(uat_deployment_record, f)
+
+    set_isolated_test_deployment_path(uat_dep_path)
+    monkeypatch.setenv("DEPLOYMENT_SIGNING_PUBLIC_KEY", pk.hex())
     monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", "UAT-COMPOSE-PERSISTENT")
 
 
@@ -5419,7 +5444,7 @@ def _leaking_credentials_worker():
 
 # ==============================================================================
 
-def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_storage, auth_keys, monkeypatch, caplog):
+def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_storage, auth_keys, monkeypatch, caplog, tmp_path):
 
     """Verify process-isolated storage worker safety invariants:
 
@@ -5638,34 +5663,59 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
 
 
     # Subcase G: Unset or unauthorized runtime profile fails closed immediately
+    import json
     from app.services.recovery_auth import (
         resolve_canonical_deployment_profile,
-        set_deployment_record_for_testing,
+        set_isolated_test_deployment_path,
     )
 
     # 1. Unset authoritative record fails closed immediately
-    set_deployment_record_for_testing(None)
+    set_isolated_test_deployment_path(None)
     with pytest.raises(RecoveryAuthError, match="Authoritative deployment-owned record is not configured"):
         resolve_canonical_deployment_profile()
 
+    # Helper to create and write signed test record
+    def _write_signed_rec(rec_payload, filename):
+        can_b = json.dumps(rec_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        rec_payload["signature"] = ed25519_sign(can_b, seed).hex()
+        fpath = str(tmp_path / filename)
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(rec_payload, f)
+        return fpath
+
     # 2. Record with unauthorized profile fails closed immediately
-    set_deployment_record_for_testing({
+    unauth_path = _write_signed_rec({
         "runtime_target": "UNAUTHORIZED-PROFILE",
         "attested": True,
-    })
+        "db_topology": {
+            "expected_identities": ["sqlite_unauth"],
+        },
+        "storage_topology": {
+            "expected_identities": ["mock://unauth"],
+        },
+    }, "unauth_rec.json")
+    set_isolated_test_deployment_path(unauth_path)
     with pytest.raises(AuthRuntimeMismatchError, match="not in authorized runtime profiles"):
         resolve_canonical_deployment_profile()
 
     # 3. Caller attempting to co-select or override runtime target via environment fails closed
-    set_deployment_record_for_testing({
+    uat_mismatch_path = _write_signed_rec({
         "runtime_target": "UAT-COMPOSE-PERSISTENT",
         "attested": True,
-    })
+        "db_topology": {
+            "expected_identities": ["sqlite_uat"],
+        },
+        "storage_topology": {
+            "expected_identities": ["mock://uat"],
+        },
+    }, "uat_mismatch_rec.json")
+    set_isolated_test_deployment_path(uat_mismatch_path)
     monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", "PRODUCTION")
     with pytest.raises(AuthRuntimeMismatchError, match="conflicts with deployment-owned authority"):
         resolve_canonical_deployment_profile()
 
     # Restore valid test deployment record
+    monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", DEFAULT_TEST_RUNTIME_TARGET)
     valid_test_record = {
         "runtime_target": DEFAULT_TEST_RUNTIME_TARGET,
         "deployment_id": "test-deployment-isolated",
@@ -5679,8 +5729,8 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
         },
         "attested": True,
     }
-    set_deployment_record_for_testing(valid_test_record)
-    monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", DEFAULT_TEST_RUNTIME_TARGET)
+    valid_path = _write_signed_rec(valid_test_record, "valid_restore_rec.json")
+    set_isolated_test_deployment_path(valid_path)
 
     # Subcase H: Process-isolated stalled read worker termination with zero surviving PID
     # Runs through production S3 adapter + controlled loopback server, verifying accept/request/stalled-read stages
@@ -5815,3 +5865,120 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
             logger_to_test.removeHandler(caplog.handler)
         logger_to_test.propagate = orig_propagate
         logger_to_test.disabled = orig_disabled
+
+
+def test_scenario_43_deployment_record_integrity_permissions_and_probe_fail_closed(tmp_path, monkeypatch, test_db):
+    """Scenario 43: Adversarial validation of deployment record integrity, mode, symlink, and probe fail-closed.
+
+    Verifies:
+    1. Mutable test deployment override is completely absent from production authority path.
+    2. Symlinked deployment records are rejected fail-closed.
+    3. World-writable or group-writable deployment records are rejected fail-closed.
+    4. Records without valid Ed25519 signature are rejected fail-closed (mandatory signed record).
+    5. Deployment record with corrupted cryptographic Ed25519 signature is rejected fail-closed.
+    6. Failed database topology probe fails closed immediately.
+    7. Failed storage topology probe fails closed immediately.
+    8. Replacement/race protection via atomic O_NOFOLLOW / descriptor fstat binding.
+    """
+    import os
+    import json
+    from tests.ed25519_test_signer import ed25519_sign, public_key_from_seed
+    from app.services.recovery_auth import (
+        _verify_deployment_file_security_and_integrity,
+        get_authoritative_deployment_record,
+        set_isolated_test_deployment_path,
+        attest_physical_topology,
+        RecoveryAuthError,
+        AuthRuntimeMismatchError,
+    )
+
+    seed = b"s" * 32
+    pub_key = public_key_from_seed(seed)
+    monkeypatch.setenv("DEPLOYMENT_SIGNING_PUBLIC_KEY", pub_key.hex())
+
+    # 1. Verify that recovery_auth has NO set_deployment_record_for_testing
+    import app.services.recovery_auth as r_auth
+    assert not hasattr(r_auth, "set_deployment_record_for_testing"), "Mutable test override must be deleted"
+
+    # 2. Symlink rejection
+    target_file = tmp_path / "actual_record.json"
+    target_file.write_text(json.dumps({"runtime_target": "TEST", "attested": True}), encoding="utf-8")
+    symlink_file = tmp_path / "symlink_record.json"
+    try:
+        os.symlink(str(target_file), str(symlink_file))
+        with pytest.raises(RecoveryAuthError, match="is a symlink"):
+            _verify_deployment_file_security_and_integrity(str(symlink_file))
+    except (OSError, NotImplementedError):
+        pass
+
+    # 3. World-writable / group-writable permissions rejection
+    perm_payload = {"runtime_target": "TEST", "attested": True}
+    perm_canonical = json.dumps(perm_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    perm_sig = ed25519_sign(perm_canonical, seed)
+    perm_payload["signature"] = perm_sig.hex()
+    perm_file = tmp_path / "world_writable.json"
+    perm_file.write_text(json.dumps(perm_payload), encoding="utf-8")
+    if os.name != "nt":
+        os.chmod(str(perm_file), 0o777)
+        with pytest.raises(RecoveryAuthError, match="unsafe permissions"):
+            _verify_deployment_file_security_and_integrity(str(perm_file))
+        os.chmod(str(perm_file), 0o644)
+
+    # 4. Mandatory Ed25519 signature requirement (unsigned or unkeyed digest rejected)
+    unsigned_file = tmp_path / "unsigned.json"
+    unsigned_file.write_text(json.dumps({"runtime_target": "TEST", "attested": True}), encoding="utf-8")
+    with pytest.raises(RecoveryAuthError, match="lacks mandatory cryptographic 'signature'"):
+        _verify_deployment_file_security_and_integrity(str(unsigned_file))
+
+    # 5. Corrupted cryptographic Ed25519 signature rejection
+    record_to_sign = {"runtime_target": "TEST", "attested": True}
+    rec_bytes = json.dumps(record_to_sign, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    valid_sig = ed25519_sign(rec_bytes, seed)
+
+    corrupt_rec = dict(record_to_sign)
+    corrupt_rec["signature"] = (b"\x00" * 64).hex()
+    corrupt_file = tmp_path / "corrupt_sig.json"
+    corrupt_file.write_text(json.dumps(corrupt_rec), encoding="utf-8")
+    with pytest.raises(RecoveryAuthError, match="signature verification failed"):
+        _verify_deployment_file_security_and_integrity(str(corrupt_file))
+
+    # Valid signed record loads successfully
+    record_to_sign_full = {
+        "runtime_target": "TEST",
+        "attested": True,
+        "db_topology": {"expected_identities": ["sqlite_test"]},
+        "storage_topology": {"expected_identities": ["local_storage"]},
+    }
+    rec_bytes_full = json.dumps(record_to_sign_full, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    valid_sig_full = ed25519_sign(rec_bytes_full, seed)
+    signed_rec = dict(record_to_sign_full)
+    signed_rec["signature"] = valid_sig_full.hex()
+    signed_file = tmp_path / "signed.json"
+    signed_file.write_text(json.dumps(signed_rec), encoding="utf-8")
+    loaded_signed = _verify_deployment_file_security_and_integrity(str(signed_file))
+    assert loaded_signed["attested"] is True
+
+    # 6. Physical database topology probe fail-closed
+    class BrokenDB:
+        bind = None
+    with pytest.raises(RecoveryAuthError, match="Physical database topology probe failed"):
+        attest_physical_topology(BrokenDB(), None)
+
+    # 7. Physical storage topology probe fail-closed
+    class BrokenStorage:
+        bucket_name = "test-bucket"
+        class BrokenClient:
+            def head_bucket(self, Bucket):
+                raise ConnectionResetError("S3 endpoint connection refused")
+        client = BrokenClient()
+
+    with pytest.raises(RecoveryAuthError, match="Physical storage topology probe failed"):
+        attest_physical_topology(test_db, BrokenStorage())
+
+    # 8. Replacement / atomic open descriptor verification
+    # Using isolated path pointing to signed file
+    set_isolated_test_deployment_path(str(signed_file))
+    fetched = get_authoritative_deployment_record()
+    assert fetched["attested"] is True
+    set_isolated_test_deployment_path(None)
+

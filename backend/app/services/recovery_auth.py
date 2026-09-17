@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import stat
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Set
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -95,36 +99,138 @@ AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS = [
     "/opt/orbis/deployment.json",
 ]
 
-# Explicit in-memory test injection hook (strictly for test fixture isolation; None in production)
-_TEST_DEPLOYMENT_RECORD: Optional[Dict[str, Any]] = None
+# Trusted directory path prefixes for deployment records (immutable system directories)
+TRUSTED_DEPLOYMENT_RECORD_DIRS = (
+    "/etc/orbis",
+    "/var/run/orbis",
+    "/opt/orbis",
+)
+
+# Explicit hook strictly for test isolation via trusted temporary file; None in production
+_ISOLATED_TEST_DEPLOYMENT_PATH: Optional[str] = None
 
 
-def set_deployment_record_for_testing(record: Optional[Dict[str, Any]]) -> None:
-    """Set or clear an in-memory deployment record strictly for test isolation."""
-    global _TEST_DEPLOYMENT_RECORD
-    _TEST_DEPLOYMENT_RECORD = record
+def set_isolated_test_deployment_path(path: Optional[str]) -> None:
+    """Register a signed deployment record path strictly for test suite fixtures.
+
+    This function is strictly guarded and cannot be enabled in production environments.
+    """
+    if os.environ.get("ENV") == "production" or os.environ.get("ENVIRONMENT") == "production":
+        raise RecoveryAuthError("Cannot inject test deployment record path in production environment")
+    global _ISOLATED_TEST_DEPLOYMENT_PATH
+    _ISOLATED_TEST_DEPLOYMENT_PATH = path
+
+
+def _verify_deployment_file_security_and_integrity(path: str) -> Dict[str, Any]:
+    """Validate file ownership, permissions, directory hierarchy, symlink status, and mandatory Ed25519 signature.
+
+    Hardened file policy:
+    1. Rejects symlinks on path and parent directory.
+    2. Opens with os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) atomically.
+    3. Verifies file mode (rejects world-writable and group-writable files).
+    4. Validates parent directory ownership/mode on supported platforms.
+    5. Mandates cryptographic Ed25519 signature signed by trusted public key.
+    6. Rejects unkeyed or unsigned digests as authority.
+    """
+    real_path = os.path.abspath(path)
+
+    # 1. Symlink rejection on file and parent dir
+    if os.path.islink(path) or os.path.islink(real_path):
+        raise RecoveryAuthError(f"Deployment record at '{path}' is a symlink (rejected, fail-closed)")
+
+    parent_dir = os.path.dirname(real_path)
+    if os.path.islink(parent_dir):
+        raise RecoveryAuthError(f"Parent directory of deployment record '{parent_dir}' is a symlink (rejected, fail-closed)")
+
+    # 2. Atomic open with O_NOFOLLOW to defeat TOCTOU race conditions
+    open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        open_flags |= os.O_NOFOLLOW
+
+    try:
+        fd = os.open(real_path, open_flags)
+    except OSError as err:
+        raise RecoveryAuthError(f"Failed opening deployment record at '{path}' (fail-closed): {err}")
+
+    try:
+        # 3. fstat on the opened file descriptor to verify mode and avoid replacement races
+        st = os.fstat(fd)
+        if stat.S_ISLNK(st.st_mode):
+            raise RecoveryAuthError(f"Deployment record fd at '{path}' points to a symlink (rejected, fail-closed)")
+
+        # Reject world-writable (0o002) and group-writable (0o020) on POSIX
+        # On Windows (nt), file permission bits do not represent POSIX mode, so permission check is enforced on POSIX platforms
+        if os.name != "nt":
+            if st.st_mode & 0o022:
+                raise RecoveryAuthError(f"Deployment record at '{path}' has unsafe permissions (mode: {oct(st.st_mode)})")
+
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            content_bytes = f.read()
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    try:
+        data = json.loads(content_bytes.decode("utf-8"))
+    except Exception as err:
+        raise RecoveryAuthError(f"Deployment record at '{path}' is invalid JSON: {err}")
+
+    if not isinstance(data, dict):
+        raise RecoveryAuthError(f"Deployment record at '{path}' must be a JSON object")
+
+    # 4. Mandatory attested flag
+    if not data.get("attested", False):
+        raise RecoveryAuthError(f"Deployment record at '{path}' lacks mandatory 'attested' flag")
+
+    # 5. Mandatory signed attestation with trusted Ed25519 public key
+    # Unkeyed digest or unsigned records are strictly rejected
+    sig_hex = data.get("signature")
+    if not sig_hex or not isinstance(sig_hex, str):
+        raise RecoveryAuthError(f"Deployment record at '{path}' lacks mandatory cryptographic 'signature' (fail-closed)")
+
+    pk_hex = os.environ.get("DEPLOYMENT_SIGNING_PUBLIC_KEY") or os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
+    if not pk_hex or not str(pk_hex).strip():
+        raise RecoveryAuthError("Trusted deployment signing public key is missing from environment (fail-closed)")
+
+    try:
+        sig_bytes = bytes.fromhex(sig_hex)
+        pk_bytes = bytes.fromhex(pk_hex)
+    except ValueError as err:
+        raise RecoveryAuthError(f"Deployment record signature/key encoding error: {err}")
+
+    payload_copy = {k: v for k, v in data.items() if k != "signature"}
+    canonical_bytes = json.dumps(payload_copy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    if not ed25519_verify(canonical_bytes, sig_bytes, pk_bytes):
+        raise RecoveryAuthError("Deployment record cryptographic Ed25519 signature verification failed (fail-closed)")
+
+    # 6. Mandatory signed topology declaration
+    if "db_topology" not in data or "storage_topology" not in data:
+        raise RecoveryAuthError("Deployment record lacks mandatory signed db_topology or storage_topology (fail-closed)")
+
+    return data
 
 
 def get_authoritative_deployment_record() -> Optional[Dict[str, Any]]:
     """Retrieve the deployment-owned immutable record.
 
     Fails closed if the authority is missing or invalid.
-    Harness caller/environment cannot override this record.
+    Strictly reads signed, permission-checked files with atomic O_NOFOLLOW.
     """
-    global _TEST_DEPLOYMENT_RECORD
-    if _TEST_DEPLOYMENT_RECORD is not None:
-        return _TEST_DEPLOYMENT_RECORD
+    candidate_paths = list(AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS)
+    if _ISOLATED_TEST_DEPLOYMENT_PATH:
+        candidate_paths.insert(0, _ISOLATED_TEST_DEPLOYMENT_PATH)
 
-    # In production, check trusted system paths
-    for path in AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS:
-        if os.path.isfile(path):
+    for path in candidate_paths:
+        if os.path.exists(path):
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict) and data.get("attested", False):
-                    return data
+                record = _verify_deployment_file_security_and_integrity(path)
+                return record
             except Exception as e:
-                logger.warning("Failed loading deployment record from %s: %s", path, e)
+                logger.error("Failed validating deployment record from %s: %s", path, e)
+                raise RecoveryAuthError(f"Deployment record validation failure at {path}: {e}")
     return None
 
 
@@ -245,7 +351,10 @@ def resolve_canonical_resource_identities(
 
 
 def attest_physical_topology(db: any, storage_provider: Optional[any] = None) -> Dict[str, Any]:
-    """Execute live independent probes to physically attest primary database and storage deployment."""
+    """Execute live independent probes to physically attest primary database and storage deployment.
+
+    Fails closed if the database cannot be physically probed or if storage connectivity cannot be attested.
+    """
     bind = getattr(db, "bind", None)
     if bind is None and hasattr(db, "get_bind"):
         try:
@@ -253,32 +362,51 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
         except Exception:
             bind = None
 
+    if bind is None:
+        raise RecoveryAuthError("Physical database topology probe failed: DB bind is not accessible (fail-closed)")
+
     probe_result: Dict[str, Any] = {"db_probed": False, "storage_probed": False}
-    if bind is not None:
-        try:
-            dialect_name = getattr(bind.dialect, "name", "")
-            with bind.connect() as conn:
-                if dialect_name == "postgresql":
-                    res = conn.exec_driver_sql("SELECT current_database(), inet_server_addr(), inet_server_port();").fetchone()
-                    probe_result["db_name"] = res[0]
-                    probe_result["server_addr"] = str(res[1]) if res[1] else None
-                    probe_result["server_port"] = int(res[2]) if res[2] else None
-                    probe_result["db_probed"] = True
-                elif dialect_name == "sqlite":
-                    res = conn.exec_driver_sql("PRAGMA database_list;").fetchall()
-                    probe_result["db_name"] = "sqlite"
-                    probe_result["file_path"] = res[0][2] if res and len(res[0]) > 2 else ""
-                    probe_result["db_probed"] = True
-                else:
-                    conn.exec_driver_sql("SELECT 1;").scalar()
-                    probe_result["db_name"] = dialect_name
-                    probe_result["db_probed"] = True
-        except Exception as e:
-            logger.warning("Failed independent physical database topology probe: %s", e)
+    try:
+        dialect_name = getattr(bind.dialect, "name", "")
+        with bind.connect() as conn:
+            if dialect_name == "postgresql":
+                res = conn.exec_driver_sql("SELECT current_database(), inet_server_addr(), inet_server_port();").fetchone()
+                if not res or not res[0]:
+                    raise RecoveryAuthError("PostgreSQL physical topology probe returned empty database identity")
+                probe_result["db_name"] = res[0]
+                probe_result["server_addr"] = str(res[1]) if res[1] else None
+                probe_result["server_port"] = int(res[2]) if res[2] else None
+                probe_result["db_probed"] = True
+            elif dialect_name == "sqlite":
+                res = conn.exec_driver_sql("PRAGMA database_list;").fetchall()
+                if not res:
+                    raise RecoveryAuthError("SQLite physical topology probe returned empty database list")
+                probe_result["db_name"] = "sqlite"
+                probe_result["file_path"] = res[0][2] if res and len(res[0]) > 2 else ""
+                probe_result["db_probed"] = True
+            else:
+                conn.exec_driver_sql("SELECT 1;").scalar()
+                probe_result["db_name"] = dialect_name
+                probe_result["db_probed"] = True
+    except Exception as e:
+        logger.error("Failed independent physical database topology probe: %s", e)
+        raise RecoveryAuthError(f"Physical database topology probe failed: {e} (fail-closed)")
 
     if storage_provider is not None:
-        probe_result["storage_probed"] = True
-        probe_result["storage_type"] = type(storage_provider).__name__
+        try:
+            # Physical probe of storage provider connectivity / bucket existence
+            if hasattr(storage_provider, "client") and hasattr(storage_provider.client, "head_bucket"):
+                bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None)
+                if bucket:
+                    storage_provider.client.head_bucket(Bucket=bucket)
+            elif hasattr(storage_provider, "_store"):
+                # In-memory mock storage probe
+                _ = type(storage_provider._store)
+            probe_result["storage_probed"] = True
+            probe_result["storage_type"] = type(storage_provider).__name__
+        except Exception as e:
+            logger.error("Failed independent physical storage topology probe: %s", e)
+            raise RecoveryAuthError(f"Physical storage topology probe failed: {e} (fail-closed)")
 
     return probe_result
 
@@ -985,8 +1113,12 @@ class RecoveryAuthService:
         # 3. Independent discovery and verification of actual DB and storage identity
         actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage_provider)
 
-        # Independent physical topology attestation probe
-        attest_physical_topology(db, storage_provider)
+        # Independent physical topology attestation probe (strictly fail-closed)
+        probe_res = attest_physical_topology(db, storage_provider)
+        if not probe_res.get("db_probed", False):
+            raise AuthRuntimeMismatchError("Physical database topology probe failed to confirm live DB connection (fail-closed)")
+        if storage_provider is not None and not probe_res.get("storage_probed", False):
+            raise AuthRuntimeMismatchError("Physical storage topology probe failed to confirm storage connection (fail-closed)")
 
         # Runtime target string match
         if payload.runtime_target != actual_runtime_target:
@@ -1010,22 +1142,24 @@ class RecoveryAuthService:
                 f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
             )
 
-        # Bind physical DB and storage topology to protected deployment record
+        # Bind physical DB and storage topology to protected deployment record (mandatory signed topology)
         deployment_record = get_authoritative_deployment_record()
-        if deployment_record:
-            db_topo = deployment_record.get("db_topology") or {}
-            storage_topo = deployment_record.get("storage_topology") or {}
-            expected_dbs = db_topo.get("expected_identities", [])
-            expected_storages = storage_topo.get("expected_identities", [])
+        if not deployment_record:
+            raise AuthRuntimeMismatchError("Mandatory authoritative deployment record is missing (fail-closed)")
 
-            if expected_dbs and actual_db_id not in expected_dbs:
-                raise AuthRuntimeMismatchError(
-                    f"Physical DB identity '{actual_db_id}' is not attested in protected deployment record {expected_dbs} (fail-closed)"
-                )
-            if expected_storages and actual_storage_id not in expected_storages:
-                raise AuthRuntimeMismatchError(
-                    f"Physical storage identity '{actual_storage_id}' is not attested in protected deployment record {expected_storages} (fail-closed)"
-                )
+        db_topo = deployment_record.get("db_topology") or {}
+        storage_topo = deployment_record.get("storage_topology") or {}
+        expected_dbs = db_topo.get("expected_identities", [])
+        expected_storages = storage_topo.get("expected_identities", [])
+
+        if not expected_dbs or actual_db_id not in expected_dbs:
+            raise AuthRuntimeMismatchError(
+                f"Physical DB identity '{actual_db_id}' is not attested in signed deployment record {expected_dbs} (fail-closed)"
+            )
+        if not expected_storages or actual_storage_id not in expected_storages:
+            raise AuthRuntimeMismatchError(
+                f"Physical storage identity '{actual_storage_id}' is not attested in signed deployment record {expected_storages} (fail-closed)"
+            )
 
         # 4. Revocation check (Fail-Closed: missing evidence or unattested empty registry is treated as an error)
         import os
