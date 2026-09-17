@@ -450,8 +450,8 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
 - **Dedicated Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
 - **Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
-- **Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Reviews 5229784538 & 5229746282)
-- **Implementation Commit**: `5e6426a423d37ddaae5c9cf1358671c620a052c8`
+- **Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5230274596)
+- **Implementation Commit**: `4980251f0c153583afdef4784057c5e7bdd13253`
 - **Previous PR HEAD**: `bdff07bcff859581a630cc297f1e862110528b71`
 - **Invariant Rules**:
   - `WP020 = ACTIVE / NOT CLOSED`
