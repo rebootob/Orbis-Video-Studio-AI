@@ -369,6 +369,10 @@ def get_authoritative_deployment_record() -> Optional[Dict[str, Any]]:
     return None
 
 
+# Retain canonical implementation reference for tests when module attribute is mocked
+_canonical_get_authoritative_deployment_record = get_authoritative_deployment_record
+
+
 def resolve_canonical_deployment_profile() -> str:
     """Resolve actual runtime profile from immutable deployment-owned authority.
 
@@ -1286,8 +1290,44 @@ class RecoveryAuthService:
         if not re.match(r"^(telegram|issue|pr|evidence|rec1|r5|run1)[\w\-\.\/:]+$", anchor, re.IGNORECASE):
             raise AuthScopeMismatchError(f"Invalid owner_evidence_anchor format: '{anchor}'")
 
-        # 3. Independent discovery and verification of actual DB and storage identity
+        # 3. Mandatory deployment record and signing-key authority verification
+        # MUST execute and succeed BEFORE any DB queries, storage probes, head_bucket, or network I/O.
+        deployment_record = get_authoritative_deployment_record()
+        if not deployment_record:
+            raise AuthRuntimeMismatchError("Mandatory authoritative deployment record is missing (fail-closed)")
+
+        # Runtime target string match
+        if payload.runtime_target != actual_runtime_target:
+            raise AuthRuntimeMismatchError(
+                f"Runtime target mismatch: authorized '{payload.runtime_target}' != actual '{actual_runtime_target}'"
+            )
+
+        # Validate against deployment-record claimed runtime_target if present
+        rec_target = deployment_record.get("runtime_target")
+        if rec_target and payload.runtime_target != rec_target:
+            raise AuthRuntimeMismatchError(
+                f"Payload runtime target '{payload.runtime_target}' does not match deployment-attested target '{rec_target}' (fail-closed)"
+            )
+
+        # Validate against authorized profile for runtime_target (fail-closed on unknown profile)
+        if payload.runtime_target not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
+            raise AuthRuntimeMismatchError(
+                f"Unknown or unauthorized runtime target profile '{payload.runtime_target}' (fail-closed)"
+            )
+
+        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES[payload.runtime_target]
+
+        # 4. Independent discovery and verification of actual DB and storage identity
         actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage_provider)
+
+        db_matched = actual_db_id in profile["trusted_db_identities"]
+        storage_matched = actual_storage_id in profile["trusted_storage_identities"]
+
+        if not db_matched or not storage_matched:
+            raise AuthRuntimeMismatchError(
+                f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
+                f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
+            )
 
         # Independent physical topology attestation probe (strictly fail-closed)
         probe_res = attest_physical_topology(db, storage_provider)
@@ -1304,33 +1344,7 @@ class RecoveryAuthService:
         if not observed_storage_id:
             raise AuthRuntimeMismatchError("Physical storage topology probe failed to yield canonical storage identity (fail-closed)")
 
-        # Runtime target string match
-        if payload.runtime_target != actual_runtime_target:
-            raise AuthRuntimeMismatchError(
-                f"Runtime target mismatch: authorized '{payload.runtime_target}' != actual '{actual_runtime_target}'"
-            )
-
-        # Validate discovered resource identity against authorized profile for runtime_target (fail-closed on unknown profile)
-        if payload.runtime_target not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
-            raise AuthRuntimeMismatchError(
-                f"Unknown or unauthorized runtime target profile '{payload.runtime_target}' (fail-closed)"
-            )
-
-        profile = AUTHORIZED_RUNTIME_TARGET_PROFILES[payload.runtime_target]
-        db_matched = actual_db_id in profile["trusted_db_identities"]
-        storage_matched = actual_storage_id in profile["trusted_storage_identities"]
-
-        if not db_matched or not storage_matched:
-            raise AuthRuntimeMismatchError(
-                f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
-                f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
-            )
-
-        # Bind physically observed DB and storage topology directly to signed deployment record (mandatory signed topology)
-        deployment_record = get_authoritative_deployment_record()
-        if not deployment_record:
-            raise AuthRuntimeMismatchError("Mandatory authoritative deployment record is missing (fail-closed)")
-
+        # Reuse pre-verified deployment record directly for topology attestation (zero duplicate load)
         db_topo = deployment_record.get("db_topology") or {}
         storage_topo = deployment_record.get("storage_topology") or {}
         expected_dbs = db_topo.get("expected_identities", [])

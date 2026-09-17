@@ -6042,13 +6042,15 @@ def test_scenario_44_adversarial_deployment_record_and_key_security_hierarchy_fa
         load_deployment_signing_public_key,
         RecoveryAuthService,
     )
+    orig_validate_trusted_directory_hierarchy = _validate_trusted_directory_hierarchy
 
     class MockStatResult:
-        def __init__(self, mode, uid=0, gid=0, size=100):
+        def __init__(self, mode, uid=0, gid=0, size=100, mtime=0):
             self.st_mode = mode
             self.st_uid = uid
             self.st_gid = gid
             self.st_size = size
+            self.st_mtime = mtime
 
     # --------------------------------------------------------------------------
     # 1. Wrong deployment-record owner
@@ -6143,33 +6145,197 @@ def test_scenario_44_adversarial_deployment_record_and_key_security_hierarchy_fa
         _validate_trusted_directory_hierarchy(fake_rec_path)
 
     # --------------------------------------------------------------------------
-    # 5. Fail-closed security blocks execution before any provider I/O
+    # 5. Fail-closed security blocks execution before any DB/storage probe,
+    #    head_bucket, or provider network call
     # --------------------------------------------------------------------------
     seed, pk = auth_keys
     payload, sig = make_valid_auth(seed)
-    mock_provider = MockProviderAdapter()
 
-    # Simulate production authority failure when loading deployment record
+    class CountingStorageClient:
+        def __init__(self):
+            self.head_bucket_calls = 0
+            self.get_object_calls = 0
+            self.head_object_calls = 0
+            class Meta:
+                endpoint_url = "http://localhost:9000"
+            self.meta = Meta()
+
+        def head_bucket(self, **kwargs):
+            self.head_bucket_calls += 1
+            return {}
+
+        def get_object(self, **kwargs):
+            self.get_object_calls += 1
+            return {}
+
+        def head_object(self, **kwargs):
+            self.head_object_calls += 1
+            return {}
+
+    class CountingStorageProvider:
+        def __init__(self):
+            self.bucket_name = "orbis-media-assets"
+            self.client = CountingStorageClient()
+
+        @property
+        def head_bucket_calls(self):
+            return self.client.head_bucket_calls
+
+        @property
+        def get_calls(self):
+            return self.client.get_object_calls
+
+    # Restore canonical production implementation of get_authoritative_deployment_record
+    from app.services.recovery_auth import (
+        _canonical_get_authoritative_deployment_record,
+        _validate_trusted_directory_hierarchy as real_val_hierarchy,
+    )
     monkeypatch.setattr(
         "app.services.recovery_auth.get_authoritative_deployment_record",
-        lambda: (_ for _ in ()).throw(RecoveryAuthError("Fail-closed: untrusted authority ownership UID 1001")),
+        _canonical_get_authoritative_deployment_record,
     )
+    monkeypatch.setattr("app.services.recovery_auth.ENFORCE_POSIX_SECURITY", True)
 
-    # Verify that calling recovery authorization fails immediately
-    with pytest.raises(RecoveryAuthError, match="Fail-closed: untrusted authority ownership UID 1001"):
+    # Subcase 5A: Wrong deployment record owner (UID 1001) triggered via production path
+    fake_rec_path = "/etc/orbis/deployment.json"
+    fake_rec_fd = 9991
+    monkeypatch.setattr("app.services.recovery_auth.AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS", [fake_rec_path])
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == fake_rec_path else False)
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr("app.services.recovery_auth._validate_trusted_directory_hierarchy", lambda p: None)
+    monkeypatch.setattr(os, "open", lambda p, f: fake_rec_fd)
+    monkeypatch.setattr(os, "close", lambda fd: None)
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o600, uid=1001, gid=0))
+
+    counting_storage_5a = CountingStorageProvider()
+    mock_provider_5a = MockProviderAdapter()
+
+    with pytest.raises(RecoveryAuthError, match="untrusted owner UID 1001"):
         RecoveryAuthService.verify_phase_2_and_claim_fence(
             db=test_db,
             payload=payload,
             auth_digest="fake-digest",
-            execution_id="fail-test",
+            execution_id="fail-test-5a",
             actual_runtime_target=payload.runtime_target,
             revocation_list=[],
-            storage_provider=None,
+            storage_provider=counting_storage_5a,
         )
 
-    # Invariant: Provider adapter was never called (zero provider I/O)
-    assert mock_provider.get_calls_attempted == 0
+    # Invariants: Zero storage probe, zero head_bucket, zero GET, zero provider I/O
+    assert counting_storage_5a.head_bucket_calls == 0
+    assert counting_storage_5a.get_calls == 0
+    assert mock_provider_5a.get_calls_attempted == 0
 
-    # Invariant: Zero outbound provider network calls attempted
-    assert mock_provider.get_calls_attempted == 0
+    # Subcase 5B: Wrong public key owner (UID 1002) triggered via production path
+    fake_key_path = "/etc/orbis/deployment-signing.pub"
+    fake_key_fd = 9992
+    monkeypatch.setattr("app.services.recovery_auth.AUTHORITATIVE_DEPLOYMENT_KEY_PATHS", [fake_key_path])
+    monkeypatch.setattr(
+        os.path,
+        "exists",
+        lambda p: True if any(x in str(p).replace("\\", "/") for x in ("deployment.json", "deployment-signing.pub")) else False,
+    )
+
+    import io, json
+    valid_rec_json = json.dumps({
+        "attested": True,
+        "signature": "00" * 64,
+        "db_topology": {"expected_identities": ["postgresql://localhost:5432/test"]},
+        "storage_topology": {"expected_identities": ["s3://orbis-media-assets"]},
+    }).encode("utf-8")
+
+    orig_fdopen = os.fdopen
+    def safe_mock_fdopen(fd, mode="rb", **kw):
+        if fd == fake_rec_fd:
+            return io.BytesIO(valid_rec_json)
+        return orig_fdopen(fd, mode, **kw)
+
+    def mock_open_5b(p, f, *a, **kw):
+        norm = str(p).replace("\\", "/")
+        if "deployment.json" in norm:
+            return fake_rec_fd
+        if "deployment-signing.pub" in norm:
+            return fake_key_fd
+        return 9999
+
+    monkeypatch.setattr(os, "open", mock_open_5b)
+    monkeypatch.setattr(os, "fdopen", safe_mock_fdopen)
+    monkeypatch.setattr(
+        os,
+        "fstat",
+        lambda fd: MockStatResult(stat.S_IFREG | 0o600, uid=0, gid=0)
+        if fd == fake_rec_fd
+        else MockStatResult(stat.S_IFREG | 0o644, uid=1002, gid=0),
+    )
+
+    counting_storage_5b = CountingStorageProvider()
+    mock_provider_5b = MockProviderAdapter()
+
+    with pytest.raises(RecoveryAuthError, match="untrusted owner UID 1002"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest="fake-digest",
+            execution_id="fail-test-5b",
+            actual_runtime_target=payload.runtime_target,
+            revocation_list=[],
+            storage_provider=counting_storage_5b,
+        )
+
+    # Invariants: Zero storage probe, zero head_bucket, zero GET, zero provider I/O
+    assert counting_storage_5b.head_bucket_calls == 0
+    assert counting_storage_5b.get_calls == 0
+    assert mock_provider_5b.get_calls_attempted == 0
+
+    # Subcase 5C: Unsafe parent hierarchy (directory untrusted owner UID 1003) via production path
+    orig_stat = os.stat
+    def safe_mock_stat(p, *a, **kw):
+        norm = str(p).replace("\\", "/")
+        if "/etc" in norm or "\\etc" in norm:
+            return MockStatResult(stat.S_IFDIR | 0o755, uid=1003, gid=0)
+        return orig_stat(p, *a, **kw)
+
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o600, uid=0, gid=0))
+    monkeypatch.setattr("app.services.recovery_auth._validate_trusted_directory_hierarchy", orig_validate_trusted_directory_hierarchy)
+    monkeypatch.setattr(os, "stat", safe_mock_stat)
+
+    counting_storage_5c = CountingStorageProvider()
+    mock_provider_5c = MockProviderAdapter()
+
+    with pytest.raises(RecoveryAuthError, match="has untrusted owner UID 1003"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest="fake-digest",
+            execution_id="fail-test-5c",
+            actual_runtime_target=payload.runtime_target,
+            revocation_list=[],
+            storage_provider=counting_storage_5c,
+        )
+
+    # Invariants: Zero storage probe, zero head_bucket, zero GET, zero provider I/O
+    assert counting_storage_5c.head_bucket_calls == 0
+    assert counting_storage_5c.get_calls == 0
+    assert mock_provider_5c.get_calls_attempted == 0
+
+    # Subcase 5D: Missing deployment record fails closed with zero probes
+    monkeypatch.setattr(os.path, "exists", lambda p: False)
+    counting_storage_5d = CountingStorageProvider()
+    mock_provider_5d = MockProviderAdapter()
+
+    with pytest.raises(AuthRuntimeMismatchError, match="Mandatory authoritative deployment record is missing"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest="fake-digest",
+            execution_id="fail-test-5d",
+            actual_runtime_target=payload.runtime_target,
+            revocation_list=[],
+            storage_provider=counting_storage_5d,
+        )
+
+    # Invariants: Zero storage probe, zero head_bucket, zero GET, zero provider I/O
+    assert counting_storage_5d.head_bucket_calls == 0
+    assert counting_storage_5d.get_calls == 0
+    assert mock_provider_5d.get_calls_attempted == 0
 
