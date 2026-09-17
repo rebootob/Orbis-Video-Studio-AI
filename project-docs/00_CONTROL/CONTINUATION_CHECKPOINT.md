@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Post-Merge Gate B Control Closure (P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-CLOSE)
+> Updated: Gate C Infrastructure Readiness Preflight (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1)
 
 ---
 
@@ -10,23 +10,19 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
-- **Gate B Pull Request**: [PR #108 (Merged)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
-- **Gate B Merge Commit**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
-- **Gate B Reviewed PR HEAD**: `848fe0b9846f13f8af78aa7d010ef5991dfdc38d`
-- **Gate B Final Review**: `5231880182`
-- **Gate B Final Review Verdict**: `PASS / READY FOR OWNER DECISION`
-- **Gate B Owner Decision**: `MERGE APPROVED`
-- **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE`
-- **Active Work Package**: `NONE`
-- **Active Execution Package**: `NONE`
-- **Current Gate**: Gate B Closed / Gate C Proposed (Awaiting Owner Scope Decision)
-- **Next Control Decision**: `GATE C SCOPE / AUTHORIZATION DECISION`
-- **Gate C Status**: `PROPOSED / NOT AUTHORIZED / NOT STARTED`
+- **Canonical Base Main**: `79bf07cb7907b542d68871c7bc493e72d9562e8a`
+- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1`
+- **Mode**: `READ-ONLY INFRA PREFLIGHT / NO-PROVIDER / NO-PROVISIONING`
+- **Owner Authorization**: Issue #63 comment `5711612185` (Date: 2026-09-17)
+- **Dedicated Execution Branch**: `ai/p4-wp020-rec1-gatec-infra-preflight1`
+- **Preflight Result**: `BLOCKED_INFRA_NOT_PROVISIONED`
+- **Current Gate**: Gate C Infrastructure Readiness Preflight Completed / Awaiting Owner Decision
+- **Next Recommended Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PROVISION1`
+- **Next Control Decision**: `OWNER UAT INFRASTRUCTURE PROVISIONING DECISION`
+- **Gate C Status**: `AUTHORIZED PREFLIGHT ONLY / EXECUTION NOT AUTHORIZED`
 - **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED`
-- **Post-Merge Base Main**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
-- **Control Closure Commit**: RESOLVED AFTER COMMIT / REPORTED BY GIT
-- **Final Remote HEAD**: AUTHORITATIVE FROM GITHUB AFTER PUSH
+- **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)`
+- **Gate B Closeout PR**: `PR #109 (Merged, commit 79bf07cb7907b542d68871c7bc493e72d9562e8a)`
 
 ---
 
