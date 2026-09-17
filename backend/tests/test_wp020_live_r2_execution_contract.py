@@ -15,7 +15,7 @@ R1_SNAPSHOT_GIT_BLOB_SHA = "7a34b21b8e72c4d8ef49efc56a23feef4476d82c"
 
 
 def _git_blob_sha(path: Path) -> str:
-    data = path.read_bytes()
+    data = path.read_bytes().replace(b"\x0d\x0a", b"\x0a")
     return hashlib.sha1(f"blob {len(data)}\0".encode("utf-8") + data).hexdigest()
 
 

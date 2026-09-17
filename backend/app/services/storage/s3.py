@@ -18,12 +18,22 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
         use_ssl: bool = False,
     ):
         self.endpoint_url = endpoint_url
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
         self.use_ssl = use_ssl
+
+        import os
+        connect_timeout = float(os.environ.get("STORAGE_CONNECT_TIMEOUT_SECONDS", "5.0"))
+        read_timeout = float(os.environ.get("STORAGE_READ_TIMEOUT_SECONDS", "10.0"))
+        max_retries = int(os.environ.get("STORAGE_MAX_RETRIES", "2"))
 
         config = Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            retries={"max_attempts": max_retries, "mode": "standard"},
         )
 
         self.client = boto3.client(
@@ -35,6 +45,21 @@ class S3CompatibleObjectStorageProvider(ObjectStorageProvider):
             use_ssl=use_ssl,
             config=config,
         )
+
+    def get_serializable_config(self) -> dict:
+        """Return serializable configuration for process-isolated workers.
+
+        Passes adapter connection config and credentials strictly across the isolated process
+        spawn boundary in memory without exposing secrets to queues, logs, or audit records.
+        """
+        return {
+            "type": "s3",
+            "endpoint_url": self.endpoint_url,
+            "region_name": self.region_name,
+            "use_ssl": self.use_ssl,
+            "aws_access_key_id": self.aws_access_key_id,
+            "aws_secret_access_key": self.aws_secret_access_key,
+        }
 
     def ensure_bucket_exists(self, bucket: str) -> None:
         try:

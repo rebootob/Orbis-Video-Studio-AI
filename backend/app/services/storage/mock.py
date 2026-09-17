@@ -11,6 +11,13 @@ class InMemoryObjectStorageProvider(ObjectStorageProvider):
         self._buckets: set = set()
         self.simulate_deletion_failure = False
 
+    def get_serializable_config(self) -> dict:
+        """Return minimal serializable configuration for process-isolated workers."""
+        return {
+            "type": "memory",
+            "store": {f"{b}/{k}": (data, ct) for (b, k), (data, ct) in self._store.items()},
+        }
+
     def ensure_bucket_exists(self, bucket: str) -> None:
         self._buckets.add(bucket)
 
