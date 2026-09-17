@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Post-Review 5229426522 Corrective Hardening (R9)
+> Updated: Post-Merge Gate B Control Closure (P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-CLOSE)
 
 ---
 
@@ -10,21 +10,23 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Active Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
-- **Active Pull Request**: [PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
-- **Authorized Base Main**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
-- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1`
-- **Current Gate**: Gate B (Execution Harness, Standalone Schema & Failure Matrix)
-- **Gate B Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5231764413)
-- **Previous Remote Head**: `0c9335181ab93f2a0fc8feb26a88cae6e5bcc879`
-- **Authority Ordering Corrective Commit**: `7cd0bab1c5d5b99c9ba75dd2409de71a6216994b`
-- **Scenario 44 Test Evidence Commit**: `6fc48eecf0fd74a74d812a40bd6133a3cd8c48a0`
-- **Evidence Base Head**: `5a06529b649803e09de168c35d366abe320d77d6`
-- **Control Sync Commit**: RESOLVED AFTER COMMIT / REPORTED BY GIT
-- **Current Remote PR HEAD**: AUTHORITATIVE FROM GITHUB PR REF AFTER CONTROL SYNC
-- **Addressing Review**: `Review 5231764413`
-- **Next Gate**: `CHATGPT_INDEPENDENT_REVIEW` (Hermes STOP condition enforced; Gate B is NOT marked PASS/VERIFIED until independent review completes)
-- **Gate C & REC1-RUN1**: `STRICTLY NOT AUTHORIZED / BLOCKED`
+- **Canonical Base Main**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
+- **Gate B Pull Request**: [PR #108 (Merged)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
+- **Gate B Merge Commit**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
+- **Gate B Reviewed PR HEAD**: `848fe0b9846f13f8af78aa7d010ef5991dfdc38d`
+- **Gate B Final Review**: `5231880182`
+- **Gate B Final Review Verdict**: `PASS / READY FOR OWNER DECISION`
+- **Gate B Owner Decision**: `MERGE APPROVED`
+- **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE`
+- **Active Work Package**: `NONE`
+- **Active Execution Package**: `NONE`
+- **Current Gate**: Gate B Closed / Gate C Proposed (Awaiting Owner Scope Decision)
+- **Next Control Decision**: `GATE C SCOPE / AUTHORIZATION DECISION`
+- **Gate C Status**: `PROPOSED / NOT AUTHORIZED / NOT STARTED`
+- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED`
+- **Post-Merge Base Main**: `b605a4d9928a7411a7f41cd7058d3a8fbceae581`
+- **Control Closure Commit**: RESOLVED AFTER COMMIT / REPORTED BY GIT
+- **Final Remote HEAD**: AUTHORITATIVE FROM GITHUB AFTER PUSH
 
 ---
 
@@ -49,9 +51,9 @@
    - Symmetrically enforced root UID 0 / GID 0 and parent directory hierarchy traversal on public keys and deployment records, verified zero provider calls before failure.
 
 5. **Truthful Status & Acceptance Matrix Markings**:
-   - **Scenario 44**: Marked `LOCAL TEST PASS` (Awaiting independent review).
-   - **Scenario 43**: Marked `LOCAL TEST PASS` (Awaiting independent review).
-   - **Scenario 42**: Marked `PARTIAL / NOT PROVEN` pending independent review.
+   - **Scenario 44**: Marked `LOCAL TEST PASS / INDEPENDENT GATE B REVIEW ACCEPTED`.
+   - **Scenario 43**: Marked `LOCAL TEST PASS / INDEPENDENT GATE B REVIEW ACCEPTED`.
+   - **Scenario 42**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 35**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 40**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 41**: Kept `PARTIAL / NOT PROVEN`.
@@ -89,13 +91,13 @@
 
 ## 4. Test Verification Summary
 
-### EXACT-HEAD CI EVIDENCE:
-- Backend Run: `35187028593` -> **SUCCESS** (`672 passed, 2 skipped`)
-- Frontend Run: `35187028590` -> **SUCCESS**
+### EXACT-HEAD CI EVIDENCE (BEFORE MERGE):
+- Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
+- Frontend Run: `35188302878` -> **SUCCESS**
 - Migrations: **SUCCESS**
+- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
 
 ### LOCAL EVIDENCE:
 - `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
 - Full backend suite (local): **674 passed**
 - Frontend suite (local): **52 passed**
-- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
