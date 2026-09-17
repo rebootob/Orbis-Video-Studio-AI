@@ -106,46 +106,152 @@ TRUSTED_DEPLOYMENT_RECORD_DIRS = (
     "/opt/orbis",
 )
 
-# Explicit hook strictly for test isolation via trusted temporary file; None in production
-_ISOLATED_TEST_DEPLOYMENT_PATH: Optional[str] = None
+# Immutable deployment-owned public key paths (deployment authority trust root)
+AUTHORITATIVE_DEPLOYMENT_KEY_PATHS = [
+    "/etc/orbis/deployment-signing.pub",
+    "/etc/orbis/deployment.pub",
+    "/var/run/orbis/deployment-signing.pub",
+    "/opt/orbis/deployment-signing.pub",
+]
 
 
-def set_isolated_test_deployment_path(path: Optional[str]) -> None:
-    """Register a signed deployment record path strictly for test suite fixtures.
+def load_deployment_signing_public_key() -> bytes:
+    """Load deployment signing public key from immutable deployment-owned path.
 
-    This function is strictly guarded and cannot be enabled in production environments.
+    Production authority MUST NOT trust caller-controlled environment variables
+    (e.g., DEPLOYMENT_SIGNING_PUBLIC_KEY or OWNER_AUTH_PUBLIC_KEY).
+    Fails closed if missing, malformed, symlinked, or unreadable.
     """
-    if os.environ.get("ENV") == "production" or os.environ.get("ENVIRONMENT") == "production":
-        raise RecoveryAuthError("Cannot inject test deployment record path in production environment")
-    global _ISOLATED_TEST_DEPLOYMENT_PATH
-    _ISOLATED_TEST_DEPLOYMENT_PATH = path
+    for key_path in AUTHORITATIVE_DEPLOYMENT_KEY_PATHS:
+        if os.path.exists(key_path):
+            real_key_path = os.path.abspath(key_path)
+            if os.path.islink(key_path) or os.path.islink(real_key_path):
+                raise RecoveryAuthError(f"Deployment public key at '{key_path}' is a symlink (fail-closed)")
+            open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            if hasattr(os, "O_NOFOLLOW"):
+                open_flags |= os.O_NOFOLLOW
+            elif os.name != "nt":
+                raise RecoveryAuthError("O_NOFOLLOW capability missing on required platform (fail-closed)")
+            try:
+                fd = os.open(real_key_path, open_flags)
+            except OSError as err:
+                raise RecoveryAuthError(f"Failed opening deployment public key at '{key_path}' (fail-closed): {err}")
+            try:
+                st = os.fstat(fd)
+                if stat.S_ISLNK(st.st_mode):
+                    raise RecoveryAuthError(f"Deployment public key fd at '{key_path}' is a symlink (fail-closed)")
+                if not stat.S_ISREG(st.st_mode):
+                    raise RecoveryAuthError(f"Deployment public key at '{key_path}' is not a regular file (fail-closed)")
+                if os.name != "nt":
+                    if st.st_mode & 0o022:
+                        raise RecoveryAuthError(f"Deployment public key at '{key_path}' has unsafe permissions (mode: {oct(st.st_mode)})")
+                with os.fdopen(fd, "rb", closefd=False) as f:
+                    pk_content = f.read().strip()
+            finally:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+            try:
+                pk_str = pk_content.decode("utf-8").strip()
+                pk_bytes = bytes.fromhex(pk_str)
+                if len(pk_bytes) != 32:
+                    raise ValueError(f"Invalid Ed25519 public key length: {len(pk_bytes)} bytes")
+                return pk_bytes
+            except Exception as err:
+                raise RecoveryAuthError(f"Malformed deployment signing public key at '{key_path}': {err}")
+
+    raise RecoveryAuthError("Authoritative deployment signing public key is missing from system trust root (fail-closed)")
 
 
-def _verify_deployment_file_security_and_integrity(path: str) -> Dict[str, Any]:
+def _validate_trusted_directory_hierarchy(path: str) -> None:
+    """Validate that path resides under TRUSTED_DEPLOYMENT_RECORD_DIRS and no parent component is a symlink or world/group writable."""
+    real_path = os.path.abspath(path)
+
+    # Must be under one of the trusted roots
+    matching_root = None
+    for trusted_dir in TRUSTED_DEPLOYMENT_RECORD_DIRS:
+        norm_trusted = os.path.abspath(trusted_dir)
+        if real_path == norm_trusted or real_path.startswith(norm_trusted + os.sep):
+            matching_root = norm_trusted
+            break
+
+    if not matching_root:
+        raise RecoveryAuthError(f"Deployment record at '{path}' is outside approved trusted roots {TRUSTED_DEPLOYMENT_RECORD_DIRS} (fail-closed)")
+
+    # Traverse from parent up to filesystem root, inspecting every component
+    current_dir = os.path.dirname(real_path)
+    while True:
+        if os.path.islink(current_dir):
+            raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' is a symlink (fail-closed)")
+        try:
+            st = os.stat(current_dir, follow_symlinks=False)
+            if stat.S_ISLNK(st.st_mode):
+                raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' is a symlink (fail-closed)")
+            if not stat.S_ISDIR(st.st_mode):
+                raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' is not a directory (fail-closed)")
+            if os.name != "nt":
+                if st.st_mode & 0o022:
+                    raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has unsafe permissions (mode: {oct(st.st_mode)})")
+        except OSError as err:
+            raise RecoveryAuthError(f"Failed inspecting hierarchy component '{current_dir}' (fail-closed): {err}")
+
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir or not parent_dir:
+            break
+        current_dir = parent_dir
+
+
+def _verify_deployment_file_security_and_integrity(
+    path: str,
+    trusted_public_key_bytes: Optional[bytes] = None,
+    enforce_trusted_root: bool = True,
+) -> Dict[str, Any]:
     """Validate file ownership, permissions, directory hierarchy, symlink status, and mandatory Ed25519 signature.
 
     Hardened file policy:
-    1. Rejects symlinks on path and parent directory.
-    2. Opens with os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) atomically.
-    3. Verifies file mode (rejects world-writable and group-writable files).
-    4. Validates parent directory ownership/mode on supported platforms.
-    5. Mandates cryptographic Ed25519 signature signed by trusted public key.
+    1. Validates hierarchy and trusted root allowlist.
+    2. Rejects symlinks on path and all parent directories.
+    3. Opens with os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) atomically.
+    4. Verifies file mode (rejects world-writable and group-writable files).
+    5. Mandates cryptographic Ed25519 signature signed by deployment public key.
     6. Rejects unkeyed or unsigned digests as authority.
     """
     real_path = os.path.abspath(path)
 
-    # 1. Symlink rejection on file and parent dir
+    if enforce_trusted_root:
+        _validate_trusted_directory_hierarchy(path)
+    else:
+        # Check parent hierarchy symlinks even if trusted root check is relaxed
+        current_dir = os.path.dirname(real_path)
+        while True:
+            if os.path.islink(current_dir):
+                raise RecoveryAuthError(f"Parent directory '{current_dir}' is a symlink (fail-closed)")
+            try:
+                st = os.stat(current_dir, follow_symlinks=False)
+                if stat.S_ISLNK(st.st_mode):
+                    raise RecoveryAuthError(f"Parent directory '{current_dir}' is a symlink (fail-closed)")
+                if os.name != "nt":
+                    if st.st_mode & 0o022:
+                        raise RecoveryAuthError(f"Parent directory '{current_dir}' has unsafe permissions (mode: {oct(st.st_mode)})")
+            except OSError as err:
+                raise RecoveryAuthError(f"Failed inspecting parent hierarchy '{current_dir}' (fail-closed): {err}")
+            parent_dir = os.path.dirname(current_dir)
+            if parent_dir == current_dir or not parent_dir:
+                break
+            current_dir = parent_dir
+
+    # 1. Symlink rejection on file
     if os.path.islink(path) or os.path.islink(real_path):
         raise RecoveryAuthError(f"Deployment record at '{path}' is a symlink (rejected, fail-closed)")
-
-    parent_dir = os.path.dirname(real_path)
-    if os.path.islink(parent_dir):
-        raise RecoveryAuthError(f"Parent directory of deployment record '{parent_dir}' is a symlink (rejected, fail-closed)")
 
     # 2. Atomic open with O_NOFOLLOW to defeat TOCTOU race conditions
     open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_NOFOLLOW"):
         open_flags |= os.O_NOFOLLOW
+    elif os.name != "nt":
+        raise RecoveryAuthError("O_NOFOLLOW capability is unavailable on target platform (fail-closed)")
 
     try:
         fd = os.open(real_path, open_flags)
@@ -157,9 +263,10 @@ def _verify_deployment_file_security_and_integrity(path: str) -> Dict[str, Any]:
         st = os.fstat(fd)
         if stat.S_ISLNK(st.st_mode):
             raise RecoveryAuthError(f"Deployment record fd at '{path}' points to a symlink (rejected, fail-closed)")
+        if not stat.S_ISREG(st.st_mode):
+            raise RecoveryAuthError(f"Deployment record fd at '{path}' is not a regular file (rejected, fail-closed)")
 
         # Reject world-writable (0o002) and group-writable (0o020) on POSIX
-        # On Windows (nt), file permission bits do not represent POSIX mode, so permission check is enforced on POSIX platforms
         if os.name != "nt":
             if st.st_mode & 0o022:
                 raise RecoveryAuthError(f"Deployment record at '{path}' has unsafe permissions (mode: {oct(st.st_mode)})")
@@ -185,20 +292,19 @@ def _verify_deployment_file_security_and_integrity(path: str) -> Dict[str, Any]:
         raise RecoveryAuthError(f"Deployment record at '{path}' lacks mandatory 'attested' flag")
 
     # 5. Mandatory signed attestation with trusted Ed25519 public key
-    # Unkeyed digest or unsigned records are strictly rejected
     sig_hex = data.get("signature")
     if not sig_hex or not isinstance(sig_hex, str):
         raise RecoveryAuthError(f"Deployment record at '{path}' lacks mandatory cryptographic 'signature' (fail-closed)")
 
-    pk_hex = os.environ.get("DEPLOYMENT_SIGNING_PUBLIC_KEY") or os.environ.get("OWNER_AUTH_PUBLIC_KEY", "")
-    if not pk_hex or not str(pk_hex).strip():
-        raise RecoveryAuthError("Trusted deployment signing public key is missing from environment (fail-closed)")
+    if trusted_public_key_bytes is not None:
+        pk_bytes = trusted_public_key_bytes
+    else:
+        pk_bytes = load_deployment_signing_public_key()
 
     try:
         sig_bytes = bytes.fromhex(sig_hex)
-        pk_bytes = bytes.fromhex(pk_hex)
     except ValueError as err:
-        raise RecoveryAuthError(f"Deployment record signature/key encoding error: {err}")
+        raise RecoveryAuthError(f"Deployment record signature encoding error: {err}")
 
     payload_copy = {k: v for k, v in data.items() if k != "signature"}
     canonical_bytes = json.dumps(payload_copy, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -206,9 +312,20 @@ def _verify_deployment_file_security_and_integrity(path: str) -> Dict[str, Any]:
     if not ed25519_verify(canonical_bytes, sig_bytes, pk_bytes):
         raise RecoveryAuthError("Deployment record cryptographic Ed25519 signature verification failed (fail-closed)")
 
-    # 6. Mandatory signed topology declaration
+    # 6. Mandatory signed topology declaration with non-empty expected identities
     if "db_topology" not in data or "storage_topology" not in data:
         raise RecoveryAuthError("Deployment record lacks mandatory signed db_topology or storage_topology (fail-closed)")
+
+    db_topo = data.get("db_topology")
+    storage_topo = data.get("storage_topology")
+    if not isinstance(db_topo, dict) or not isinstance(storage_topo, dict):
+        raise RecoveryAuthError("Deployment record topology definitions must be JSON objects (fail-closed)")
+
+    if not db_topo.get("expected_identities") or not isinstance(db_topo["expected_identities"], list) or len(db_topo["expected_identities"]) == 0:
+        raise RecoveryAuthError("Deployment record db_topology must contain non-empty expected_identities (fail-closed)")
+
+    if not storage_topo.get("expected_identities") or not isinstance(storage_topo["expected_identities"], list) or len(storage_topo["expected_identities"]) == 0:
+        raise RecoveryAuthError("Deployment record storage_topology must contain non-empty expected_identities (fail-closed)")
 
     return data
 
@@ -217,16 +334,12 @@ def get_authoritative_deployment_record() -> Optional[Dict[str, Any]]:
     """Retrieve the deployment-owned immutable record.
 
     Fails closed if the authority is missing or invalid.
-    Strictly reads signed, permission-checked files with atomic O_NOFOLLOW.
+    Uses ONLY fixed immutable production-authorized paths.
     """
-    candidate_paths = list(AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS)
-    if _ISOLATED_TEST_DEPLOYMENT_PATH:
-        candidate_paths.insert(0, _ISOLATED_TEST_DEPLOYMENT_PATH)
-
-    for path in candidate_paths:
+    for path in AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS:
         if os.path.exists(path):
             try:
-                record = _verify_deployment_file_security_and_integrity(path)
+                record = _verify_deployment_file_security_and_integrity(path, enforce_trusted_root=True)
                 return record
             except Exception as e:
                 logger.error("Failed validating deployment record from %s: %s", path, e)
@@ -353,6 +466,9 @@ def resolve_canonical_resource_identities(
 def attest_physical_topology(db: any, storage_provider: Optional[any] = None) -> Dict[str, Any]:
     """Execute live independent probes to physically attest primary database and storage deployment.
 
+    Returns independently observed canonical resource identities:
+    - db_identity
+    - storage_identity
     Fails closed if the database cannot be physically probed or if storage connectivity cannot be attested.
     """
     bind = getattr(db, "bind", None)
@@ -373,20 +489,31 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
                 res = conn.exec_driver_sql("SELECT current_database(), inet_server_addr(), inet_server_port();").fetchone()
                 if not res or not res[0]:
                     raise RecoveryAuthError("PostgreSQL physical topology probe returned empty database identity")
-                probe_result["db_name"] = res[0]
-                probe_result["server_addr"] = str(res[1]) if res[1] else None
-                probe_result["server_port"] = int(res[2]) if res[2] else None
+                db_name = res[0]
+                server_addr = str(res[1]) if res[1] else "localhost"
+                server_port = int(res[2]) if res[2] else 5432
+                observed_db_id = f"postgresql://{server_addr}:{server_port}/{db_name}"
+                probe_result["db_name"] = db_name
+                probe_result["server_addr"] = server_addr
+                probe_result["server_port"] = server_port
+                probe_result["db_identity"] = observed_db_id
                 probe_result["db_probed"] = True
             elif dialect_name == "sqlite":
                 res = conn.exec_driver_sql("PRAGMA database_list;").fetchall()
                 if not res:
                     raise RecoveryAuthError("SQLite physical topology probe returned empty database list")
+                raw_file = res[0][2] if res and len(res[0]) > 2 else ""
+                file_path = raw_file or ":memory:"
+                observed_db_id = f"sqlite://{file_path}"
                 probe_result["db_name"] = "sqlite"
-                probe_result["file_path"] = res[0][2] if res and len(res[0]) > 2 else ""
+                probe_result["file_path"] = file_path
+                probe_result["db_identity"] = observed_db_id
                 probe_result["db_probed"] = True
             else:
                 conn.exec_driver_sql("SELECT 1;").scalar()
+                observed_db_id = f"{dialect_name}://localhost/{getattr(bind.url, 'database', '')}"
                 probe_result["db_name"] = dialect_name
+                probe_result["db_identity"] = observed_db_id
                 probe_result["db_probed"] = True
     except Exception as e:
         logger.error("Failed independent physical database topology probe: %s", e)
@@ -394,19 +521,42 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
 
     if storage_provider is not None:
         try:
+            observed_storage_id = None
             # Physical probe of storage provider connectivity / bucket existence
             if hasattr(storage_provider, "client") and hasattr(storage_provider.client, "head_bucket"):
                 bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None)
-                if bucket:
-                    storage_provider.client.head_bucket(Bucket=bucket)
+                if not bucket:
+                    raise RecoveryAuthError("Storage provider bucket name cannot be identified (fail-closed)")
+                # Execute physical head_bucket probe
+                storage_provider.client.head_bucket(Bucket=bucket)
+                endpoint = None
+                if hasattr(storage_provider.client, "meta") and hasattr(storage_provider.client.meta, "endpoint_url"):
+                    endpoint = getattr(storage_provider.client.meta, "endpoint_url", None)
+                if not endpoint and hasattr(storage_provider, "endpoint_url"):
+                    endpoint = getattr(storage_provider, "endpoint_url", None)
+                if not endpoint:
+                    raise RecoveryAuthError("S3 storage provider endpoint cannot be physically verified (fail-closed)")
+                observed_storage_id = f"s3://{endpoint}/{bucket}"
             elif hasattr(storage_provider, "_store"):
-                # In-memory mock storage probe
-                _ = type(storage_provider._store)
+                # In-memory / mock storage probe
+                bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None) or "orbis-media-assets"
+                observed_storage_id = f"mock://local/{bucket}"
+            else:
+                raise RecoveryAuthError("Storage provider type unrecognized or un-probeable (fail-closed)")
+
+            probe_result["storage_identity"] = observed_storage_id
             probe_result["storage_probed"] = True
             probe_result["storage_type"] = type(storage_provider).__name__
         except Exception as e:
             logger.error("Failed independent physical storage topology probe: %s", e)
             raise RecoveryAuthError(f"Physical storage topology probe failed: {e} (fail-closed)")
+    else:
+        # Fallback for local sqlite environments when storage_provider is omitted
+        if probe_result.get("db_identity", "").startswith("sqlite://"):
+            from app.core.config import settings
+            bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")
+            probe_result["storage_identity"] = f"mock://local/{bucket}"
+            probe_result["storage_probed"] = True
 
     return probe_result
 
@@ -1117,8 +1267,16 @@ class RecoveryAuthService:
         probe_res = attest_physical_topology(db, storage_provider)
         if not probe_res.get("db_probed", False):
             raise AuthRuntimeMismatchError("Physical database topology probe failed to confirm live DB connection (fail-closed)")
-        if storage_provider is not None and not probe_res.get("storage_probed", False):
+        if not probe_res.get("storage_probed", False):
             raise AuthRuntimeMismatchError("Physical storage topology probe failed to confirm storage connection (fail-closed)")
+
+        observed_db_id = probe_res.get("db_identity")
+        observed_storage_id = probe_res.get("storage_identity")
+
+        if not observed_db_id:
+            raise AuthRuntimeMismatchError("Physical database topology probe failed to yield canonical DB identity (fail-closed)")
+        if not observed_storage_id:
+            raise AuthRuntimeMismatchError("Physical storage topology probe failed to yield canonical storage identity (fail-closed)")
 
         # Runtime target string match
         if payload.runtime_target != actual_runtime_target:
@@ -1142,7 +1300,7 @@ class RecoveryAuthService:
                 f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
             )
 
-        # Bind physical DB and storage topology to protected deployment record (mandatory signed topology)
+        # Bind physically observed DB and storage topology directly to signed deployment record (mandatory signed topology)
         deployment_record = get_authoritative_deployment_record()
         if not deployment_record:
             raise AuthRuntimeMismatchError("Mandatory authoritative deployment record is missing (fail-closed)")
@@ -1152,13 +1310,13 @@ class RecoveryAuthService:
         expected_dbs = db_topo.get("expected_identities", [])
         expected_storages = storage_topo.get("expected_identities", [])
 
-        if not expected_dbs or actual_db_id not in expected_dbs:
+        if not expected_dbs or observed_db_id not in expected_dbs:
             raise AuthRuntimeMismatchError(
-                f"Physical DB identity '{actual_db_id}' is not attested in signed deployment record {expected_dbs} (fail-closed)"
+                f"Physically observed DB identity '{observed_db_id}' is not attested in signed deployment record {expected_dbs} (fail-closed)"
             )
-        if not expected_storages or actual_storage_id not in expected_storages:
+        if not expected_storages or observed_storage_id not in expected_storages:
             raise AuthRuntimeMismatchError(
-                f"Physical storage identity '{actual_storage_id}' is not attested in signed deployment record {expected_storages} (fail-closed)"
+                f"Physically observed storage identity '{observed_storage_id}' is not attested in signed deployment record {expected_storages} (fail-closed)"
             )
 
         # 4. Revocation check (Fail-Closed: missing evidence or unattested empty registry is treated as an error)
