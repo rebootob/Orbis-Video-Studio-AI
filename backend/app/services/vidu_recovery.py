@@ -211,22 +211,34 @@ def sanitize_error_message(msg: Any) -> str:
         r'[REDACTED_USER]:[REDACTED_SECRET]@\3',
         text,
     )
-    # 3. Sensitive query parameters and signed tokens
+    # 3. Authorization header forms (Bearer, Basic, Token, or raw secret)
     text = re.sub(
-        r'(?i)(x-amz-signature|x-amz-credential|x-amz-security-token|signature|sig|access_token|refresh_token|api[-_]?key|auth[-_]?token|password|passwd|secret)=([^&\s\'",]+)',
-        r'\1=[REDACTED]',
+        r'(?i)\b(authorization\s*[:=]\s*(?:bearer\s+|basic\s+|token\s+)?)([^\s,\'"]+)',
+        r'\1[REDACTED]',
         text,
     )
-    # 4. Sensitive key-value pairs in exception messages
+    # 4. Bearer tokens anywhere
+    text = re.sub(
+        r'(?i)\b(bearer\s+)[^\s,\'"]+',
+        r'\1[REDACTED]',
+        text,
+    )
+    # 5. Sensitive query parameters and signed tokens in URLs
+    text = re.sub(
+        r'(?i)([?&])(x-amz-[a-z0-9_-]+|signature|sig|access[-_]?token|refresh[-_]?token|api[-_]?key|auth[-_]?token|auth|token|password|passwd|secret)=([^&\s\'",]+)',
+        r'\1\2=[REDACTED]',
+        text,
+    )
+    # 6. Sensitive key-value pairs in exception messages or configs
     text = re.sub(
         r'(?i)\b(aws_secret_access_key|aws_access_key_id|aws_session_token|secret_access_key|secret_key|api_key|private_key|client_secret|password|passwd)\b\s*[:=]\s*([\'"]?)([^\s,\'"]+)\2',
         r'\1=[REDACTED]',
         text,
     )
-    # 5. Bearer tokens
+    # 7. Additional catch for standalone key=val where key is a token/secret param
     text = re.sub(
-        r'(?i)\b(bearer\s+)[a-zA-Z0-9._\-]+',
-        r'\1[REDACTED]',
+        r'(?i)\b(x-amz-signature|x-amz-credential|x-amz-security-token|signature|sig|access_token|refresh_token|api[-_]?key|auth[-_]?token|token)\b\s*[:=]\s*([\'"]?)([^\s,\'"]+)\2',
+        r'\1=[REDACTED]',
         text,
     )
     return text

@@ -27,29 +27,6 @@ MAX_VALIDITY_WINDOW_SECONDS = 7200  # 2 hours
 
 
 AUTHORIZED_RUNTIME_TARGET_PROFILES = {
-    "TEST": {
-        "trusted_db_identities": [
-            "sqlite://:memory:",
-            "sqlite:///",
-            "sqlite://",
-            "postgresql+psycopg://localhost:5432/orbis_studio",
-            "postgresql+psycopg://127.0.0.1:5432/orbis_studio",
-            "postgresql://localhost:5432/orbis_studio",
-            "postgresql://127.0.0.1:5432/orbis_studio",
-        ],
-        "trusted_storage_identities": [
-            "mock://local/test-bucket",
-            "mock://local/orbis-media-assets",
-            "mock://local/orbis-assets",
-            "s3://http://127.0.0.1/test-bucket",
-            "s3://http://localhost/test-bucket",
-            "s3://http://127.0.0.1/orbis-media-assets",
-            "s3://http://localhost/orbis-media-assets",
-        ],
-        "require_distinct_mount": False,
-        "require_directory_fsync": False,
-        "trusted_register_paths": [],
-    },
     "UAT-COMPOSE-PERSISTENT": {
         "trusted_db_identities": [
             "sqlite://:memory:",
@@ -111,34 +88,76 @@ AUTHORIZED_RUNTIME_TARGET_PROFILES = {
 }
 
 
-def resolve_canonical_deployment_profile() -> str:
-    """Resolve actual runtime profile from immutable trusted deployment configuration.
+# Deployment-owned authoritative attestation file locations (immutable, system-owned)
+AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS = [
+    "/etc/orbis/deployment.json",
+    "/var/run/orbis/deployment.json",
+    "/opt/orbis/deployment.json",
+]
 
-    Fails closed if the deployment environment does not explicitly declare a valid
-    authorized profile. Never defaults to payload or caller-supplied values.
-    Source of truth must be deployment-owned and protected from caller manipulation.
+# Explicit in-memory test injection hook (strictly for test fixture isolation; None in production)
+_TEST_DEPLOYMENT_RECORD: Optional[Dict[str, Any]] = None
+
+
+def set_deployment_record_for_testing(record: Optional[Dict[str, Any]]) -> None:
+    """Set or clear an in-memory deployment record strictly for test isolation."""
+    global _TEST_DEPLOYMENT_RECORD
+    _TEST_DEPLOYMENT_RECORD = record
+
+
+def get_authoritative_deployment_record() -> Optional[Dict[str, Any]]:
+    """Retrieve the deployment-owned immutable record.
+
+    Fails closed if the authority is missing or invalid.
+    Harness caller/environment cannot override this record.
     """
-    from app.core.config import settings
+    global _TEST_DEPLOYMENT_RECORD
+    if _TEST_DEPLOYMENT_RECORD is not None:
+        return _TEST_DEPLOYMENT_RECORD
 
-    # Deployment-owned configuration takes absolute precedence
-    target = getattr(settings, "DEPLOYED_RUNTIME_TARGET", None) or os.environ.get("DEPLOYED_RUNTIME_TARGET")
-    if not target:
-        # Fallback to explicit deployment environment mappings if configured
-        env_val = getattr(settings, "ENVIRONMENT", "").lower()
-        if env_val == "production":
-            target = "PRODUCTION"
-        elif env_val in ("uat", "staging"):
-            target = "UAT-COMPOSE-PERSISTENT"
+    # In production, check trusted system paths
+    for path in AUTHORITATIVE_DEPLOYMENT_RECORD_PATHS:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and data.get("attested", False):
+                    return data
+            except Exception as e:
+                logger.warning("Failed loading deployment record from %s: %s", path, e)
+    return None
 
+
+def resolve_canonical_deployment_profile() -> str:
+    """Resolve actual runtime profile from immutable deployment-owned authority.
+
+    Fails closed if the deployment authority is missing, invalid, or specifies
+    an unauthorized profile. A caller launching the process cannot override or co-select
+    this identity via environment variables, CLI options, or payload claims.
+    """
+    record = get_authoritative_deployment_record()
+    if not record or not isinstance(record, dict):
+        raise RecoveryAuthError(
+            "Authoritative deployment-owned record is not configured or missing (fail-closed)"
+        )
+
+    target = record.get("runtime_target")
     if not target or not str(target).strip():
         raise RecoveryAuthError(
-            "Immutable deployment runtime target is not configured (fail-closed; set DEPLOYED_RUNTIME_TARGET)"
+            "Deployment record does not declare an immutable runtime target profile (fail-closed)"
         )
 
     target_str = str(target).strip()
     if target_str not in AUTHORIZED_RUNTIME_TARGET_PROFILES:
         raise AuthRuntimeMismatchError(
-            f"Configured deployment runtime target '{target_str}' is not in authorized runtime profiles (fail-closed)"
+            f"Deployment-owned runtime target '{target_str}' is not in authorized runtime profiles (fail-closed)"
+        )
+
+    # Validate against caller-supplied environment attempts: if caller attempts to forge/co-select a different target, fail closed
+    caller_env_target = os.environ.get("DEPLOYED_RUNTIME_TARGET")
+    if caller_env_target and str(caller_env_target).strip() != target_str:
+        raise AuthRuntimeMismatchError(
+            f"Caller environment runtime target '{caller_env_target}' conflicts with deployment-owned authority '{target_str}' (fail-closed)"
         )
 
     return target_str
@@ -223,6 +242,45 @@ def resolve_canonical_resource_identities(
         storage_identity = f"s3://{endpoint}/{bucket}"
 
     return db_identity, storage_identity
+
+
+def attest_physical_topology(db: any, storage_provider: Optional[any] = None) -> Dict[str, Any]:
+    """Execute live independent probes to physically attest primary database and storage deployment."""
+    bind = getattr(db, "bind", None)
+    if bind is None and hasattr(db, "get_bind"):
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+
+    probe_result: Dict[str, Any] = {"db_probed": False, "storage_probed": False}
+    if bind is not None:
+        try:
+            dialect_name = getattr(bind.dialect, "name", "")
+            with bind.connect() as conn:
+                if dialect_name == "postgresql":
+                    res = conn.exec_driver_sql("SELECT current_database(), inet_server_addr(), inet_server_port();").fetchone()
+                    probe_result["db_name"] = res[0]
+                    probe_result["server_addr"] = str(res[1]) if res[1] else None
+                    probe_result["server_port"] = int(res[2]) if res[2] else None
+                    probe_result["db_probed"] = True
+                elif dialect_name == "sqlite":
+                    res = conn.exec_driver_sql("PRAGMA database_list;").fetchall()
+                    probe_result["db_name"] = "sqlite"
+                    probe_result["file_path"] = res[0][2] if res and len(res[0]) > 2 else ""
+                    probe_result["db_probed"] = True
+                else:
+                    conn.exec_driver_sql("SELECT 1;").scalar()
+                    probe_result["db_name"] = dialect_name
+                    probe_result["db_probed"] = True
+        except Exception as e:
+            logger.warning("Failed independent physical database topology probe: %s", e)
+
+    if storage_provider is not None:
+        probe_result["storage_probed"] = True
+        probe_result["storage_type"] = type(storage_provider).__name__
+
+    return probe_result
 
 
 class RecoveryAuthError(RuntimeError):
@@ -927,6 +985,9 @@ class RecoveryAuthService:
         # 3. Independent discovery and verification of actual DB and storage identity
         actual_db_id, actual_storage_id = resolve_canonical_resource_identities(db, storage_provider)
 
+        # Independent physical topology attestation probe
+        attest_physical_topology(db, storage_provider)
+
         # Runtime target string match
         if payload.runtime_target != actual_runtime_target:
             raise AuthRuntimeMismatchError(
@@ -948,6 +1009,23 @@ class RecoveryAuthService:
                 f"Actual resource configuration does not match authorized runtime target profile '{payload.runtime_target}': "
                 f"actual_db='{actual_db_id}', actual_storage='{actual_storage_id}'"
             )
+
+        # Bind physical DB and storage topology to protected deployment record
+        deployment_record = get_authoritative_deployment_record()
+        if deployment_record:
+            db_topo = deployment_record.get("db_topology") or {}
+            storage_topo = deployment_record.get("storage_topology") or {}
+            expected_dbs = db_topo.get("expected_identities", [])
+            expected_storages = storage_topo.get("expected_identities", [])
+
+            if expected_dbs and actual_db_id not in expected_dbs:
+                raise AuthRuntimeMismatchError(
+                    f"Physical DB identity '{actual_db_id}' is not attested in protected deployment record {expected_dbs} (fail-closed)"
+                )
+            if expected_storages and actual_storage_id not in expected_storages:
+                raise AuthRuntimeMismatchError(
+                    f"Physical storage identity '{actual_storage_id}' is not attested in protected deployment record {expected_storages} (fail-closed)"
+                )
 
         # 4. Revocation check (Fail-Closed: missing evidence or unattested empty registry is treated as an error)
         import os

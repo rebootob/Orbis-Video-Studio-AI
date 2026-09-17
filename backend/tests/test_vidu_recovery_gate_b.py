@@ -174,7 +174,10 @@ def setup_auth_env(monkeypatch, tmp_path):
 
     # monkeypatch a test-only profile in the test fixture (never in production code).
 
-    from app.services.recovery_auth import AUTHORIZED_RUNTIME_TARGET_PROFILES
+    from app.services.recovery_auth import (
+        AUTHORIZED_RUNTIME_TARGET_PROFILES,
+        set_deployment_record_for_testing,
+    )
 
     test_profile = {
 
@@ -237,6 +240,25 @@ def setup_auth_env(monkeypatch, tmp_path):
     uat_paths = list(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"].get("trusted_register_paths", []))
 
     monkeypatch.setitem(AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"], "trusted_register_paths", uat_paths + [reg_file])
+
+    # Inject authoritative deployment record for tests
+    test_deployment_record = {
+        "runtime_target": DEFAULT_TEST_RUNTIME_TARGET,
+        "deployment_id": "test-deployment-isolated",
+        "db_topology": {
+            "expected_identities": test_profile["trusted_db_identities"],
+            "database_name": "sqlite",
+        },
+        "storage_topology": {
+            "expected_identities": test_profile["trusted_storage_identities"],
+            "bucket": "orbis-media-assets",
+        },
+        "attested": True,
+    }
+    set_deployment_record_for_testing(test_deployment_record)
+
+    yield
+    set_deployment_record_for_testing(None)
 
 
 
@@ -4305,6 +4327,25 @@ def test_scenario_40_external_register_atomic_claim_and_topology(tmp_path, monke
 
     mock_provider = MockProviderAdapter()
 
+    from app.services.recovery_auth import (
+        AUTHORIZED_RUNTIME_TARGET_PROFILES,
+        set_deployment_record_for_testing,
+    )
+    uat_profile = AUTHORIZED_RUNTIME_TARGET_PROFILES["UAT-COMPOSE-PERSISTENT"]
+    uat_deployment_record = {
+        "runtime_target": "UAT-COMPOSE-PERSISTENT",
+        "deployment_id": "test-deployment-uat",
+        "db_topology": {
+            "expected_identities": uat_profile["trusted_db_identities"],
+            "database_name": "sqlite",
+        },
+        "storage_topology": {
+            "expected_identities": uat_profile["trusted_storage_identities"],
+            "bucket": "orbis-media-assets",
+        },
+        "attested": True,
+    }
+    set_deployment_record_for_testing(uat_deployment_record)
     monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", "UAT-COMPOSE-PERSISTENT")
 
 
@@ -5355,16 +5396,21 @@ def _stalled_read_test_worker():
 
 
 
+SYNTHETIC_TEST_SECRETS = {
+    "db_password": "super_secret_db_password_987654321",
+    "bearer_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.synthetic_secret_token_12345",
+    "s3_signature": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0_signature",
+    "api_key": "sec_live_99887766554433221100_key",
+}
+
+
 def _leaking_credentials_worker():
-
     raise RuntimeError(
-
-        "Failed accessing postgresql://user:super_secret_pw@10.0.0.5:5432/proddb?ssl=true "
-
-        "and https://admin:token_xyz123@storage.internal/bucket/file.mp4?X-Amz-Signature=abcd1234efgh"
-
+        f"Database connection error: postgresql://admin_user:{SYNTHETIC_TEST_SECRETS['db_password']}@10.0.0.5:5432/proddb?ssl=true. "
+        f"Authorization header was: Authorization: Bearer {SYNTHETIC_TEST_SECRETS['bearer_token']}. "
+        f"Object fetch signed URL was: https://s3.us-east-1.amazonaws.com/orbis-media-assets/video.mp4?X-Amz-Signature={SYNTHETIC_TEST_SECRETS['s3_signature']}&token=tok_secret_sample. "
+        f"Provider API key was: api_key={SYNTHETIC_TEST_SECRETS['api_key']}."
     )
-
 
 
 # ==============================================================================
@@ -5373,7 +5419,7 @@ def _leaking_credentials_worker():
 
 # ==============================================================================
 
-def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_storage, auth_keys, monkeypatch):
+def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_storage, auth_keys, monkeypatch, caplog):
 
     """Verify process-isolated storage worker safety invariants:
 
@@ -5513,28 +5559,30 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
 
     orig_ctx = multiprocessing.get_context("spawn")
     orig_spawn_process = orig_ctx.Process
+    orig_get_context = multiprocessing.get_context
 
     def mock_get_context(method=None):
         if method == "spawn" or method is None:
             c = orig_ctx
             c.Process = ZombieProcess
             return c
-        return multiprocessing.get_context(method)
+        return orig_get_context(method)
 
-    monkeypatch.setattr(multiprocessing, "get_context", mock_get_context)
+    multiprocessing.get_context = mock_get_context
 
-    with pytest.raises(ViduRecoveryError, match="could not be terminated \\(fail-closed\\)"):
-        _execute_isolated_storage_verify(
-            config=config,
-            bucket=bucket,
-            key=key,
-            expected_size=expected_size,
-            expected_sha256=expected_sha256,
-            max_duration_seconds=0.05,
-        )
-
-    orig_ctx.Process = orig_spawn_process
-    monkeypatch.undo()
+    try:
+        with pytest.raises(ViduRecoveryError, match=r"could not be terminated \(fail-closed\)"):
+            _execute_isolated_storage_verify(
+                config=config,
+                bucket=bucket,
+                key=key,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+                max_duration_seconds=0.05,
+            )
+    finally:
+        orig_ctx.Process = orig_spawn_process
+        multiprocessing.get_context = orig_get_context
 
 
 
@@ -5590,30 +5638,49 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
 
 
     # Subcase G: Unset or unauthorized runtime profile fails closed immediately
+    from app.services.recovery_auth import (
+        resolve_canonical_deployment_profile,
+        set_deployment_record_for_testing,
+    )
 
-    from app.services.recovery_auth import resolve_canonical_deployment_profile
-
-    monkeypatch.delenv("DEPLOYED_RUNTIME_TARGET", raising=False)
-
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "DEPLOYED_RUNTIME_TARGET", None)
-
-    monkeypatch.setattr(settings, "ENVIRONMENT", "test")
-
-    with pytest.raises(RecoveryAuthError, match="Immutable deployment runtime target is not configured"):
-
+    # 1. Unset authoritative record fails closed immediately
+    set_deployment_record_for_testing(None)
+    with pytest.raises(RecoveryAuthError, match="Authoritative deployment-owned record is not configured"):
         resolve_canonical_deployment_profile()
 
-
-
-    monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", "UNAUTHORIZED-PROFILE")
-
+    # 2. Record with unauthorized profile fails closed immediately
+    set_deployment_record_for_testing({
+        "runtime_target": "UNAUTHORIZED-PROFILE",
+        "attested": True,
+    })
     with pytest.raises(AuthRuntimeMismatchError, match="not in authorized runtime profiles"):
-
         resolve_canonical_deployment_profile()
 
+    # 3. Caller attempting to co-select or override runtime target via environment fails closed
+    set_deployment_record_for_testing({
+        "runtime_target": "UAT-COMPOSE-PERSISTENT",
+        "attested": True,
+    })
+    monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", "PRODUCTION")
+    with pytest.raises(AuthRuntimeMismatchError, match="conflicts with deployment-owned authority"):
+        resolve_canonical_deployment_profile()
 
+    # Restore valid test deployment record
+    valid_test_record = {
+        "runtime_target": DEFAULT_TEST_RUNTIME_TARGET,
+        "deployment_id": "test-deployment-isolated",
+        "db_topology": {
+            "expected_identities": ["sqlite://:memory:", "sqlite:///", "sqlite://"],
+            "database_name": "sqlite",
+        },
+        "storage_topology": {
+            "expected_identities": ["mock://local/orbis-media-assets"],
+            "bucket": "orbis-media-assets",
+        },
+        "attested": True,
+    }
+    set_deployment_record_for_testing(valid_test_record)
+    monkeypatch.setenv("DEPLOYED_RUNTIME_TARGET", DEFAULT_TEST_RUNTIME_TARGET)
 
     # Subcase H: Process-isolated stalled read worker termination with zero surviving PID
     # Runs through production S3 adapter + controlled loopback server, verifying accept/request/stalled-read stages
@@ -5694,16 +5761,18 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
     # Subcase I: Queue and log sanitization strictly prevents secret/token leakage across boundaries
     from app.services.vidu_recovery import sanitize_error_message, _process_boundary_worker
 
-    # 1. Direct unit test of sanitize_error_message
+    # 1. Direct unit test of sanitize_error_message with realistic synthetic secrets
     raw_leaked_err = (
-        "Failed accessing postgresql://user:***@10.0.0.5:5432/proddb?ssl=true "
-        "and https://admin:token_xyz123@storage.internal/bucket/file.mp4?X-Amz-Signature=abcd1234efgh"
+        f"Database connection error: postgresql://admin_user:{SYNTHETIC_TEST_SECRETS['db_password']}@10.0.0.5:5432/proddb?ssl=true. "
+        f"Authorization header was: Authorization: Bearer {SYNTHETIC_TEST_SECRETS['bearer_token']}. "
+        f"Object fetch signed URL was: https://s3.us-east-1.amazonaws.com/orbis-media-assets/video.mp4?X-Amz-Signature={SYNTHETIC_TEST_SECRETS['s3_signature']}&token=tok_secret_sample. "
+        f"Provider API key was: api_key={SYNTHETIC_TEST_SECRETS['api_key']}."
     )
     sanitized = sanitize_error_message(raw_leaked_err)
-    assert "super_secret_pw" not in sanitized
-    assert "token_xyz123" not in sanitized
-    assert "abcd1234efgh" not in sanitized
-    assert "[REDACTED_SECRET]" in sanitized or "[REDACTED_PASSWORD]" in sanitized
+    for secret_val in SYNTHETIC_TEST_SECRETS.values():
+        assert secret_val not in sanitized
+    assert "tok_secret_sample" not in sanitized
+    assert "[REDACTED_SECRET]" in sanitized
     assert "[REDACTED]" in sanitized
 
     # 2. Verify _process_boundary_worker sanitizes before enqueueing
@@ -5711,15 +5780,24 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
     _process_boundary_worker(_leaking_credentials_worker, (), {}, test_q)
     q_msg = test_q.get(timeout=1.0)
     assert q_msg["success"] is False
-    assert "super_secret_pw" not in q_msg["error_message"]
-    assert "token_xyz123" not in q_msg["error_message"]
-    assert "abcd1234efgh" not in q_msg["error_message"]
-    assert "[REDACTED_SECRET]" in q_msg["error_message"] or "[REDACTED_PASSWORD]" in q_msg["error_message"]
+    for secret_val in SYNTHETIC_TEST_SECRETS.values():
+        assert secret_val not in q_msg["error_message"]
+    assert "tok_secret_sample" not in q_msg["error_message"]
+    assert "[REDACTED_SECRET]" in q_msg["error_message"]
+    assert "[REDACTED]" in q_msg["error_message"]
 
-    # 3. Captured log test: ensure sensitive headers/DSNs are redacted in logs
+    # 3. Captured log test: ensure live logging records captured via caplog contain ZERO synthetic secrets
     import logging
-    test_logger = logging.getLogger("test_security_sanitization")
-    test_logger.warning("Attempted connection to %s", sanitize_error_message("Bearer secret-api-token-value postgresql://dbuser:mypassword@localhost/db"))
-    # (Sanitization verified through string assertion above)
+    caplog.clear()
+    logger_to_test = logging.getLogger("app.services.vidu_recovery")
+    with caplog.at_level(logging.WARNING):
+        logger_to_test.warning("Isolated worker execution failed: %s", sanitize_error_message(raw_leaked_err))
+        logger_to_test.error("Queue payload received error: %s", q_msg["error_message"])
 
-
+    assert len(caplog.records) >= 2
+    captured_text = caplog.text
+    for secret_val in SYNTHETIC_TEST_SECRETS.values():
+        assert secret_val not in captured_text
+    assert "tok_secret_sample" not in captured_text
+    assert "[REDACTED_SECRET]" in captured_text
+    assert "[REDACTED]" in captured_text
