@@ -7,10 +7,10 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231251115)**
-- **Previous PR HEAD**: `0c93351336fa4762c16cce025dc4a54fbbe777a8`
-- **Implementation Commit**: `7cd0bab1c5d5b99c9ba75dd2409de71a6216994b`
-- **Addressing Review**: `Review 5231251115`
+- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5231489147)**
+- **Previous PR HEAD**: `0c9335181ab93f2a0fc8feb26a88cae6e5bcc879`
+- **Implementation Commit**: `6fc48ee5f58c7344fe38578762d3a39eef79a6db`
+- **Addressing Review**: `Review 5231489147`
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -139,7 +139,7 @@ Release = NOT DECLARED
 | 41 | External Dispatch Registration Failure Audited Truthfully | **PARTIAL / NOT PROVEN** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 42 | Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization | **PARTIAL / NOT PROVEN** | Module-level isolated process worker with termination guarantees and multi-layer secret redaction; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 43 | Adversarial File Policy & Physical Topology Probes | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket. |
-| 44 | Adversarial Deployment Record & Key Authority Security Suite | LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW | Full production-path adversarial suite: wrong record owner (UID 1001), wrong key owner (UID 1002), unsafe directory hierarchy (UID 1003), missing record fail-closed, with CountingStorageProvider proving exactly 0 head_bucket and 0 get calls prior to authority verification. |
+| 44 | Adversarial Deployment Record & Key Authority Security Suite | LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW | Full production-path adversarial suite: wrong record owner (UID 1001), wrong record GID (1001), env var override immunity, UID 0 / GID 0 positive acceptance, record symlink rejection, wrong key owner (UID 1002), wrong key GID (1001), key symlink rejection, unsafe directory hierarchy (UID 1003), missing record fail-closed, with CountingProviderAdapter and CountingStorageProvider proving exactly 0 head_bucket, 0 get, 0 post, and 0 generation calls prior to authority verification. |
 
 ---
 
