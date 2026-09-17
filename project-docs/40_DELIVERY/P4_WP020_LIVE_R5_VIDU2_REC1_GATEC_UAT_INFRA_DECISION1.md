@@ -62,6 +62,7 @@ In accordance with safety rules, only environment variable names and secret refe
 ### Path A: Use / Bind Existing UAT Infrastructure
 **Concept**: Point the application runtime to an existing, already-provisioned external PostgreSQL instance and S3-compatible object storage bucket managed by the Owner / Organization.
 
+- **Existence Truth**: `EXISTING_UAT_TARGET_EXISTENCE = UNKNOWN / NOT VERIFIED`
 - **Minimum Requirements**:
   1. **PostgreSQL**:
      - PostgreSQL 16+ compatible.
@@ -79,6 +80,33 @@ In accordance with safety rules, only environment variable names and secret refe
      - Stateless runtime / runner compatible with external DB/storage.
      - Isolated from production network.
      - External provider execution disabled by default.
+- **Cost Truth**: `UNKNOWN / DEPENDS ON OWNER-PROVIDED EXISTING-INFRASTRUCTURE ALLOCATION, CAPACITY, LICENSING, AND INCREMENTAL COST` (No claim of free, zero-cost, or minimal-cost is made).
+- **Required Owner / Admin Inputs**:
+  - `POSTGRES_TARGET_IDENTITY`:
+    - Hostname or endpoint identity
+    - Port
+    - Database name
+    - Isolation model (e.g. dedicated DB instance vs isolated database/schema)
+  - `OBJECT_STORAGE_TARGET_IDENTITY`:
+    - Endpoint
+    - Region if applicable
+    - Bucket / prefix identity
+  - `COMPUTE_RUNTIME_TARGET_IDENTITY`:
+    - Runtime / platform identity
+    - Environment identity
+    - Deployment target name / reference
+    - Isolation boundary
+  - `SECRET_REFERENCE_MECHANISM`:
+    - GitHub Environment Secrets OR Cloud secret manager OR equivalent organization-approved secret store
+  - `SECRET_REFERENCE_NAMES`:
+    - Specific environment variable / secret key names (values MUST NOT be recorded)
+  - `OWNER / ADMIN CONFIRMATIONS`:
+    - Target ownership confirmation
+    - Explicit UAT authorization to use target
+    - Expected retention period
+    - Acceptable data classification
+    - Backup / restore expectations
+    - Assessment whether incremental usage has billing / licensing impact
 - **Candidate Next Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-BIND1`
 - **Status**: `PROPOSED / NOT AUTHORIZED`
 - **Mutations Required**: Configuration/secret binding only (no cloud provisioning).
@@ -86,21 +114,86 @@ In accordance with safety rules, only environment variable names and secret refe
 ---
 
 ### Path B: Separately Authorize New UAT Infrastructure Provisioning
-**Concept**: Authorize dedicated provisioning of new cloud infrastructure (e.g., AWS RDS / Supabase / Neon PostgreSQL + AWS S3 / Cloudflare R2 bucket + dedicated compute container).
+**Concept**: Authorize dedicated provisioning of new cloud infrastructure (e.g., managed PostgreSQL 16+ + dedicated S3-compatible bucket + isolated compute container/runner).
 
-- **Provisioning Specification Requirements**:
-  1. **PostgreSQL Resource**: Dedicated managed PostgreSQL 16 instance.
-  2. **Object Storage Resource**: Dedicated S3-compatible bucket with CORS and TLS encryption.
-  3. **Compute / Runtime**: Isolated container/runner environment.
-  4. **Region / Location**: Standard low-latency region (e.g., ap-southeast-1 or us-east-1).
-  5. **Isolation**: Dedicated VPC/network rules or distinct project tenancy separating UAT from Dev/Prod.
-  6. **Secrets Management**: KMS / Cloud secret store or GitHub repository environments.
-  7. **Backup / Restore**: Point-in-time recovery (PITR) or automated snapshot lifecycle.
-  8. **Cost Estimates**: `UNKNOWN / REQUIRES PROVIDER/PLATFORM QUOTE OR OWNER TARGET SELECTION`.
-  9. **Decommission / Rollback**: Ability to destroy or pause resources when testing concludes.
 - **Candidate Next Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PROVISION1`
 - **Status**: `PROPOSED / NOT AUTHORIZED`
 - **Mutations Required**: Cloud resource creation, IAM roles, billing commitment, external infrastructure state creation.
+
+#### Path B — Minimum Sizing / Capacity Assumptions (Decision-Preparation Classification)
+*(Note: Decision-preparation classifications only; exact sizing requires Owner target selection)*
+- `POSTGRES_ENGINE`: `PostgreSQL 16+ compatible`
+- `POSTGRES_CPU`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `POSTGRES_MEMORY`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `POSTGRES_STORAGE`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `POSTGRES_CONNECTION_CAPACITY`: `TBD / WORKLOAD-SIZING REQUIRED`
+- `OBJECT_STORAGE_CAPACITY`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `OBJECT_STORAGE_RETENTION`: `TBD / UAT RETENTION POLICY REQUIRED`
+- `COMPUTE_CPU`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `COMPUTE_MEMORY`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `COMPUTE_REPLICA_COUNT`: `TBD / OWNER TARGET SELECTION REQUIRED`
+- `NETWORK_EGRESS_REQUIREMENT`: `TBD / PROVIDER + TEST-SCOPE DEPENDENT`
+- `REGION`: `TBD / OWNER TARGET SELECTION REQUIRED` (Examples such as ap-southeast-1 or us-east-1 are illustrative examples only, never selected target truth).
+
+#### Path B — Cost Categories
+- **Recurring Cost Categories**:
+  - Managed PostgreSQL instance / runtime
+  - PostgreSQL persistent storage
+  - PostgreSQL backup / PITR retention
+  - Object storage capacity
+  - Object storage request operations (GET/PUT/LIST)
+  - Object storage versioning / retention if enabled
+  - Compute / container / runtime
+  - Network egress
+  - Logging / monitoring if separately billed
+  - Secret-management service if separately billed
+  - Static IP / load-balancer / network services if required
+  - **Classification**: `EXACT_RECURRING_COST = UNKNOWN / REQUIRES OWNER TARGET + PROVIDER QUOTE`
+- **One-Time / Setup Cost Categories**:
+  - Environment / bootstrap setup
+  - IAM / service-account setup
+  - Network / security configuration
+  - DB initialization / migration preparation
+  - Bucket / prefix setup
+  - Backup / restore validation preparation
+  - Decommission / cleanup activity if separately charged
+  - **Classification**: `EXACT_ONE_TIME_COST = UNKNOWN / REQUIRES OWNER TARGET + PROVIDER QUOTE`
+
+#### Path B — Future Acceptance Criteria (Informational / Future Implementation Only)
+*(Note: These are FUTURE acceptance criteria for a future provisioning package. They are NOT marked PASS in DECISION1.)*
+1. PostgreSQL target exists and is isolated for UAT.
+2. PostgreSQL version is compatible with PostgreSQL 16+ requirements.
+3. Object storage target exists with dedicated UAT isolation.
+4. Compute / runtime target is isolated from production.
+5. Secret values are stored outside repository.
+6. Runtime references only approved secret names / references.
+7. Provider execution remains disabled by default.
+8. Backup capability is explicitly identified.
+9. Restore capability is explicitly identified.
+10. Backup / restore test remains separately authorized.
+11. No production data is required or mutated.
+12. Resource ownership and billing account are explicitly known.
+13. Rollback / decommission procedure is documented.
+14. Security / network boundary is documented.
+15. Owner accepts expected recurring / one-time cost classification before provisioning.
+16. No REC1-RUN1 authorization is implied.
+
+#### Owner Approvals Required Before Path B Mutation
+A future `PROVISION1` package MUST NOT execute until Owner explicitly approves:
+1. Cloud / provider / platform selection
+2. Account / project / subscription target
+3. Region
+4. PostgreSQL sizing
+5. PostgreSQL storage / retention
+6. Object storage target / sizing / retention
+7. Compute sizing / runtime
+8. Network / security boundary
+9. IAM / service-account mutation
+10. Secret-management mechanism
+11. Recurring cost ceiling or accepted cost basis
+12. One-time setup cost ceiling or accepted cost basis
+13. Rollback / decommission ownership and schedule
+14. Explicit execution authorization comment referencing the provisioning package
 
 ---
 
@@ -109,10 +202,10 @@ In accordance with safety rules, only environment variable names and secret refe
 | Dimension | Path A: Bind Existing Infrastructure | Path B: Provision New Infrastructure |
 | :--- | :--- | :--- |
 | **Known Evidence** | Codebase supports standard Postgres & S3 env vars; local compose has templates. | No active cloud provisioning scripts or Terraform state in repo. |
-| **Unknowns** | Whether dedicated UAT instances exist in Owner's accounts. | Platform provider preference, sizing, region, and target budget. |
-| **Required Owner/Admin Inputs** | Hostname, port, DB name, bucket name, credential refs. | Choice of cloud provider, budget approval, provisioning execution approval. |
+| **Unknowns** | Whether dedicated UAT instances exist in Owner's accounts (`EXISTING_UAT_TARGET_EXISTENCE = UNKNOWN / NOT VERIFIED`). | Platform provider preference, sizing, region, and target budget. |
+| **Required Owner/Admin Inputs** | Hostname, port, DB name, bucket name, secret refs, ownership/retention/billing impact confirmation. | Provider selection, account/region, sizing, IAM boundaries, cost ceiling, provisioning approval. |
 | **Mutation Required?** | No cloud resource creation; secrets/config binding only. | Yes: Cloud resource creation, subscription/IAM mutation. |
-| **Potential Cost?** | Minimal/zero additional cost (if using existing resources). | `UNKNOWN / REQUIRES PROVIDER/PLATFORM QUOTE OR OWNER SELECTION`. |
+| **Potential Cost?** | `UNKNOWN / DEPENDS ON OWNER-PROVIDED EXISTING-INFRASTRUCTURE ALLOCATION, CAPACITY, LICENSING, AND INCREMENTAL COST` | `EXACT_RECURRING_COST = UNKNOWN / REQUIRES OWNER TARGET + PROVIDER QUOTE`<br>`EXACT_ONE_TIME_COST = UNKNOWN / REQUIRES OWNER TARGET + PROVIDER QUOTE` |
 | **Proposed Next Package** | `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-BIND1` | `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PROVISION1` |
 | **Authorization State** | `PROPOSED / NOT AUTHORIZED` | `PROPOSED / NOT AUTHORIZED` |
 
