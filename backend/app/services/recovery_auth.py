@@ -106,6 +106,11 @@ TRUSTED_DEPLOYMENT_RECORD_DIRS = (
     "/opt/orbis",
 )
 
+# Fixed trusted owner identities for system deployment authority (immutable system policy)
+TRUSTED_DEPLOYMENT_OWNER_UIDS = (0,)
+TRUSTED_DEPLOYMENT_OWNER_GIDS = (0,)
+ENFORCE_POSIX_SECURITY = os.name != "nt"
+
 # Immutable deployment-owned public key paths (deployment authority trust root)
 AUTHORITATIVE_DEPLOYMENT_KEY_PATHS = [
     "/etc/orbis/deployment-signing.pub",
@@ -119,32 +124,52 @@ def load_deployment_signing_public_key() -> bytes:
     """Load deployment signing public key from immutable deployment-owned path.
 
     Production authority MUST NOT trust caller-controlled environment variables
-    (e.g., DEPLOYMENT_SIGNING_PUBLIC_KEY or OWNER_AUTH_PUBLIC_KEY).
-    Fails closed if missing, malformed, symlinked, or unreadable.
+    (e.g., DEPLOYMENT_SIGNING_PUBLIC_KEY or OWNER_AUTH_PUBLIC_KEY) or process UID.
+    Enforces fixed trusted owner (root UID 0/GID 0), safe permissions (no world/group writable),
+    regular file, no symlinks, and full parent directory hierarchy validation.
+    Fails closed if missing, malformed, symlinked, unreadable, or failing security/ownership policy.
     """
     for key_path in AUTHORITATIVE_DEPLOYMENT_KEY_PATHS:
         if os.path.exists(key_path):
             real_key_path = os.path.abspath(key_path)
+
+            # 1. Full parent directory hierarchy inspection
+            _validate_trusted_directory_hierarchy(real_key_path)
+
+            # 2. Symlink rejection on file
             if os.path.islink(key_path) or os.path.islink(real_key_path):
                 raise RecoveryAuthError(f"Deployment public key at '{key_path}' is a symlink (fail-closed)")
+
+            # 3. Symlink rejection on parent directory
+            parent_dir = os.path.dirname(real_key_path)
+            if os.path.islink(parent_dir):
+                raise RecoveryAuthError(f"Parent directory '{parent_dir}' of deployment public key is a symlink (fail-closed)")
+
+            # 4. Atomic open with O_NOFOLLOW
             open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
             if hasattr(os, "O_NOFOLLOW"):
                 open_flags |= os.O_NOFOLLOW
             elif os.name != "nt":
                 raise RecoveryAuthError("O_NOFOLLOW capability missing on required platform (fail-closed)")
+
             try:
                 fd = os.open(real_key_path, open_flags)
             except OSError as err:
                 raise RecoveryAuthError(f"Failed opening deployment public key at '{key_path}' (fail-closed): {err}")
+
             try:
                 st = os.fstat(fd)
                 if stat.S_ISLNK(st.st_mode):
                     raise RecoveryAuthError(f"Deployment public key fd at '{key_path}' is a symlink (fail-closed)")
                 if not stat.S_ISREG(st.st_mode):
                     raise RecoveryAuthError(f"Deployment public key at '{key_path}' is not a regular file (fail-closed)")
-                if os.name != "nt":
+                if ENFORCE_POSIX_SECURITY:
                     if st.st_mode & 0o022:
                         raise RecoveryAuthError(f"Deployment public key at '{key_path}' has unsafe permissions (mode: {oct(st.st_mode)})")
+                    if st.st_uid not in TRUSTED_DEPLOYMENT_OWNER_UIDS:
+                        raise RecoveryAuthError(f"Deployment public key fd at '{key_path}' has untrusted owner UID {st.st_uid} (fail-closed, requires root UID 0)")
+                    if st.st_gid not in TRUSTED_DEPLOYMENT_OWNER_GIDS:
+                        raise RecoveryAuthError(f"Deployment public key fd at '{key_path}' has untrusted owner GID {st.st_gid} (fail-closed, requires root GID 0)")
                 with os.fdopen(fd, "rb", closefd=False) as f:
                     pk_content = f.read().strip()
             finally:
@@ -166,7 +191,8 @@ def load_deployment_signing_public_key() -> bytes:
 
 
 def _validate_trusted_directory_hierarchy(path: str) -> None:
-    """Validate that path resides under TRUSTED_DEPLOYMENT_RECORD_DIRS and no parent component is a symlink or world/group writable."""
+    """Validate that path resides under TRUSTED_DEPLOYMENT_RECORD_DIRS and no parent component is a symlink,
+    world/group writable, or owned by untrusted UID/GID (fixed deployment root UID 0 / GID 0)."""
     real_path = os.path.abspath(path)
 
     # Must be under one of the trusted roots
@@ -191,12 +217,13 @@ def _validate_trusted_directory_hierarchy(path: str) -> None:
                 raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' is a symlink (fail-closed)")
             if not stat.S_ISDIR(st.st_mode):
                 raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' is not a directory (fail-closed)")
-            if os.name != "nt":
+            if ENFORCE_POSIX_SECURITY:
                 if st.st_mode & 0o022:
                     raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has unsafe permissions (mode: {oct(st.st_mode)})")
-                current_uid = os.geteuid() if hasattr(os, "geteuid") else None
-                if current_uid is not None and st.st_uid not in (0, current_uid):
-                    raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has untrusted owner UID {st.st_uid} (fail-closed)")
+                if st.st_uid not in TRUSTED_DEPLOYMENT_OWNER_UIDS:
+                    raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has untrusted owner UID {st.st_uid} (fail-closed, requires root UID 0)")
+                if st.st_gid not in TRUSTED_DEPLOYMENT_OWNER_GIDS:
+                    raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has untrusted owner GID {st.st_gid} (fail-closed, requires root GID 0)")
         except OSError as err:
             raise RecoveryAuthError(f"Failed inspecting hierarchy component '{current_dir}' (fail-closed): {err}")
 
@@ -256,13 +283,15 @@ def _verify_deployment_file_security_and_integrity(
             raise RecoveryAuthError(f"Deployment record fd at '{path}' is not a regular file (rejected, fail-closed)")
 
         # Reject world-writable (0o002) and group-writable (0o020) on POSIX
-        if os.name != "nt":
+        if ENFORCE_POSIX_SECURITY:
             if st.st_mode & 0o022:
                 raise RecoveryAuthError(f"Deployment record at '{path}' has unsafe permissions (mode: {oct(st.st_mode)})")
-            # Verify trusted ownership (root:root or current process owner on POSIX)
-            current_uid = os.geteuid() if hasattr(os, "geteuid") else None
-            if current_uid is not None and st.st_uid not in (0, current_uid):
-                raise RecoveryAuthError(f"Deployment record fd at '{path}' has untrusted owner UID {st.st_uid} (fail-closed)")
+            # Verify trusted ownership (root:root UID 0/GID 0 in production authority)
+            if enforce_trusted_root:
+                if st.st_uid not in TRUSTED_DEPLOYMENT_OWNER_UIDS:
+                    raise RecoveryAuthError(f"Deployment record fd at '{path}' has untrusted owner UID {st.st_uid} (fail-closed, requires root UID 0)")
+                if st.st_gid not in TRUSTED_DEPLOYMENT_OWNER_GIDS:
+                    raise RecoveryAuthError(f"Deployment record fd at '{path}' has untrusted owner GID {st.st_gid} (fail-closed, requires root GID 0)")
 
         with os.fdopen(fd, "rb", closefd=False) as f:
             content_bytes = f.read()
@@ -543,7 +572,7 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
             probe_result["storage_probed"] = True
             probe_result["storage_type"] = type(storage_provider).__name__
         except Exception as e:
-            logger.error("Failed independent physical storage topology probe: %s", e)
+            logger.error("Failed probe confirmation of configured storage endpoint/bucket: %s", e)
             raise RecoveryAuthError(f"Physical storage topology probe failed: {e} (fail-closed)")
     else:
         # Fallback for local sqlite environments when storage_provider is omitted

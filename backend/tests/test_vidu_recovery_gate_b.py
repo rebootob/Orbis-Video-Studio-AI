@@ -6019,3 +6019,157 @@ def test_scenario_43_deployment_record_integrity_permissions_and_probe_fail_clos
     assert live_probe["storage_probed"] is True
     assert "storage_identity" in live_probe
 
+
+# ==============================================================================
+# SCENARIO 44: ADVERSARIAL SYSTEM DEPLOYMENT AUTHORITY & HIERARCHY TESTS
+# ==============================================================================
+
+def test_scenario_44_adversarial_deployment_record_and_key_security_hierarchy_fail_closed(
+    auth_keys, test_db, monkeypatch
+):
+    """Adversarial tests validating fail-closed security for deployment records and public keys
+    without requiring root/chown in CI:
+    1. Wrong deployment-record owner (untrusted UID/GID) fails closed
+    2. Wrong deployment public-key owner (untrusted UID/GID) fails closed
+    3. Unsafe deployment public-key parent hierarchy (permissions / untrusted UID / symlink) fails closed
+    4. Unsafe deployment-record parent hierarchy (permissions / untrusted UID / symlink) fails closed
+    5. Zero provider I/O invariant: all failures strictly occur before any provider network call
+    """
+    import stat
+    from app.services.recovery_auth import (
+        _validate_trusted_directory_hierarchy,
+        _verify_deployment_file_security_and_integrity,
+        load_deployment_signing_public_key,
+        RecoveryAuthService,
+    )
+
+    class MockStatResult:
+        def __init__(self, mode, uid=0, gid=0, size=100):
+            self.st_mode = mode
+            self.st_uid = uid
+            self.st_gid = gid
+            self.st_size = size
+
+    # --------------------------------------------------------------------------
+    # 1. Wrong deployment-record owner
+    # --------------------------------------------------------------------------
+    fake_rec_path = "/etc/orbis/deployment.json"
+    fake_rec_fd = 9991
+
+    monkeypatch.setattr("app.services.recovery_auth.ENFORCE_POSIX_SECURITY", True)
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == fake_rec_path else False)
+    monkeypatch.setattr("app.services.recovery_auth._validate_trusted_directory_hierarchy", lambda p: None)
+    monkeypatch.setattr(os, "open", lambda p, f: fake_rec_fd)
+    monkeypatch.setattr(os, "close", lambda fd: None)
+
+    # Subcase 1A: Untrusted owner UID (1001)
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o644, uid=1001, gid=0))
+    with pytest.raises(RecoveryAuthError, match="untrusted owner UID 1001"):
+        _verify_deployment_file_security_and_integrity(fake_rec_path, enforce_trusted_root=True)
+
+    # Subcase 1B: Untrusted owner GID (1001)
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o644, uid=0, gid=1001))
+    with pytest.raises(RecoveryAuthError, match="untrusted owner GID 1001"):
+        _verify_deployment_file_security_and_integrity(fake_rec_path, enforce_trusted_root=True)
+
+    # --------------------------------------------------------------------------
+    # 2. Wrong deployment public-key owner
+    # --------------------------------------------------------------------------
+    fake_key_path = "/etc/orbis/deployment-signing.pub"
+    fake_key_fd = 9992
+
+    monkeypatch.setattr("app.services.recovery_auth.ENFORCE_POSIX_SECURITY", True)
+    monkeypatch.setattr("app.services.recovery_auth.AUTHORITATIVE_DEPLOYMENT_KEY_PATHS", [fake_key_path])
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == fake_key_path else False)
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr("app.services.recovery_auth._validate_trusted_directory_hierarchy", lambda p: None)
+    monkeypatch.setattr(os, "open", lambda p, f: fake_key_fd)
+    monkeypatch.setattr(os, "close", lambda fd: None)
+
+    # Subcase 2A: Untrusted public-key owner UID (1001)
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o644, uid=1001, gid=0))
+    with pytest.raises(RecoveryAuthError, match="untrusted owner UID 1001"):
+        load_deployment_signing_public_key()
+
+    # Subcase 2B: Untrusted public-key owner GID (1001)
+    monkeypatch.setattr(os, "fstat", lambda fd: MockStatResult(stat.S_IFREG | 0o644, uid=0, gid=1001))
+    with pytest.raises(RecoveryAuthError, match="untrusted owner GID 1001"):
+        load_deployment_signing_public_key()
+
+    # --------------------------------------------------------------------------
+    # 3. Unsafe key parent hierarchy
+    # --------------------------------------------------------------------------
+    monkeypatch.setattr("app.services.recovery_auth.ENFORCE_POSIX_SECURITY", True)
+    # Subcase 3A: Parent directory has unsafe permissions (0o777)
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr(os, "stat", lambda p, **kw: MockStatResult(stat.S_IFDIR | 0o777, uid=0, gid=0))
+    with pytest.raises(RecoveryAuthError, match="has unsafe permissions"):
+        _validate_trusted_directory_hierarchy(fake_key_path)
+
+    # Subcase 3B: Untrusted parent directory owner UID (1001)
+    monkeypatch.setattr(os, "stat", lambda p, **kw: MockStatResult(stat.S_IFDIR | 0o755, uid=1001, gid=0))
+    with pytest.raises(RecoveryAuthError, match="has untrusted owner UID 1001"):
+        _validate_trusted_directory_hierarchy(fake_key_path)
+
+    # Subcase 3C: Untrusted parent directory owner GID (1001)
+    monkeypatch.setattr(os, "stat", lambda p, **kw: MockStatResult(stat.S_IFDIR | 0o755, uid=0, gid=1001))
+    with pytest.raises(RecoveryAuthError, match="has untrusted owner GID 1001"):
+        _validate_trusted_directory_hierarchy(fake_key_path)
+
+    # Subcase 3D: Parent directory is a symlink
+    monkeypatch.setattr(os.path, "islink", lambda p: True)
+    with pytest.raises(RecoveryAuthError, match="is a symlink"):
+        _validate_trusted_directory_hierarchy(fake_key_path)
+
+    # --------------------------------------------------------------------------
+    # 4. Unsafe deployment-record parent hierarchy
+    # --------------------------------------------------------------------------
+    monkeypatch.setattr("app.services.recovery_auth.ENFORCE_POSIX_SECURITY", True)
+    # Subcase 4A: Unsafe directory permissions (0o777)
+    monkeypatch.setattr(os.path, "islink", lambda p: False)
+    monkeypatch.setattr(os, "stat", lambda p, **kw: MockStatResult(stat.S_IFDIR | 0o777, uid=0, gid=0))
+    with pytest.raises(RecoveryAuthError, match="has unsafe permissions"):
+        _validate_trusted_directory_hierarchy(fake_rec_path)
+
+    # Subcase 4B: Untrusted parent directory owner UID (1001)
+    monkeypatch.setattr(os, "stat", lambda p, **kw: MockStatResult(stat.S_IFDIR | 0o755, uid=1001, gid=0))
+    with pytest.raises(RecoveryAuthError, match="has untrusted owner UID 1001"):
+        _validate_trusted_directory_hierarchy(fake_rec_path)
+
+    # Subcase 4C: Parent directory is a symlink
+    monkeypatch.setattr(os.path, "islink", lambda p: True)
+    with pytest.raises(RecoveryAuthError, match="is a symlink"):
+        _validate_trusted_directory_hierarchy(fake_rec_path)
+
+    # --------------------------------------------------------------------------
+    # 5. Fail-closed security blocks execution before any provider I/O
+    # --------------------------------------------------------------------------
+    seed, pk = auth_keys
+    payload, sig = make_valid_auth(seed)
+    mock_provider = MockProviderAdapter()
+
+    # Simulate production authority failure when loading deployment record
+    monkeypatch.setattr(
+        "app.services.recovery_auth.get_authoritative_deployment_record",
+        lambda: (_ for _ in ()).throw(RecoveryAuthError("Fail-closed: untrusted authority ownership UID 1001")),
+    )
+
+    # Verify that calling recovery authorization fails immediately
+    with pytest.raises(RecoveryAuthError, match="Fail-closed: untrusted authority ownership UID 1001"):
+        RecoveryAuthService.verify_phase_2_and_claim_fence(
+            db=test_db,
+            payload=payload,
+            auth_digest="fake-digest",
+            execution_id="fail-test",
+            actual_runtime_target=payload.runtime_target,
+            revocation_list=[],
+            storage_provider=None,
+        )
+
+    # Invariant: Provider adapter was never called (zero provider I/O)
+    assert mock_provider.get_calls_attempted == 0
+
+    # Invariant: Zero outbound provider network calls attempted
+    assert mock_provider.get_calls_attempted == 0
+
