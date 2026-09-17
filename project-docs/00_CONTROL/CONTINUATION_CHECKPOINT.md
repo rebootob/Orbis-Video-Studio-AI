@@ -15,10 +15,10 @@
 - **Authorized Base Main**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1`
 - **Current Gate**: Gate B (Execution Harness, Standalone Schema & Failure Matrix)
-- **Gate B Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5230453776)
-- **Previous Remote Head**: `b54875f21b71e8154fa05cda58c7e5b2c5f1f269`
-- **Implementation Commit**: `b1b67c8728c10029366ca0dff438d8f4301fe293`
-- **Docs Commit**: `SYNCHRONIZED_WITH_IMPLEMENTATION_b1b67c8`
+- **Gate B Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5230512366)
+- **Previous Remote Head**: `adaaa662b268516e1161e1587b7d426ffbd79b89`
+- **Implementation Commit**: `2f1c7fdb14f6093be36dc3bd1b9a165550db452b`
+- **Docs Commit**: `SYNCHRONIZED_WITH_IMPLEMENTATION_2f1c7fd`
 - **Exact PR HEAD**: `FOLLOWS_DOCS_COMMIT`
 - **Next Gate**: `CHATGPT_INDEPENDENT_REVIEW` (Hermes STOP condition enforced; Gate B is NOT marked PASS/VERIFIED until independent review completes)
 - **Gate C & REC1-RUN1**: `STRICTLY NOT AUTHORIZED / BLOCKED`
@@ -41,10 +41,12 @@
    - Mandatory `db_topology` and `storage_topology` sections; missing topologies fail closed.
    - Physical DB and Storage connectivity probes fail closed and match observed identities against signed topology.
 
-4. **Scenario 43 Adversarial Security Suite**:
-   - Expanded adversarial test suite proving in-process caller cannot override production authority, forged JSON is rejected, symlinks are rejected, missing/corrupted signatures are rejected, and probe mismatches fail closed before provider I/O.
+4. **Scenario 43 & 44 Adversarial Security Suite**:
+   - Expanded adversarial test suite proving in-process caller cannot override production authority, forged JSON is rejected, symlinks are rejected, missing/corrupted signatures are rejected, probe-confirmed configured endpoint/bucket identity matches signed topology before provider I/O.
+   - Symmetrically enforced root UID 0 / GID 0 and parent directory hierarchy traversal on public keys and deployment records, verified zero provider calls before failure.
 
 5. **Truthful Status & Acceptance Matrix Markings**:
+   - **Scenario 44**: Marked `LOCAL TEST PASS` (Awaiting independent review).
    - **Scenario 43**: Marked `LOCAL TEST PASS` (Awaiting independent review).
    - **Scenario 42**: Marked `PARTIAL / NOT PROVEN` pending independent review.
    - **Scenario 35**: Kept `PARTIAL / NOT PROVEN`.
@@ -84,9 +86,7 @@
 
 ## 4. Test Verification Summary
 
-- `backend/tests/test_vidu_recovery_gate_b.py`: **45 passed**
-- `backend/tests/test_vidu_recovery.py`: **27 passed**
-- `backend/tests/test_migrations.py`: **11 passed**
-- **Total Backend Tests**: **82 passed**
-- **Frontend Test Suite**: **52 passed**
-- **Alembic Single Head**: `022_provider_execution_fences_and_audits (head)`
+- `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
+- Full backend suite: **674 passed**
+- Frontend suite: **52 passed**
+- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`

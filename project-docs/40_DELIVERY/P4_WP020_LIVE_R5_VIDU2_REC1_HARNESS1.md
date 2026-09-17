@@ -7,9 +7,11 @@
 - **Authorized Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
 - **Current Gate B Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated Gate B PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
-- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5230453776)**
-- **Previous PR HEAD**: `b54875f21b71e8154fa05cda58c7e5b2c5f1f269`
-- **Implementation Commit**: `b1b67c8728c10029366ca0dff438d8f4301fe293`
+- **Gate B Implementation Status**: **CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5230512366)**
+- **Previous PR HEAD**: `adaaa662b268516e1161e1587b7d426ffbd79b89`
+- **Implementation Commit**: `2f1c7fdb14f6093be36dc3bd1b9a165550db452b`
+- **Docs Commit**: `SYNCHRONIZED_WITH_IMPLEMENTATION_2f1c7fd`
+- **Exact PR HEAD**: `FOLLOWS_DOCS_COMMIT`
 - **Gate C & Gate D Status**: **STRICTLY NOT AUTHORIZED / NOT EXECUTED**
 - **Overall WP020 Status**: **ACTIVE / NOT CLOSED** (19/20 Core V1 Packages = 95%)
 - **Core V1 Release Declaration**: **NOT DECLARED**
@@ -137,17 +139,19 @@ Release = NOT DECLARED
 | 40 | External Register Atomic Claim, Concurrency & Topology | **PARTIAL / NOT PROVEN** | Fail-closed durability policy without platform proof, immutable profile registry allowlists, non-downgradeable directory fsync; caller downgrade rejected; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 41 | External Dispatch Registration Failure Audited Truthfully | **PARTIAL / NOT PROVEN** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 | 42 | Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization | **PARTIAL / NOT PROVEN** | Module-level isolated process worker with termination guarantees and multi-layer secret redaction; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
+| 43 | Adversarial File Policy & Physical Topology Probes | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket. |
+| 44 | Adversarial Deployment Record & Key Authority Security Suite | **LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW** | Adversarial tests for wrong record owner, wrong key owner, unsafe key parent hierarchy, unsafe record parent hierarchy, proving zero provider I/O before failure. |
 
 ---
 
 ## 6. Verification Evidence Summary
 
 - **Gate B Acceptance Tests (`backend/tests/test_vidu_recovery_gate_b.py`)**:
-  - `44 passed in 7.97s` (covering all 41 scenarios including restore-safe anti-replay across successful/failed/crashed GETs, transport-level bounded cancellation, atomic external claims, truthful failure audits, and pre-DB invariants)
-- **Regression Suite (`tests/test_vidu_recovery.py`, `tests/test_migrations.py`, `tests/test_vidu_recovery_gate_b.py`)**:
-  - `82 passed in 28.46s`
+  - `47 passed` (covering all 44 scenarios including restore-safe anti-replay, transport-level cancellation, root-only authority hierarchy, probe-confirmed storage identity, and zero provider I/O invariant)
+- **Backend Full Test Suite**:
+  - `674 passed`
 - **Frontend Test Suite (`frontend`)**:
-  - `52 passed in 6.39s`
+  - `52 passed`
 - **Alembic Migration Verification**:
   - Verified single head: `022_provider_execution_fences_and_audits (head)`
   - Full lifecycle test: `010_story_version_history` -> `head (022)` -> `downgrade -1 (021)` -> `upgrade head (022)` -> `SUCCESS`

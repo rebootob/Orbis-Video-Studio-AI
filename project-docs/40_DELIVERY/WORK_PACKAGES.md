@@ -450,9 +450,9 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
 - **Dedicated Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Dedicated PR**: **[PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)**
 - **Base Commit**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
-- **Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5230453776)
-- **Implementation Commit**: `b1b67c8728c10029366ca0dff438d8f4301fe293`
-- **Previous PR HEAD**: `b54875f21b71e8154fa05cda58c7e5b2c5f1f269`
+- **Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5230512366)
+- **Implementation Commit**: `2f1c7fdb14f6093be36dc3bd1b9a165550db452b`
+- **Previous PR HEAD**: `adaaa662b268516e1161e1587b7d426ffbd79b89`
 - **Invariant Rules**:
   - `WP020 = ACTIVE / NOT CLOSED`
   - `Core V1 = 19/20 (95%)`
@@ -465,7 +465,8 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
   - `Scenario 40 = PARTIAL / NOT PROVEN`
   - `Scenario 41 = PARTIAL / NOT PROVEN`
   - `Scenario 42 = PARTIAL / NOT PROVEN`
-  - `Scenario 43 = LOCAL TEST PASS (Awaiting independent review)`
+  - `Scenario 43 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW`
+  - `Scenario 44 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW`
 
 ---
 

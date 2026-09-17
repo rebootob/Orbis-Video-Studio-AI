@@ -46,10 +46,10 @@ PREV6_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56
 PREV7_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
 PREV7_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 
-GATE_B_STATUS = CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5230453776)
-GATE_B_PREVIOUS_HEAD = b54875f21b71e8154fa05cda58c7e5b2c5f1f269
-GATE_B_IMPLEMENTATION_COMMIT = b1b67c8728c10029366ca0dff438d8f4301fe293
-GATE_B_DOCS_COMMIT = SYNCHRONIZED_WITH_IMPLEMENTATION_b1b67c8
+GATE_B_STATUS = CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5230512366)
+GATE_B_PREVIOUS_HEAD = adaaa662b268516e1161e1587b7d426ffbd79b89
+GATE_B_IMPLEMENTATION_COMMIT = 2f1c7fdb14f6093be36dc3bd1b9a165550db452b
+GATE_B_DOCS_COMMIT = SYNCHRONIZED_WITH_IMPLEMENTATION_2f1c7fd
 GATE_B_EXACT_HEAD = FOLLOWS_DOCS_COMMIT
 GATE_B_CI_BACKEND_RUN_ID = PENDING_PUSH
 GATE_B_CI_FRONTEND_RUN_ID = PENDING_PUSH
@@ -58,14 +58,15 @@ GATE_C_STATUS = PROPOSED / NOT AUTHORIZED / NOT STARTED
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
 
 ================================================================================
-ACCEPTANCE MATRIX (43 SCENARIOS) TRUTH STATUS
+ACCEPTANCE MATRIX (44 SCENARIOS) TRUTH STATUS
 ================================================================================
 SCENARIO_25 = NOT PROVEN / DEFERRED TO GATE C
 SCENARIO_35 = PARTIAL / NOT PROVEN (Process boundary isolation & OS termination lifecycle implemented; awaiting independent review)
 SCENARIO_40 = PARTIAL / NOT PROVEN (Exact profile register binding & fail-closed Windows durability implemented; awaiting independent review)
 SCENARIO_41 = PARTIAL / NOT PROVEN (Recovery authority binding & fail-closed enforcement; awaiting independent review)
 SCENARIO_42 = PARTIAL / NOT PROVEN (Process-isolated storage worker lifecycle & multi-layer sanitization implemented; awaiting independent review)
-SCENARIO_43 = LOCAL TEST PASS (Adversarial test suite for trusted file policy, atomic open, Ed25519 signature, and physical topology probes; awaiting independent review)
+SCENARIO_43 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW (Adversarial test suite for trusted file policy, atomic open, Ed25519 signature, and probe-confirmed configured endpoint/bucket; awaiting independent review)
+SCENARIO_44 = LOCAL TEST PASS / AWAITING INDEPENDENT REVIEW (Adversarial security tests for deployment record & public key authority, parent hierarchy, root ownership, and zero provider I/O)
 
 ================================================================================
 TOOLING & READINESS INVARIANTS
