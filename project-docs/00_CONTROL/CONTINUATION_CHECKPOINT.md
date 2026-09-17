@@ -89,14 +89,15 @@
 
 ## 4. Test Verification Summary
 
-### CURRENT VERIFY1 EXACT-HEAD CI EVIDENCE:
-- PR HEAD = `5301c80731a4433ea2d7ba1451c4be49b914c905`
-- Frontend Run = `35214227204` / **SUCCESS**
-- Backend Run = `35214227179` / **SUCCESS**
+### LATEST RECORDED PRE-CORRECTIVE CI EVIDENCE:
+- Recorded PR Head: `5301c80731a4433ea2d7ba1451c4be49b914c905`
+- Frontend Run: `35214227204` / **SUCCESS**
+- Backend Run: `35214227179` / **SUCCESS**
   - `backend-tests` = **SUCCESS**
   - `fresh-postgres-migrations (fresh-head)` = **SUCCESS**
   - `fresh-postgres-migrations (from-revision-010)` = **SUCCESS**
 - Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
+- *Note*: Exact-current-head CI is authoritative from GitHub Actions / independent review and is intentionally not hard-coded here because any documentation corrective commit advances the PR HEAD.
 
 ### HISTORICAL GATE B CI EVIDENCE:
 - Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
