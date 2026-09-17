@@ -194,6 +194,9 @@ def _validate_trusted_directory_hierarchy(path: str) -> None:
             if os.name != "nt":
                 if st.st_mode & 0o022:
                     raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has unsafe permissions (mode: {oct(st.st_mode)})")
+                current_uid = os.geteuid() if hasattr(os, "geteuid") else None
+                if current_uid is not None and st.st_uid not in (0, current_uid):
+                    raise RecoveryAuthError(f"Directory hierarchy component '{current_dir}' has untrusted owner UID {st.st_uid} (fail-closed)")
         except OSError as err:
             raise RecoveryAuthError(f"Failed inspecting hierarchy component '{current_dir}' (fail-closed): {err}")
 
@@ -222,29 +225,15 @@ def _verify_deployment_file_security_and_integrity(
 
     if enforce_trusted_root:
         _validate_trusted_directory_hierarchy(path)
-    else:
-        # Check parent hierarchy symlinks even if trusted root check is relaxed
-        current_dir = os.path.dirname(real_path)
-        while True:
-            if os.path.islink(current_dir):
-                raise RecoveryAuthError(f"Parent directory '{current_dir}' is a symlink (fail-closed)")
-            try:
-                st = os.stat(current_dir, follow_symlinks=False)
-                if stat.S_ISLNK(st.st_mode):
-                    raise RecoveryAuthError(f"Parent directory '{current_dir}' is a symlink (fail-closed)")
-                if os.name != "nt":
-                    if st.st_mode & 0o022:
-                        raise RecoveryAuthError(f"Parent directory '{current_dir}' has unsafe permissions (mode: {oct(st.st_mode)})")
-            except OSError as err:
-                raise RecoveryAuthError(f"Failed inspecting parent hierarchy '{current_dir}' (fail-closed): {err}")
-            parent_dir = os.path.dirname(current_dir)
-            if parent_dir == current_dir or not parent_dir:
-                break
-            current_dir = parent_dir
 
     # 1. Symlink rejection on file
     if os.path.islink(path) or os.path.islink(real_path):
         raise RecoveryAuthError(f"Deployment record at '{path}' is a symlink (rejected, fail-closed)")
+
+    # 1b. Validate parent directory is not a symlink
+    parent_dir = os.path.dirname(real_path)
+    if os.path.islink(parent_dir):
+        raise RecoveryAuthError(f"Parent directory '{parent_dir}' is a symlink (rejected, fail-closed)")
 
     # 2. Atomic open with O_NOFOLLOW to defeat TOCTOU race conditions
     open_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
@@ -270,6 +259,10 @@ def _verify_deployment_file_security_and_integrity(
         if os.name != "nt":
             if st.st_mode & 0o022:
                 raise RecoveryAuthError(f"Deployment record at '{path}' has unsafe permissions (mode: {oct(st.st_mode)})")
+            # Verify trusted ownership (root:root or current process owner on POSIX)
+            current_uid = os.geteuid() if hasattr(os, "geteuid") else None
+            if current_uid is not None and st.st_uid not in (0, current_uid):
+                raise RecoveryAuthError(f"Deployment record fd at '{path}' has untrusted owner UID {st.st_uid} (fail-closed)")
 
         with os.fdopen(fd, "rb", closefd=False) as f:
             content_bytes = f.read()
@@ -538,8 +531,10 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
                     raise RecoveryAuthError("S3 storage provider endpoint cannot be physically verified (fail-closed)")
                 observed_storage_id = f"s3://{endpoint}/{bucket}"
             elif hasattr(storage_provider, "_store"):
-                # In-memory / mock storage probe
+                # In-memory / mock storage probe: verify backing store exists and is accessible
                 bucket = getattr(storage_provider, "bucket_name", None) or getattr(storage_provider, "bucket", None) or "orbis-media-assets"
+                if not isinstance(storage_provider._store, dict):
+                    raise RecoveryAuthError("Mock storage store is corrupted or not a dict (fail-closed)")
                 observed_storage_id = f"mock://local/{bucket}"
             else:
                 raise RecoveryAuthError("Storage provider type unrecognized or un-probeable (fail-closed)")
@@ -555,8 +550,10 @@ def attest_physical_topology(db: any, storage_provider: Optional[any] = None) ->
         if probe_result.get("db_identity", "").startswith("sqlite://"):
             from app.core.config import settings
             bucket = getattr(settings, "OBJECT_STORAGE_BUCKET", "orbis-media-assets")
-            probe_result["storage_identity"] = f"mock://local/{bucket}"
+            storage_identity = f"mock://local/{bucket}"
+            probe_result["storage_identity"] = storage_identity
             probe_result["storage_probed"] = True
+            probe_result["storage_type"] = "mock_local"
 
     return probe_result
 
