@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Gate C Infrastructure Readiness Preflight (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1)
+> Updated: Gate C Infrastructure Readiness Verification (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1)
 
 ---
 
@@ -10,18 +10,19 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `79bf07cb7907b542d68871c7bc493e72d9562e8a`
-- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1`
-- **Mode**: `READ-ONLY INFRA PREFLIGHT / NO-PROVIDER / NO-PROVISIONING`
-- **Owner Authorization**: Issue #63 comment `5711612185` (Date: 2026-09-17)
-- **Dedicated Execution Branch**: `ai/p4-wp020-rec1-gatec-infra-preflight1`
-- **Preflight Result**: `BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`
-- **Current Gate**: Gate C Infrastructure Readiness Preflight Completed / Awaiting Owner Decision
-- **Next Control Decision**: `VERIFY EXISTING UAT INFRASTRUCTURE / CONFIGURATION BEFORE ANY PROVISIONING`
-- **Next Recommended Action**: `READ-ONLY EXISTING-INFRA VERIFICATION OR OWNER INFRA DECISION`
-- **Future Provisioning**: `NOT AUTHORIZED`
-- **Gate C Status**: `AUTHORIZED PREFLIGHT ONLY / EXECUTION NOT AUTHORIZED`
-- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED`
+- **Canonical Base Main**: `ead14bf9d9b36958618d0f6d6531ff44b9506492`
+- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1`
+- **Mode**: `READ-ONLY EXISTING-UAT-INFRA VERIFICATION / NO-PROVIDER / NO-PROVISIONING`
+- **Owner Authorization**: Issue #63 comment `5712713119` (Date: 2026-09-17)
+- **Dedicated Execution Branch**: `ai/p4-wp020-rec1-gatec-infra-verify1`
+- **Verification Result**: `BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`
+- **Current Gate**: Gate C Infrastructure Verification Completed / Result: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
+- **Next Control Decision**: `OWNER UAT INFRASTRUCTURE TARGET & CREDENTIAL CONFIGURATION DECISION`
+- **Next Recommended Action**: `OWNER SPECIFIES EXISTING UAT TARGETS/CREDENTIALS OR AUTHORIZES PROVISIONING`
+- **Future Provisioning**: `NOT AUTHORIZED / PENDING OWNER DECISION`
+- **Gate C Status**: `AUTHORIZED VERIFICATION ONLY / EXECUTION NOT AUTHORIZED`
+- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+- **Gate C Preflight PR**: `PR #110 (Merged, commit ead14bf9d9b36958618d0f6d6531ff44b9506492)`
 - **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)`
 - **Gate B Closeout PR**: `PR #109 (Merged, commit 79bf07cb7907b542d68871c7bc493e72d9562e8a)`
 
@@ -88,13 +89,19 @@
 
 ## 4. Test Verification Summary
 
-### EXACT-HEAD CI EVIDENCE (BEFORE MERGE):
+### LATEST RECORDED PRE-CORRECTIVE CI EVIDENCE:
+- Recorded PR Head: `5301c80731a4433ea2d7ba1451c4be49b914c905`
+- Frontend Run: `35214227204` / **SUCCESS**
+- Backend Run: `35214227179` / **SUCCESS**
+  - `backend-tests` = **SUCCESS**
+  - `fresh-postgres-migrations (fresh-head)` = **SUCCESS**
+  - `fresh-postgres-migrations (from-revision-010)` = **SUCCESS**
+- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
+- *Note*: Exact-current-head CI is authoritative from GitHub Actions / independent review and is intentionally not hard-coded here because any documentation corrective commit advances the PR HEAD.
+
+### HISTORICAL GATE B CI EVIDENCE:
 - Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
 - Frontend Run: `35188302878` -> **SUCCESS**
-- Migrations: **SUCCESS**
-- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
-
-### LOCAL EVIDENCE:
-- `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
+- Local Evidence: `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
 - Full backend suite (local): **674 passed**
 - Frontend suite (local): **52 passed**
