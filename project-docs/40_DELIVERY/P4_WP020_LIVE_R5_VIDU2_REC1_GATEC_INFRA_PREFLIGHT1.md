@@ -60,31 +60,31 @@ EXECUTION_STARTED_RECORDED = NO
 ## 4. Infrastructure Discovery Findings
 
 ### A. PostgreSQL UAT Readiness
-- **Status**: **NOT_PROVISIONED / UNCONFIGURED**
-- **External / Persistent Target**: No external or dedicated persistent UAT PostgreSQL instance is configured in environment or repo settings.
+- **Status**: **EXTERNAL_UAT_POSTGRES_EXISTENCE = UNKNOWN / NOT VERIFIED; CURRENT_RUNTIME_UAT_POSTGRES_CONFIGURATION = ABSENT / UNCONFIGURED**
+- **External / Persistent Target**: No external or dedicated persistent UAT PostgreSQL instance is configured in inspected environment or repo settings. Whether external/cloud PostgreSQL exists is UNKNOWN / NOT VERIFIED.
 - **Host State**: A local Windows PostgreSQL 16 service is installed on the host, but no Orbis UAT database, connection parameters, or credentials are configured.
-- **Distinction from Local/CI**: There is no isolated, persistent cloud or dedicated staging database configured.
-- **Migration & Schema Inspection**: Not inspectable against an external target since no target exists.
-- **Backup / PITR Capability**: **UNKNOWN / UNPROVISIONED** (No persistent UAT RDS/managed database service exists to provide snapshot or PITR).
+- **Distinction from Local/CI**: In the inspected execution context, there is no isolated, persistent cloud or dedicated staging database configured.
+- **Migration & Schema Inspection**: Not inspectable against an external target since no target is configured in the current execution context.
+- **Backup / PITR Capability**: **UNKNOWN / NOT VERIFIED** (No persistent UAT RDS/managed database service configuration is available to verify snapshot or PITR).
 
 ### B. Object Storage UAT Readiness
-- **Status**: **NOT_PROVISIONED / ABSENT**
-- **Target Storage**: No persistent S3-compatible UAT bucket is configured.
-- **MinIO / Local Storage**: Port 9000 is inactive; docker daemon is inactive. Local dev MinIO is not persistent cloud UAT storage.
-- **Connectivity & Metadata**: Zero buckets or endpoints reachable or configured.
-- **Versioning / Snapshot / Lifecycle**: **UNKNOWN / UNPROVISIONED**.
+- **Status**: **EXTERNAL_UAT_STORAGE_EXISTENCE = UNKNOWN / NOT VERIFIED; CURRENT_RUNTIME_UAT_STORAGE_CONFIGURATION = ABSENT / UNCONFIGURED**
+- **Target Storage**: No persistent S3-compatible UAT bucket is configured in the inspected execution context. Whether external/cloud object storage exists is UNKNOWN / NOT VERIFIED.
+- **MinIO / Local Storage**: Port 9000 is inactive; docker daemon is inactive. Local dev MinIO in docker-compose does not constitute evidence of persistent cloud UAT.
+- **Connectivity & Metadata**: Zero buckets or endpoints reachable or configured in current context.
+- **Versioning / Snapshot / Lifecycle**: **UNKNOWN / NOT VERIFIED**.
 
 ### C. Compute & Runtime Readiness
-- **Status**: **STATELESS ARCHITECTURE READY / RUNTIME UNPROVISIONED**
+- **Status**: **DEDICATED_UAT_COMPUTE_EXISTENCE = UNKNOWN / NOT VERIFIED; CURRENT_EXECUTION_CONTEXT = NO VERIFIED PERSISTENT UAT TARGET CONFIGURED**
 - **Statelessness**: The Orbis Video Studio backend worker design is stateless; persistence is separated into DB and object storage.
 - **Provider Disable Capability**: Confirmed. Codebase supports `VIDU_GENERATION_ENABLED=False` and fail-closed runtime target profile matching (`UAT-COMPOSE-PERSISTENT`).
-- **Dedicated UAT Worker**: No persistent staging worker instance is deployed or running.
+- **Dedicated UAT Worker**: No persistent staging worker instance is configured or running in current context.
 
 ### D. Backup & Restore Capability Assessment
-- **Discovery Status**: **CAPABILITY UNVERIFIED / UNPROVISIONED**
-- **Database Backup/Restore**: Because no persistent UAT database instance exists, automated snapshot, pg_dump/pg_restore, or PITR cannot be verified.
-- **Object Storage Snapshot/Restore**: Because no persistent S3 UAT bucket exists, versioned rollback or isolated scratch restoration cannot be verified.
-- **Restored-Runtime Verification**: Software harness (Gate B) was tested on isolated/mock fixtures, but live infrastructure verification requires provisioned infrastructure.
+- **Discovery Status**: **BACKUP_CAPABILITY = UNKNOWN / NOT VERIFIED; RESTORE_CAPABILITY = UNKNOWN / NOT VERIFIED**
+- **Database Backup/Restore**: Because no persistent UAT database instance is configured in current context, automated snapshot, pg_dump/pg_restore, or PITR cannot be verified.
+- **Object Storage Snapshot/Restore**: Because no persistent S3 UAT bucket is configured in current context, versioned rollback or isolated scratch restoration cannot be verified.
+- **Restored-Runtime Verification**: Software harness (Gate B) was tested on isolated/mock fixtures, but live infrastructure verification requires verified persistent infrastructure.
 
 ---
 
@@ -92,18 +92,20 @@ EXECUTION_STARTED_RECORDED = NO
 
 - **Secret Safety Confirmation**: **PASS**. Zero secrets, passwords, tokens, or connection strings were exposed, printed, or committed. All credential presence checks yielded `ABSENT`.
 - **Infrastructure Cost Finding**: **ZERO COST**. Zero cloud resources created, zero paid plans touched, zero cloud billing mutated.
-- **Security & Isolation Assessment**: Existing environment lacks physical isolation because no dedicated UAT environment has been provisioned.
+- **Security & Isolation Assessment**: Current execution context lacks verified isolation because no dedicated UAT environment configuration is present.
 
 ---
 
 ## 6. Blockers & Evidence Gaps
 
 ### Active Blocker
-- **`BLOCKED_INFRA_NOT_PROVISIONED`**:
-  - An existing persistent UAT environment (PostgreSQL instance + S3-compatible bucket) does not exist.
-  - Gate C backup/restore proof cannot be executed until a dedicated, isolated UAT environment is provisioned with Owner authorization.
+- **`BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`**:
+  - In the inspected execution context, no configured persistent UAT target (PostgreSQL instance + S3-compatible bucket) is verified.
+  - Whether external/cloud infrastructure exists remains UNKNOWN / NOT VERIFIED.
+  - Backup & restore capability cannot currently be verified from available configuration.
+  - Gate C backup/restore proof cannot be executed until a dedicated, isolated UAT environment configuration is verified or established with Owner authorization.
 
-### Documented Minimum Infrastructure Requirements for Future Provisioning
+### Documented Minimum Infrastructure Requirements for Future Verification / Provisioning
 1. **Isolated PostgreSQL UAT Target**:
    - Managed PostgreSQL (version 16+) or dedicated persistent container/instance with isolated database name (`orbis_uat` or `orbis_studio`).
    - Automated snapshot or pg_dump/pg_restore capability to an isolated scratch target.
@@ -119,12 +121,13 @@ EXECUTION_STARTED_RECORDED = NO
 
 ```text
 GATE_C_STATUS: AUTHORIZED PREFLIGHT ONLY / EXECUTION NOT AUTHORIZED
-RESULTING_STATE: BLOCKED_INFRA_NOT_PROVISIONED
+RESULTING_STATE: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
 REC1_RUN1_STATUS: BLOCKED / NOT AUTHORIZED
 WP020_STATUS: ACTIVE / NOT CLOSED
 CORE_V1_PROGRESS: 19 / 20 = 95%
 CORE_V1_RELEASE_DECLARED: FALSE
 
-NEXT_RECOMMENDED_PACKAGE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PROVISION1
-(Awaiting Owner review and authorization before any provisioning or cost creation).
+NEXT_CONTROL_DECISION: VERIFY EXISTING UAT INFRASTRUCTURE / CONFIGURATION BEFORE ANY PROVISIONING
+NEXT_RECOMMENDED_ACTION: READ-ONLY EXISTING-INFRA VERIFICATION OR OWNER INFRA DECISION
+(Any future provisioning package remains NOT AUTHORIZED; no cloud resource creation is authorized).
 ```
