@@ -112,9 +112,9 @@ Next Gate Direction:
 - Next Control Decision: `OWNER UAT INFRASTRUCTURE TARGET & CREDENTIAL CONFIGURATION DECISION` (Owner specifies existing UAT target configuration or separately authorizes provisioning).
 - Provisioning: NOT AUTHORIZED.
 - Backup / Restore: NOT AUTHORIZED.
-- REC1-RUN1: BLOCKED / NOT AUTHORIZED.
+- REC1-RUN1: BLOCKED / NOT AUTHORIZED / UNCONSUMED.
 - Provider Execution: NOT AUTHORIZED.
-- Executed gate: `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1` (NOT AUTHORIZED / UNCONSUMED).
+- Next Recovery Execution Candidate: `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1` (BLOCKED / NOT AUTHORIZED / UNCONSUMED).
 - Consumed live runs:
   - `LIVE-20260910-VIDU2-R5` (Run 34569728383): PASS / CONSUMED / NEVER RERUN (1 POST, video present, credits reported 30.0, actual credits consumed UNKNOWN / NOT CONFIRMED).
   - `LIVE-20260909-VIDU1-R5` (Run 34423580310): STOPPED / CONSUMED / NEVER RERUN (1 POST, HTTP status UNKNOWN, credits UNKNOWN / NOT CONFIRMED).

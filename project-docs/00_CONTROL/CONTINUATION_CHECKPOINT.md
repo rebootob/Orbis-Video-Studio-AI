@@ -16,12 +16,12 @@
 - **Owner Authorization**: Issue #63 comment `5712713119` (Date: 2026-09-17)
 - **Dedicated Execution Branch**: `ai/p4-wp020-rec1-gatec-infra-verify1`
 - **Verification Result**: `BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`
-- **Current Gate**: Gate C Infrastructure Verification Completed / Awaiting Owner Decision
+- **Current Gate**: Gate C Infrastructure Verification Completed / Result: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
 - **Next Control Decision**: `OWNER UAT INFRASTRUCTURE TARGET & CREDENTIAL CONFIGURATION DECISION`
 - **Next Recommended Action**: `OWNER SPECIFIES EXISTING UAT TARGETS/CREDENTIALS OR AUTHORIZES PROVISIONING`
 - **Future Provisioning**: `NOT AUTHORIZED / PENDING OWNER DECISION`
 - **Gate C Status**: `AUTHORIZED VERIFICATION ONLY / EXECUTION NOT AUTHORIZED`
-- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED`
+- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
 - **Gate C Preflight PR**: `PR #110 (Merged, commit ead14bf9d9b36958618d0f6d6531ff44b9506492)`
 - **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)`
 - **Gate B Closeout PR**: `PR #109 (Merged, commit 79bf07cb7907b542d68871c7bc493e72d9562e8a)`
@@ -89,13 +89,18 @@
 
 ## 4. Test Verification Summary
 
-### EXACT-HEAD CI EVIDENCE (BEFORE MERGE):
-- Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
-- Frontend Run: `35188302878` -> **SUCCESS**
-- Migrations: **SUCCESS**
+### CURRENT VERIFY1 EXACT-HEAD CI EVIDENCE:
+- PR HEAD = `5301c80731a4433ea2d7ba1451c4be49b914c905`
+- Frontend Run = `35214227204` / **SUCCESS**
+- Backend Run = `35214227179` / **SUCCESS**
+  - `backend-tests` = **SUCCESS**
+  - `fresh-postgres-migrations (fresh-head)` = **SUCCESS**
+  - `fresh-postgres-migrations (from-revision-010)` = **SUCCESS**
 - Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
 
-### LOCAL EVIDENCE:
-- `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
+### HISTORICAL GATE B CI EVIDENCE:
+- Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
+- Frontend Run: `35188302878` -> **SUCCESS**
+- Local Evidence: `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
 - Full backend suite (local): **674 passed**
 - Frontend suite (local): **52 passed**
