@@ -194,6 +194,15 @@ A future `PROVISION1` package MUST NOT execute until Owner explicitly approves:
 12. One-time setup cost ceiling or accepted cost basis
 13. Rollback / decommission ownership and schedule
 14. Explicit execution authorization comment referencing the provisioning package
+15. Backup capability design
+16. Restore capability design
+17. Exact provisioning package identity AND exact authorized base HEAD (Owner approval must be bound to: exact future package name, exact canonical base HEAD, and exact mutation scope)
+
+APPROVAL OF DECISION1 != APPROVAL TO PROVISION
+
+MERGE OF DECISION1 != APPROVAL TO PROVISION
+
+APPROVAL OF A FUTURE PROVISIONING PACKAGE MUST BE BOUND TO AN EXACT PACKAGE AND EXACT BASE HEAD
 
 ---
 
