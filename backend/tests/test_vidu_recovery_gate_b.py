@@ -5790,14 +5790,28 @@ def test_scenario_42_process_isolated_storage_worker_lifecycle_and_safety(mock_s
     import logging
     caplog.clear()
     logger_to_test = logging.getLogger("app.services.vidu_recovery")
-    with caplog.at_level(logging.WARNING):
-        logger_to_test.warning("Isolated worker execution failed: %s", sanitize_error_message(raw_leaked_err))
-        logger_to_test.error("Queue payload received error: %s", q_msg["error_message"])
+    orig_disabled = logger_to_test.disabled
+    orig_propagate = logger_to_test.propagate
+    logger_to_test.disabled = False
+    logger_to_test.propagate = True
+    added_handler = False
+    if caplog.handler not in logger_to_test.handlers:
+        logger_to_test.addHandler(caplog.handler)
+        added_handler = True
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.services.vidu_recovery"):
+            logger_to_test.warning("Isolated worker execution failed: %s", sanitize_error_message(raw_leaked_err))
+            logger_to_test.error("Queue payload received error: %s", q_msg["error_message"])
 
-    assert len(caplog.records) >= 2
-    captured_text = caplog.text
-    for secret_val in SYNTHETIC_TEST_SECRETS.values():
-        assert secret_val not in captured_text
-    assert "tok_secret_sample" not in captured_text
-    assert "[REDACTED_SECRET]" in captured_text
-    assert "[REDACTED]" in captured_text
+        assert len(caplog.records) >= 2
+        captured_text = caplog.text
+        for secret_val in SYNTHETIC_TEST_SECRETS.values():
+            assert secret_val not in captured_text
+        assert "tok_secret_sample" not in captured_text
+        assert "[REDACTED_SECRET]" in captured_text
+        assert "[REDACTED]" in captured_text
+    finally:
+        if added_handler and caplog.handler in logger_to_test.handlers:
+            logger_to_test.removeHandler(caplog.handler)
+        logger_to_test.propagate = orig_propagate
+        logger_to_test.disabled = orig_disabled

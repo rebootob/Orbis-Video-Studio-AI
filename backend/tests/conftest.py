@@ -10,6 +10,16 @@ from app.db.base_class import Base
 from app.db.session import get_db
 from app.main import app as fastapi_app
 import app.models  # noqa: F401
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+
+@compiles(UUID, "sqlite")
+@compiles(PG_UUID, "sqlite")
+def compile_uuid_sqlite(type_, compiler, **kw):
+    return "CHAR(32)"
+
 
 SQLALCHEMY_TEST_DATABASE_URL = "sqlite:///:memory:"
 
