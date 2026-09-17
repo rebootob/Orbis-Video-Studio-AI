@@ -13,39 +13,43 @@
 - **Active Branch**: `ai/p4-wp020-live-r5-vidu2-rec1-harness1`
 - **Active Pull Request**: [PR #108 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
 - **Authorized Base Main**: `ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7` (Merged PR #107)
-- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-R9`
+- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1`
 - **Current Gate**: Gate B (Execution Harness, Standalone Schema & Failure Matrix)
-- **Gate B Status**: `IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Review 5229426522: R9 CORRECTIVE IMPLEMENTED)
-- **Exact Implementation HEAD**: `83f8d07c1162e21180279eda335d151189b4f65a`
-- **Exact-Head CI Status**:
-  - Backend CI Run ID `35166602399`: SUCCESS (670 passed)
-  - Frontend CI Run ID `35166602403`: SUCCESS (38 passed)
+- **Gate B Status**: `CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW` (Addressing Reviews 5229784538 & 5229746282)
+- **Previous Remote PR HEAD**: `bdff07bcff859581a630cc297f1e862110528b71`
+- **Implementation Commit**: `5e6426a423d37ddaae5c9cf1358671c620a052c8`
+- **Exact PR HEAD**: PENDING_DOCS_COMMIT
 - **Next Gate**: `CHATGPT_INDEPENDENT_REVIEW` (Hermes STOP condition enforced; Gate B is NOT marked PASS/VERIFIED until independent review completes)
 - **Gate C & REC1-RUN1**: `STRICTLY NOT AUTHORIZED / BLOCKED`
 
 ---
 
-## 2. Review 5229426522 Blocker Resolution Summary (R9)
+## 2. Reviews 5229784538 & 5229746282 Blocker Resolution Summary
 
-1. **Production Runtime Profile Whitelist**:
-   - Removed `TEST` profile from production `AUTHORIZED_RUNTIME_TARGET_PROFILES` in `backend/app/services/recovery_auth.py`.
-   - Test harness uses dynamic injection for testing only (`set_deployment_record_for_testing`).
+1. **Eliminate Mutable Test Deployment Override**:
+   - Completely eliminated `_TEST_DEPLOYMENT_RECORD` and `set_deployment_record_for_testing` from `backend/app/services/recovery_auth.py`.
+   - Replaced with `set_isolated_test_deployment_path()` which only accepts file paths and enforces full production security validation.
 
-2. **Immutable Deployment-Owned Identity & Live Physical Topology**:
-   - Runtime identity resolved from authoritative deployment records.
-   - Enforced database topology (`PRAGMA database_list` / `current_database()`) and S3 storage endpoint verification fail-closed.
+2. **Trusted File Security Policy & Atomic O_NOFOLLOW**:
+   - Enforced symlink rejection on both the file and its parent hierarchy.
+   - Atomic `os.open` with `O_RDONLY | O_NOFOLLOW` and descriptor `os.fstat` checks.
+   - Fail-closed mode verification rejecting world-writable and group-writable permissions on POSIX.
 
-3. **Multi-layer Sanitization & Synthetic Secret Redaction**:
-   - Enhanced `sanitize_error_message()` across DB credentials, Bearer tokens, S3 signatures, and API keys.
-   - Verified Subcase I in Scenario 42 with synthetic secrets and zero leakage.
+3. **Mandatory Ed25519 Cryptographic Signature & Topology Declaration**:
+   - Deployment record must be signed with Ed25519 using trusted public key.
+   - Mandatory `db_topology` and `storage_topology` sections; missing topologies fail closed.
+   - Physical DB and Storage connectivity probes fail closed and match observed identities against signed topology.
 
-4. **Truthful Status & Acceptance Matrix Markings**:
+4. **Scenario 43 Adversarial Security Suite**:
+   - Expanded adversarial test suite proving in-process caller cannot override production authority, forged JSON is rejected, symlinks are rejected, missing/corrupted signatures are rejected, and probe mismatches fail closed before provider I/O.
+
+5. **Truthful Status & Acceptance Matrix Markings**:
+   - **Scenario 43**: Marked `LOCAL TEST PASS` (Awaiting independent review).
    - **Scenario 42**: Marked `PARTIAL / NOT PROVEN` pending independent review.
    - **Scenario 35**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 40**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 41**: Kept `PARTIAL / NOT PROVEN`.
    - **Scenario 25**: Kept `NOT PROVEN / DEFERRED TO GATE C`.
-   - All other scenarios (1–24, 26–34, 36–39) remain **VERIFIED (PASSED)**.
 
 ---
 
