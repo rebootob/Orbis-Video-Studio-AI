@@ -86,7 +86,7 @@ NEXT/FUTURE PAID/LIVE EXECUTION: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-current authorized base main: e09ee2127d0a20c01f6aad38eb759e5bfba7e248 (historical CONTRACT1 merge: e09ee2127d0a20c01f6aad38eb759e5bfba7e248; historical READY1 merge: 0326def88915b25fbb4e2b7019753c2b3fedc0f7; historical REC1-PREP-CLOSE merge: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c; historical REC1-PREP merge: 7ff516f317f84278f6143f15cc58b91fd3fa34d5; historical FINAL-GAP1-CLOSE merge: 8cae4bd72bd447470f214cf852b516b856638b7f; historical FINAL-GAP1 merge: a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0; historical VIDU2-RUN1-CLOSE merge: 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
+current authorized base main: b605a4d9928a7411a7f41cd7058d3a8fbceae581 (historical CONTRACT1 merge: e09ee2127d0a20c01f6aad38eb759e5bfba7e248; historical READY1 merge: 0326def88915b25fbb4e2b7019753c2b3fedc0f7; historical REC1-PREP-CLOSE merge: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c; historical REC1-PREP merge: 7ff516f317f84278f6143f15cc58b91fd3fa34d5; historical FINAL-GAP1-CLOSE merge: 8cae4bd72bd447470f214cf852b516b856638b7f; historical FINAL-GAP1 merge: a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0; historical VIDU2-RUN1-CLOSE merge: 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 VIDU2_CONSUMED_EXECUTION_ID: LIVE-20260910-VIDU2-R5
 VIDU2_CONSUMED_RUN: 34569728383
 VIDU2_CONSUMED_STATUS: PASS / CONSUMED / NEVER RERUN
