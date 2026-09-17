@@ -46,10 +46,10 @@ PREV6_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #101, commit a62d0ebfb1d56
 PREV7_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-RUN1-CLOSE
 PREV7_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #100, commit 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 
-GATE_B_STATUS = IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5223968663: R8 CORRECTIVE IMPLEMENTED)
-GATE_B_EXACT_HEAD = PENDING_COMMIT_PUSH
-GATE_B_CI_BACKEND_RUN_ID = 35106600159 (PARENT_HEAD_SUCCESS) / PENDING_NEW_HEAD_CI
-GATE_B_CI_FRONTEND_RUN_ID = 35106044297 (PARENT_HEAD_SUCCESS) / PENDING_NEW_HEAD_CI
+GATE_B_STATUS = IN PROGRESS / CORRECTIVE IMPLEMENTED / AWAITING INDEPENDENT REVIEW (ADDRESSING REVIEW 5229426522: R9 CORRECTIVE IMPLEMENTED)
+GATE_B_EXACT_HEAD = 83f8d07c1162e21180279eda335d151189b4f65a
+GATE_B_CI_BACKEND_RUN_ID = 35166602399 (SUCCESS, 670 passed)
+GATE_B_CI_FRONTEND_RUN_ID = 35166602403 (SUCCESS, 38 passed)
 ROUTED_CHECKPOINT = project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md
 GATE_C_STATUS = PROPOSED / NOT AUTHORIZED / NOT STARTED
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
@@ -57,12 +57,12 @@ REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
 ================================================================================
 ACCEPTANCE MATRIX (42 SCENARIOS) TRUTH STATUS
 ================================================================================
-SCENARIOS_VERIFIED = 38
+SCENARIOS_VERIFIED = 37
 SCENARIO_25 = NOT PROVEN / DEFERRED TO GATE C
 SCENARIO_35 = PARTIAL / NOT PROVEN (Process boundary isolation & OS termination lifecycle implemented; awaiting independent review)
 SCENARIO_40 = PARTIAL / NOT PROVEN (Exact profile register binding & fail-closed Windows durability implemented; awaiting independent review)
 SCENARIO_41 = PARTIAL / NOT PROVEN (Recovery authority binding & fail-closed enforcement; awaiting independent review)
-SCENARIO_42 = VERIFIED / PASSED (Production S3 adapter + loopback stalled read child process termination; 45/45 backend pytest passed)
+SCENARIO_42 = PARTIAL / NOT PROVEN (Process-isolated storage worker lifecycle & multi-layer sanitization implemented; awaiting independent review)
 
 ================================================================================
 TOOLING & READINESS INVARIANTS

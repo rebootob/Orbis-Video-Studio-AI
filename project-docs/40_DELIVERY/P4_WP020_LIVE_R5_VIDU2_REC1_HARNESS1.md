@@ -133,7 +133,8 @@ Release = NOT DECLARED
 | 38 | Readback Terminal Transition Commit Failure Audit | **VERIFIED (PASSED)** | Commit failure when transitioning fence to terminal state after readback failure is recorded in `FENCE_TRANSITION_TERMINAL_READBACK` audit and propagated fail-closed. |
 | 39 | Mandatory Signed Restore Epoch & Independent Freshness | **VERIFIED (PASSED)** | `restore_epoch` is an explicit REQUIRED field in `CanonicalAuthPayload` and signed canonical JSON; sourced independently via `get_current_runtime_restore_epoch()`; missing/stale/unattested epoch fails closed. |
 | 40 | External Register Atomic Claim, Concurrency & Topology | **PARTIAL / NOT PROVEN** | Fail-closed durability policy without platform proof, immutable profile registry allowlists, non-downgradeable directory fsync; caller downgrade rejected; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
-| 41 | External Dispatch Registration Failure Audited Truthfully | **VERIFIED (PASSED)** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; audit write failure propagates `AuditWriteFailureError` fail-closed. |
+| 41 | External Dispatch Registration Failure Audited Truthfully | **PARTIAL / NOT PROVEN** | Injected failure during `claim_pre_get_dispatch` transitions fence to `CONSUMED_TERMINAL_FAILURE`, records `EXTERNAL_DISPATCH_REGISTRATION` audit, preserves 0 provider GET calls; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
+| 42 | Process-Isolated Storage Worker Lifecycle & Multi-layer Sanitization | **PARTIAL / NOT PROVEN** | Module-level isolated process worker with termination guarantees and multi-layer secret redaction; status remains PARTIAL / NOT PROVEN pending ChatGPT Independent Review. |
 
 ---
 
