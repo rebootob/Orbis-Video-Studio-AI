@@ -63,12 +63,12 @@ GATE_B_MERGE_COMMIT = b605a4d9928a7411a7f41cd7058d3a8fbceae581
 GATE_B_FINAL_REVIEW = 5231880182
 GATE_B_FINAL_REVIEW_VERDICT = PASS / READY FOR OWNER DECISION
 GATE_B_OWNER_DECISION = MERGE APPROVED
-POST_MERGE_BASE_MAIN = 79bf07cb7907b542d68871c7bc493e72d9562e8a
-CONTROL_CLOSURE_COMMIT = 79bf07cb7907b542d68871c7bc493e72d9562e8a
+POST_MERGE_BASE_MAIN = ead14bf9d9b36958618d0f6d6531ff44b9506492
+CONTROL_CLOSURE_COMMIT = ead14bf9d9b36958618d0f6d6531ff44b9506492
 FINAL_REMOTE_HEAD = AUTHORITATIVE FROM GITHUB AFTER PUSH
 ROUTED_CHECKPOINT = project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md
-GATE_C_STATUS = AUTHORIZED PREFLIGHT ONLY / EXECUTION NOT AUTHORIZED
-GATE_C_PREFLIGHT_RESULT = BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
+GATE_C_STATUS = AUTHORIZED VERIFICATION ONLY / EXECUTION NOT AUTHORIZED
+GATE_C_VERIFY_RESULT = BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
 REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED
 
 ================================================================================
@@ -105,9 +105,16 @@ GATE_B_MANUAL_WORKFLOW_DISPATCH = 0
 ```
 
 Next Gate Direction:
-- Current active gate: NONE (Gate B Closed / Gate C Proposed, awaiting Owner Scope Decision).
-- Last merged gate: `P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1` (PASS / OWNER APPROVED / MERGED / COMPLETE, PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581, Review 5231880182: PASS).
-- Executed gate: `P4-WP020-LIVE-R5-VIDU2-RUN1` (PASS / CONSUMED / NEVER RERUN, Run 34569728383).
+- Current active package: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1` (READ-ONLY EXISTING-UAT-INFRA VERIFICATION / NO-PROVIDER / NO-PROVISIONING).
+- Current gate result: `BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`.
+- Last merged gate: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1` (PASS / MERGED / COMPLETE, PR #110, commit ead14bf9d9b36958618d0f6d6531ff44b9506492).
+- Active PR: PR #111 (OPEN / IN REVIEW / NOT MERGED).
+- Next Control Decision: `OWNER UAT INFRASTRUCTURE TARGET & CREDENTIAL CONFIGURATION DECISION` (Owner specifies existing UAT target configuration or separately authorizes provisioning).
+- Provisioning: NOT AUTHORIZED.
+- Backup / Restore: NOT AUTHORIZED.
+- REC1-RUN1: BLOCKED / NOT AUTHORIZED.
+- Provider Execution: NOT AUTHORIZED.
+- Executed gate: `P4-WP020-LIVE-R5-VIDU2-REC1-RUN1` (NOT AUTHORIZED / UNCONSUMED).
 - Consumed live runs:
   - `LIVE-20260910-VIDU2-R5` (Run 34569728383): PASS / CONSUMED / NEVER RERUN (1 POST, video present, credits reported 30.0, actual credits consumed UNKNOWN / NOT CONFIRMED).
   - `LIVE-20260909-VIDU1-R5` (Run 34423580310): STOPPED / CONSUMED / NEVER RERUN (1 POST, HTTP status UNKNOWN, credits UNKNOWN / NOT CONFIRMED).
@@ -119,22 +126,23 @@ Next Gate Direction:
 ## Pre-Merge PR Review Routing (In-Flight Execution Note)
 
 > [!NOTE]
-> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1 (Gate B) review/merge gate only.
+> This section is an execution-flight reference for the P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1 (Gate C Infrastructure Verification) review/merge gate only.
 
 ```text
-GATE = P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1
-TYPE = Gate B Execution Harness, Standalone Schema & Failure Matrix (NO-PROVIDER)
-PR = #108 (https://github.com/rebootob/Orbis-Video-Studio-AI/pull/108)
-BRANCH = ai/p4-wp020-live-r5-vidu2-rec1-harness1
-AUTHORIZED_BASE_MAIN = ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7
+GATE = P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1
+TYPE = Gate C Infrastructure Verification (READ-ONLY EXISTING-UAT-INFRA VERIFICATION / NO-PROVIDER / NO-PROVISIONING)
+PR = #111 (https://github.com/rebootob/Orbis-Video-Studio-AI/pull/111)
+BRANCH = ai/p4-wp020-rec1-gatec-infra-verify1
+AUTHORIZED_BASE_MAIN = ead14bf9d9b36958618d0f6d6531ff44b9506492
 STATUS = OPEN / IN REVIEW / NOT MERGED (AWAITING CHATGPT INDEPENDENT REVIEW / OWNER NEXT-GATE DECISION)
-REVIEW_5198347460 = CHANGES REQUIRED (ADDRESSING BLOCKERS ON PR #108)
+REVIEW_5234712618 = CHANGES REQUIRED (ADDRESSING STALE CONTROL STATE IN ROUTED DOCS ON PR #111)
 ```
 
 Pre-Merge Action Routing:
-- Fresh-fetch canonical `main` and branch `ai/p4-wp020-live-r5-vidu2-rec1-harness1`.
-- Verify exact-head CI success on PR #108.
+- Fresh-fetch canonical `main` and branch `ai/p4-wp020-rec1-gatec-infra-verify1`.
+- Verify exact-head CI success on PR #111.
 - Confirm NO-PROVIDER scope (zero real provider GET/POST calls, zero paid calls, zero new generation).
+- Confirm NO-PROVISIONING scope (zero cloud resources created, zero billing changes).
 - Present for ChatGPT independent review on GitHub.
 - STOP for explicit Owner decision. DO NOT merge without Owner approval.
 
