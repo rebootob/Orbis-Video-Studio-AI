@@ -6,12 +6,14 @@
 PROJECT: Orbis Video Studio AI
 REPOSITORY: rebootob/Orbis-Video-Studio-AI
 PACKAGE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1
-MODE: RESUME EVIDENCE / OWNER-ADMIN INPUT CAPTURE ONLY
-OWNER_AUTHORIZATION: ALREADY APPROVED IN CHAT 2026-09-18
+MODE: BOUNDED DOCS-ONLY CORRECTIVE / OWNER-ADMIN INPUT CAPTURE
+OWNER_AUTHORIZATION: Issue #63 comment 5725424016
 AUTHORIZED_BASE: 92ce4665529cbe99ecb4c30cf28e59fd786b0599
 AUTHORIZATION_COMMENT_ID: 5725424016
 AUTHORIZATION_COMMENT_URL: https://github.com/rebootob/Orbis-Video-Studio-AI/issues/63#issuecomment-5725424016
 AUTHORIZED_BRANCH: ai/p4-wp020-rec1-gatec-infra-owner-admin-input1
+TARGET_PR: 117
+INDEPENDENT_REVIEW: 5244725136
 
 # ACCEPTED PREDECESSOR EVIDENCE
 PREDECESSOR_PACKAGE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PATHA-DISCOVERY1-CLOSE
@@ -65,58 +67,123 @@ RELEASE_ACTIONS: 0
 
 ## 1. Input Capture Assessment
 
-In accordance with package instructions:
+In accordance with package instructions and repository governance:
 - No infrastructure data has been invented.
-- PR #115 read-only discovery concluded that no live UAT database or storage targets were identified within repository configuration, requiring explicit Owner/Admin input.
-- In this package execution, no new external Owner/Admin infrastructure identifiers, configuration targets, or credentials references were supplied.
-- As required by the governance rules, missing information is NOT interpreted as infrastructure absence, but rather recorded conservatively as:
+- PR #115 read-only discovery established that repository configuration contains no live UAT database or storage targets.
+- PR #116 formally closed Path A discovery with `FINAL_RESULT = OWNER_ADMIN_INPUT_REQUIRED`.
+- Under the current package execution, no new direct external Owner/Admin infrastructure identifiers, configuration targets, or credentials references have been supplied.
+- Missing information is NOT interpreted as infrastructure absence, but rather recorded conservatively as:
   **`FINAL_RESULT = OWNER_ADMIN_INPUT_STILL_INCOMPLETE`**.
 
 ---
 
-## 2. Missing-Input Classification Matrix
+## 2. Canonical Infrastructure Input Matrix
 
-| Domain | Parameter / Metadata Field | Status | Value | Source | Confidence |
+All required canonical fields are explicitly itemized below with standard classification:
+
+| Domain | Field | STATUS | VALUE | SOURCE | CONFIDENCE |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **POSTGRESQL** | Host / Endpoint Identifier | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Port | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Database Name | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Role / User Identifier | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | SSL / TLS Mode Requirement | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Dedicated UAT Isolation Confirmation | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Backup / Snapshot Capability | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **POSTGRESQL** | Restore / Rollback Verification Capability | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **OBJECT STORAGE** | Provider / Service Type (e.g. S3, GCS) | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **OBJECT STORAGE** | Endpoint URL / Region Identifier | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **OBJECT STORAGE** | Bucket Name | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **OBJECT STORAGE** | Retention / Lifecycle Policy | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **OBJECT STORAGE** | Dedicated UAT Bucket Isolation | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COMPUTE / RUNTIME** | Target Execution Host / Runner Environment | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COMPUTE / RUNTIME** | Network Route / Security Group Egress to DB & S3 | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COMPUTE / RUNTIME** | Runtime Isolation Boundary | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **SECRET REFERENCES** | PostgreSQL Secret Reference Name (e.g. secret key identifier) | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **SECRET REFERENCES** | Object Storage Access Key Secret Reference Name | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **SECRET REFERENCES** | Object Storage Secret Key Reference Name | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **SECRET REFERENCES** | AI Provider API Key Reference Name | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COST / OWNERSHIP** | Account / Project / Subscription ID (non-secret) | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COST / OWNERSHIP** | Billing / Budget Ceiling Confirmation | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
-| **COST / OWNERSHIP** | Owner Authority Decision (Bind Path A vs Provision Path B) | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_VERSION | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_HOST_OR_ENDPOINT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_PORT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_DATABASE_IDENTITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_SERVICE_IDENTITY_REFERENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_OWNER | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_ENVIRONMENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_PRODUCTION_SEPARATION_EVIDENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_BACKUP_CAPABILITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **POSTGRESQL** | POSTGRES_RESTORE_CAPABILITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_TYPE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_ENDPOINT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_BUCKET | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_PREFIX | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_OWNER | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_ENVIRONMENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_PRODUCTION_SEPARATION_EVIDENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_RETENTION_CAPABILITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **OBJECT STORAGE** | OBJECT_STORAGE_RECOVERY_CAPABILITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | COMPUTE_TYPE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | COMPUTE_TARGET_IDENTITY | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | COMPUTE_OWNER | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | COMPUTE_ENVIRONMENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | COMPUTE_PRODUCTION_SEPARATION_EVIDENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | NETWORK_BOUNDARY_DESCRIPTION | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | POSTGRES_CONNECTIVITY_INTENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COMPUTE / RUNTIME** | OBJECT_STORAGE_CONNECTIVITY_INTENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **SECRET REFERENCES** | DATABASE_SECRET_REFERENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **SECRET REFERENCES** | OBJECT_STORAGE_SECRET_REFERENCE | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **SECRET REFERENCES** | APPLICATION_SECRET_REFERENCE_MECHANISM | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COST / OWNERSHIP** | INFRA_EXISTING_OR_NEW | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COST / OWNERSHIP** | INCREMENTAL_COST_CLASSIFICATION | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COST / OWNERSHIP** | LICENSE_REQUIREMENT | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
+| **COST / OWNERSHIP** | BILLING_OWNER | NOT PROVIDED | NONE | N/A | NOT VERIFIED |
 
-*Note: In accordance with zero-leakage security rules, secret values, passwords, private keys, and raw tokens are never requested, stored, or accepted.*
+### Supplemental Security Notes
+- Zero-leakage security constraints apply unconditionally.
+- Secret values, passwords, private keys, API keys, and raw tokens are strictly prohibited from being requested, printed, committed, or recorded.
 
 ---
 
-## 3. Summary of Missing Required Inputs
+## 3. OWNER_ADMIN_INPUT_REQUEST
 
-To make a Gate C decision (between Path A binding or Path B provisioning), the following information remains missing:
+To advance Gate C beyond the input capture stage (toward either Path A binding or Path B provisioning), the following canonical non-secret infrastructure metadata must be supplied by the Owner/Admin:
 
-1. **PostgreSQL Target Specification**: Target hostname/endpoint, database name, and secret reference name.
-2. **Object Storage Target Specification**: Target bucket name, region/endpoint, and secret reference names.
-3. **Target Execution Environment**: Confirmation of the compute/runner boundary having network access to the database and object store.
-4. **Owner Decision Signoff**: Explicit direction whether to bind existing infrastructure (Path A) or provision new isolated UAT infrastructure (Path B).
+### A. PostgreSQL Input Request
+- `POSTGRES_VERSION`: Engine version (must satisfy PostgreSQL 16+ constraint).
+- `POSTGRES_HOST_OR_ENDPOINT`: Target database hostname or network endpoint.
+- `POSTGRES_PORT`: Port number (e.g. 5432).
+- `POSTGRES_DATABASE_IDENTITY`: Name of dedicated UAT database.
+- `POSTGRES_SERVICE_IDENTITY_REFERENCE`: Dedicated service role / non-admin user identity name.
+- `POSTGRES_OWNER`: Administrative owner or team responsible for DB instance.
+- `POSTGRES_ENVIRONMENT`: Explicit environment designation (`UAT` / `STAGING`).
+- `POSTGRES_PRODUCTION_SEPARATION_EVIDENCE`: Isolation evidence proving logical/physical separation from production.
+- `POSTGRES_BACKUP_CAPABILITY`: Point-in-time recovery / snapshot schedule and mechanism.
+- `POSTGRES_RESTORE_CAPABILITY`: Verified procedure for database restore.
 
-Until these inputs are supplied by the Owner/Admin, the project conservatively remains at:
-`FINAL_RESULT = OWNER_ADMIN_INPUT_STILL_INCOMPLETE`
-`BIND1_STATUS = NOT AUTHORIZED`
-`PROVISION1_STATUS = NOT AUTHORIZED`
-`REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+### B. Object Storage Input Request
+- `OBJECT_STORAGE_TYPE`: Storage protocol/service type (e.g. AWS S3, Cloudflare R2, MinIO).
+- `OBJECT_STORAGE_ENDPOINT`: Target S3 API endpoint URL and region identifier.
+- `OBJECT_STORAGE_BUCKET`: Target bucket name dedicated to UAT.
+- `OBJECT_STORAGE_PREFIX`: Designated path prefix for video studio asset outputs.
+- `OBJECT_STORAGE_OWNER`: Administrative owner or team responsible for bucket.
+- `OBJECT_STORAGE_ENVIRONMENT`: Explicit environment designation (`UAT`).
+- `OBJECT_STORAGE_PRODUCTION_SEPARATION_EVIDENCE`: Verification that bucket cannot collide with or mutate production data.
+- `OBJECT_STORAGE_RETENTION_CAPABILITY`: Object retention and lifecycle policies.
+- `OBJECT_STORAGE_RECOVERY_CAPABILITY`: Versioning or backup/recovery provisions.
+
+### C. Compute / Runtime Input Request
+- `COMPUTE_TYPE`: Hosting environment (e.g. GitHub Actions self-hosted runner, ECS, EKS, VM, Docker host).
+- `COMPUTE_TARGET_IDENTITY`: Name / identifier of execution host or cluster.
+- `COMPUTE_OWNER`: Infrastructure team or person managing compute.
+- `COMPUTE_ENVIRONMENT`: Explicit environment designation (`UAT`).
+- `COMPUTE_PRODUCTION_SEPARATION_EVIDENCE`: Isolation guarantees separating UAT runtime from production compute.
+- `NETWORK_BOUNDARY_DESCRIPTION`: VPC / security group / network firewall perimeter description.
+- `POSTGRES_CONNECTIVITY_INTENT`: Intended routing mechanism to reach PostgreSQL endpoint.
+- `OBJECT_STORAGE_CONNECTIVITY_INTENT`: Intended routing mechanism to reach Object Storage endpoint.
+
+### D. Secret References Input Request
+- `DATABASE_SECRET_REFERENCE`: Vault/Secrets Manager key name or environment variable identifier pointing to DB credentials (do NOT provide secret values).
+- `OBJECT_STORAGE_SECRET_REFERENCE`: Vault/Secrets Manager key name or environment variable identifier pointing to S3 credentials (do NOT provide secret values).
+- `APPLICATION_SECRET_REFERENCE_MECHANISM`: Mechanism used to securely inject references into runtime (e.g. GitHub Secrets, AWS Secrets Manager, Doppler).
+
+### E. Cost / Ownership Input Request
+- `INFRA_EXISTING_OR_NEW`: Explicit declaration whether target infrastructure is existing pre-allocated infra (Path A) or newly provisioned infra (Path B).
+- `INCREMENTAL_COST_CLASSIFICATION`: Expected recurring / incremental cost impact (e.g. within existing UAT budget vs new allocated line item).
+- `LICENSE_REQUIREMENT`: Any external software licenses required.
+- `BILLING_OWNER`: Account, project, or cost center ID assigned to infrastructure billing.
+
+### Security Boundary Notice
+DO NOT PROVIDE OR REQUEST:
+- Passwords
+- Secret tokens
+- API key values
+- Private keys
+- Any confidential credential material
+
+Until the Owner/Admin explicitly supplies the non-secret metadata listed above, repository governance holds:
+```text
+FINAL_RESULT = OWNER_ADMIN_INPUT_STILL_INCOMPLETE
+BIND1_STATUS = NOT AUTHORIZED
+PROVISION1_STATUS = NOT AUTHORIZED
+REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED / UNCONSUMED
+```
