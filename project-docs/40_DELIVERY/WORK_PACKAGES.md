@@ -122,12 +122,14 @@ PREV17_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-REC1-PREP
 PREV17_COMPLETED_STATUS = PASS / MERGED / COMPLETE (PR #103, commit 7ff516f317f84278f6143f15cc58b91fd3fa34d5)
 GATE_B_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE
 ROUTED_CHECKPOINT: project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md
-GATE_C_STATUS: LOCAL-PC DESIGN COMPLETE / WAITING FOR EXPLICIT OWNER NEXT-GATE DECISION
-DISCOVERY_RESULT: LOCALPC_DESIGN_DOCUMENTED
+GATE_C_STATUS: LOCAL-PC READINESS INSPECTED / WAITING FOR OWNER PROVISION DECISION
+FINAL_RESULT: LOCALPC_PROVISION_READINESS = READY_FOR_OWNER_PROVISION_DECISION
+DISCOVERY_RESULT: LOCALPC_HOST_READINESS_INSPECTED
+FINAL_RESULT_MEANING: READ-ONLY HOST READINESS COMPLETE / READY FOR OWNER PROVISION DECISION ONLY
 BIND1_ELIGIBILITY: NOT YET PROVEN
 BIND1_STATUS: NOT AUTHORIZED
 PROVISION1_STATUS: NOT AUTHORIZED
-PATH_A_STATUS: LOCAL-PC DESIGN DELIVERED / BIND1 ELIGIBILITY NOT PROVEN
+PATH_A_STATUS: LOCAL-PC READINESS INSPECTED / BIND1 ELIGIBILITY NOT PROVEN
 PATH_B_STATUS: PROPOSED / NOT AUTHORIZED
 HISTORICAL_GATE_C_VERIFY_RESULT: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
 REC1_RUN1_STATUS: BLOCKED / NOT AUTHORIZED / UNCONSUMED
@@ -138,7 +140,7 @@ NEXT/FUTURE PAID/LIVE EXECUTION: NONE / NOT AUTHORIZED
 Current baseline:
 
 ```text
-current authorized base main: 8891efbbc2a60433db6c94d7c995d6be25263d94 (historical Gate C local PC design merge: 8891efbbc2a60433db6c94d7c995d6be25263d94; historical Gate C Owner/Admin input close merge: 6a8c0d2b55c74163a16faa15a30fb693a6d19e24; historical Gate C Owner/Admin input merge: addf1db25bc8f197f215f24c937d89b66be08403; historical Gate C Path A discovery close merge: 92ce4665529cbe99ecb4c30cf28e59fd786b0599; historical Gate C Path A discovery merge: 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7; historical Gate C decision close merge: cefab1275bf8194f161f97b1a27f6bd50b129eee; historical Gate C decision merge: 71476a435013e78d0736cafc2af8c5cb6e27b5fe; historical Gate C verify close merge: cb20631556bafdeaf17373fca3fd7ef8d9234c80; historical Gate C infrastructure preflight baseline: ead14bf9d9b36958618d0f6d6531ff44b9506492; historical HARNESS1-CLOSE merge: 79bf07cb7907b542d68871c7bc493e72d9562e8a; historical HARNESS1 merge: b605a4d9928a7411a7f41cd7058d3a8fbceae581; historical CONTRACT1-CLOSE merge: ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7; historical CONTRACT1 merge: e09ee2127d0a20c01f6aad38eb759e5bfba7e248; historical READY1 merge: 0326def88915b25fbb4e2b7019753c2b3fedc0f7; historical REC1-PREP-CLOSE merge: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c; historical REC1-PREP merge: 7ff516f317f84278f6143f15cc58b91fd3fa34d5; historical FINAL-GAP1-CLOSE merge: 8cae4bd72bd447470f214cf852b516b856638b7f; historical FINAL-GAP1 merge: a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0; historical VIDU2-RUN1-CLOSE merge: 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
+current authorized base main: de00f791be89cb73650b4ed7b0c8385b89695af4 (historical Gate C local PC design close merge: de00f791be89cb73650b4ed7b0c8385b89695af4; historical Gate C local PC design merge: 8891efbbc2a60433db6c94d7c995d6be25263d94; historical Gate C Owner/Admin input close merge: 6a8c0d2b55c74163a16faa15a30fb693a6d19e24; historical Gate C Owner/Admin input merge: addf1db25bc8f197f215f24c937d89b66be08403; historical Gate C Path A discovery close merge: 92ce4665529cbe99ecb4c30cf28e59fd786b0599; historical Gate C Path A discovery merge: 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7; historical Gate C decision close merge: cefab1275bf8194f161f97b1a27f6bd50b129eee; historical Gate C decision merge: 71476a435013e78d0736cafc2af8c5cb6e27b5fe; historical Gate C verify close merge: cb20631556bafdeaf17373fca3fd7ef8d9234c80; historical Gate C infrastructure preflight baseline: ead14bf9d9b36958618d0f6d6531ff44b9506492; historical HARNESS1-CLOSE merge: 79bf07cb7907b542d68871c7bc493e72d9562e8a; historical HARNESS1 merge: b605a4d9928a7411a7f41cd7058d3a8fbceae581; historical CONTRACT1-CLOSE merge: ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7; historical CONTRACT1 merge: e09ee2127d0a20c01f6aad38eb759e5bfba7e248; historical READY1 merge: 0326def88915b25fbb4e2b7019753c2b3fedc0f7; historical REC1-PREP-CLOSE merge: ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c; historical REC1-PREP merge: 7ff516f317f84278f6143f15cc58b91fd3fa34d5; historical FINAL-GAP1-CLOSE merge: 8cae4bd72bd447470f214cf852b516b856638b7f; historical FINAL-GAP1 merge: a62d0ebfb1d56aedecfe17c85e5d67752f8de6c0; historical VIDU2-RUN1-CLOSE merge: 1bdcaff64ab756e7144f45f0af44eca1e1bad731)
 VIDU2_CONSUMED_EXECUTION_ID: LIVE-20260910-VIDU2-R5
 VIDU2_CONSUMED_RUN: 34569728383
 VIDU2_CONSUMED_STATUS: PASS / CONSUMED / NEVER RERUN
