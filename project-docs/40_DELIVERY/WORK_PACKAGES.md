@@ -647,7 +647,7 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
 
 - **Dedicated Branch**: `ai/p4-wp020-rec1-gatec-infra-localpc-provision-prep1`
 - **Base Commit**: `de00f791be89cb73650b4ed7b0c8385b89695af4` (Merged PR #120)
-- **Status**: `ACTIVE / DELIVERED / WAITING FOR REVIEW`
+- **Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #121, merge commit 252b77fd3d567b0e6e1e743f11be4e60e55cebc8)`
 - **Deliverable**: `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_REC1_GATEC_INFRA_LOCALPC_PROVISION_PREP1.md`
 - **Authorization**: Owner authorization comment `5730593422` (Issue #63)
 - **Findings & Invariant Rules**:
@@ -679,6 +679,45 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
   - `OBJECT_WRITES = 0`
   - `BACKUP_EXECUTIONS = 0`
   - `RESTORE_EXECUTIONS = 0`
+  - `REAL_VIDU_GET_CALLS = 0`
+  - `VIDU_GENERATION_POSTS = 0`
+  - `OPENAI_PROVIDER_CALLS = 0`
+  - `GEMINI_PROVIDER_CALLS = 0`
+  - `ELEVENLABS_PROVIDER_CALLS = 0`
+  - `REAL_AI_PROVIDER_CALLS = 0`
+  - `PAID_PROVIDER_CALLS = 0`
+  - `REC1_RUN1_DISPATCHES = 0`
+  - `DEPLOYMENTS = 0`
+  - `RELEASE_ACTIONS = 0`
+
+---
+
+### P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-LOCALPC-PROVISION1 — Gate C Local PC Infrastructure Provisioning & Verification
+
+- **Dedicated Branch**: `ai/p4-wp020-rec1-gatec-infra-localpc-provision1`
+- **Target PR**: **[PR #122 (Open)](https://github.com/rebootob/Orbis-Video-Studio-AI/pull/122)**
+- **Base Commit**: `252b77fd3d567b0e6e1e743f11be4e60e55cebc8` (Merged PR #121)
+- **Status**: `OPEN / IN REVIEW`
+- **Deliverable**: `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_REC1_GATEC_INFRA_LOCALPC_PROVISION1.md`
+- **Authorization**: Owner authorization comment `5731106521` (Issue #63)
+- **Findings & Invariant Rules**:
+  - `LOCALPC_PROVISION_RESULT = PASS`
+  - `POSTGRES_STATUS = Up (healthy)`
+  - `POSTGRES_DATABASE_IDENTITY = orbis_studio (38 tables, head 022_provider_execution_fences_and_audits)`
+  - `POSTGRES_PERSISTENCE_CHECK = PASS`
+  - `MINIO_STATUS = Up (healthy)`
+  - `MINIO_BUCKET = orbis-assets, orbis-media-assets`
+  - `MINIO_PERSISTENCE_CHECK = PASS`
+  - `LOCALHOST_BINDINGS = 127.0.0.1:5434:5432, 127.0.0.1:9000:9000, 127.0.0.1:9001:9001`
+  - `SECRET_REFERENCE_VALIDATION = PASS (docker-compose uses secret references only: ${POSTGRES_PASSWORD}, ${OBJECT_STORAGE_ACCESS_KEY}, ${OBJECT_STORAGE_SECRET_KEY})`
+  - `SECRET_DISCLOSURES = 0`
+  - `RECOVERY_AUTH_SOURCE_DELTA = REVERTED (0 lines changed against origin/main)`
+  - `BIND1_STATUS = NOT AUTHORIZED`
+  - `BIND1_ELIGIBILITY = READY_FOR_OWNER_BIND_DECISION`
+  - `REC1_RUN1_STATUS = BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+  - `WP020 = ACTIVE / NOT CLOSED`
+  - `Core V1 = 19/20 (95%)`
+  - `Release = NOT DECLARED`
   - `REAL_VIDU_GET_CALLS = 0`
   - `VIDU_GENERATION_POSTS = 0`
   - `OPENAI_PROVIDER_CALLS = 0`

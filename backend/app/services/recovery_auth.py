@@ -42,10 +42,6 @@ AUTHORIZED_RUNTIME_TARGET_PROFILES = {
             "postgresql://localhost:5432/orbis_studio",
             "postgresql://127.0.0.1:5432/orbis_studio",
             "postgresql://postgres:5432/orbis_studio",
-            "postgresql+psycopg://localhost:5434/orbis_studio",
-            "postgresql+psycopg://127.0.0.1:5434/orbis_studio",
-            "postgresql://localhost:5434/orbis_studio",
-            "postgresql://127.0.0.1:5434/orbis_studio",
         ],
         "trusted_storage_identities": [
             "mock://local/orbis-media-assets",
