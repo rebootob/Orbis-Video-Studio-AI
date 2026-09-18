@@ -43,8 +43,11 @@ All discovery operations were strictly read-only metadata probes with zero confi
      - `VIDU_API_KEY`
    - *Note*: No database credentials, object storage credentials, or UAT infrastructure endpoints are registered in repository secrets.
 5. **Local / Host CLI Tooling & Services**:
-   - Installed CLIs: `docker` (daemon stopped), `aws` (not installed), `gcloud` (not installed), `az` (not installed), `psql` (not installed), `pg_isready` (not installed).
-   - Local Docker runtime: No active containers; daemon not accessible.
+   - Installed CLIs: `docker` (CLI installed), `aws` (not installed), `gcloud` (not installed), `az` (not installed), `psql` (not installed), `pg_isready` (not installed).
+   - Local Docker runtime:
+     - DOCKER_CLI = INSTALLED
+     - DOCKER_DAEMON = NOT ACCESSIBLE / NOT VERIFIED
+     - ACTIVE_CONTAINER_STATE = UNKNOWN / NOT VERIFIED
 6. **Repository Configuration Templates & Metadata**:
    - `docker-compose.yml`: Defines local development containers (`postgres:16-alpine`, `minio/minio:RELEASE.2024-03-03T17-50-39Z`, `backend`, `render-worker`). No remote UAT endpoints configured.
    - `.env.example`: References default development hostnames (`db`, `minio`).
@@ -57,7 +60,7 @@ All discovery operations were strictly read-only metadata probes with zero confi
 ### 3.1 PostgreSQL Target Findings
 
 ```yaml
-POSTGRES_TARGET_EXISTENCE: NOT_VERIFIED
+POSTGRES_TARGET_EXISTENCE: UNKNOWN / NOT VERIFIED
 POSTGRES_TARGET_IDENTITY: UNRESOLVED
 POSTGRES_VERSION: UNRESOLVED (Required: 16+)
 POSTGRES_ISOLATION: UNRESOLVED (Required: Isolated from Production)
@@ -70,7 +73,7 @@ POSTGRES_RESTORE_CAPABILITY: UNRESOLVED
 ### 3.2 Object Storage Target Findings
 
 ```yaml
-OBJECT_STORAGE_TARGET_EXISTENCE: NOT_VERIFIED
+OBJECT_STORAGE_TARGET_EXISTENCE: UNKNOWN / NOT VERIFIED
 OBJECT_STORAGE_TARGET_IDENTITY: UNRESOLVED
 OBJECT_STORAGE_TYPE: UNRESOLVED (Required: S3-compatible / MinIO)
 OBJECT_STORAGE_REGION: UNRESOLVED
@@ -83,7 +86,7 @@ OBJECT_STORAGE_RETENTION_CAPABILITY: UNRESOLVED
 ### 3.3 Compute Target Findings
 
 ```yaml
-COMPUTE_TARGET_EXISTENCE: NOT_VERIFIED
+COMPUTE_TARGET_EXISTENCE: UNKNOWN / NOT VERIFIED
 COMPUTE_TARGET_IDENTITY: UNRESOLVED
 COMPUTE_PLATFORM: UNRESOLVED
 COMPUTE_ENVIRONMENT: UNRESOLVED
@@ -96,7 +99,7 @@ COMPUTE_OWNERSHIP: UNRESOLVED
 ### 3.4 Isolation Findings
 
 ```yaml
-ISOLATION_STATUS: UNRESOLVED / CANNOT BE EVALUATED
+ISOLATION_STATUS: UNKNOWN / NOT VERIFIED
 REASON: No existing UAT infrastructure target metadata is currently present to evaluate network boundaries, tenancy, or isolation from Production.
 ```
 
@@ -105,13 +108,16 @@ REASON: No existing UAT infrastructure target metadata is currently present to e
 ## 4. Secret Reference Mechanism & Safety
 
 ```yaml
-SECRET_REFERENCE_MECHANISM: GitHub Repository Secrets / Environment Secrets
-SECRET_REFERENCE_NAMES_OBSERVED:
+SECRET_REFERENCE_MECHANISM_OBSERVED: GitHub Repository Secrets
+GITHUB_REPOSITORY_SECRET_NAMES_OBSERVED:
   - ELEVENLABS_API_KEY
   - ELEVENLABS_DEFAULT_VOICE_ID
   - GEMINI_API_KEY
   - OPENAI_API_KEY
   - VIDU_API_KEY
+GITHUB_ENVIRONMENTS: NONE CONFIGURED
+GITHUB_ENVIRONMENT_SECRETS: NOT CONFIGURED / NOT OBSERVED
+FUTURE_SECRETS_MECHANISM: FUTURE_CANDIDATE / NOT CURRENTLY CONFIGURED (GitHub Environment Secrets)
 REQUIRED_SECRET_NAMES_FOR_PATH_A:
   - POSTGRES_PASSWORD (or UAT_POSTGRES_PASSWORD)
   - OBJECT_STORAGE_ACCESS_KEY (or UAT_OBJECT_STORAGE_ACCESS_KEY)
@@ -125,8 +131,8 @@ SECRET_VALUES_INSPECTED: FALSE
 ## 5. Backup & Restore Capabilities
 
 ```yaml
-BACKUP_CAPABILITY: UNRESOLVED
-RESTORE_CAPABILITY: UNRESOLVED
+BACKUP_CAPABILITY: UNKNOWN / NOT VERIFIED
+RESTORE_CAPABILITY: UNKNOWN / NOT VERIFIED
 NOTE: Requires Owner/Admin declaration of automated backup snapshots, WAL archiving, or object lifecycle retention policies for the target environment.
 ```
 
