@@ -203,7 +203,7 @@ Tooling Delivered:
 
 Tooling Invariants & Request Contract:
 - Target model: `viduq2`, mode: `text-to-video`, duration: `4.0`s, aspect ratio: `16:9`, resolution: exact `720p` (never `720P`).
-- Endpoint: `POST https://api.vidu.com/ent/v2/text2video`, headers: `Authorization: Token *** `Content-Type: application/json`.
+- Endpoint: `POST https://api.vidu.com/ent/v2/text2video`, headers: `Authorization: Token <key>`, `Content-Type: application/json`.
 - `MAX_GENERATION_POSTS = 1`.
 - Safe HTTP status diagnostics: integer `provider_http_status` and enum `failure_classification`. Raw response bodies and secrets excluded.
 - Zero calls to OpenAI, Gemini, ElevenLabs.
@@ -242,7 +242,7 @@ Immutable Consumed Live Execution Truth (Run 34423580310):
 Delivered Diagnostic Corrective:
 - Added safe HTTP status evidence (`provider_http_status`: typed integer 100–599) and typed `failure_classification` (`HTTP_CLIENT_ERROR`, `HTTP_RATE_LIMITED`, `HTTP_SERVER_ERROR`) to `.github/scripts/wp020_live_r5_vidu1.py`;
 - Updated workflow canonical base SHA to `5a818b9dbf642b1e456dba51c9a80745d966919e`;
-- Verified outbound Vidu request contract (POST `/text2video`, headers `Authorization: Token *** `Content-Type: application/json`, payload `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720p` (with adapter normalization from `720P`)) in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
+- Verified outbound Vidu request contract (POST `/text2video`, headers `Authorization: Token <API_KEY>`, `Content-Type: application/json`, payload `model=viduq2`, `duration=4`, `aspect_ratio=16:9`, `resolution=720p` (with adapter normalization from `720P`)) in `backend/tests/test_wp020_live_r5_vidu1_contract.py`;
 - Added automated mock tests for HTTP 400, 401, 403, 429, and 500 failure responses;
 - Verified evidence sanitization excludes raw response bodies, headers, and secrets;
 - Verified `MAX_GENERATION_POSTS = 1` and zero calls to other providers;
@@ -270,7 +270,7 @@ Delivered Corrective Changes:
 - `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU1_COR1.md`: delivery specification.
 
 Fresh Authorization Requirement:
-- **COR1 NO-PAID Owner authorization:*** Issue #63 comment `5604486823` — authorizes only this NO-PAID corrective work package.
+- **COR1 NO-PAID Owner authorization:** Issue #63 comment `5604486823` — authorizes only this NO-PAID corrective work package.
 - **Prior paid VIDU1 authorization marker:** Issue #63 comment `5603798466` — contains `FRESH_OWNER_AUTHORIZED_VIDU1: LIVE-20260909-VIDU1-R5 @ 42d789efdb49725b1dd45b312ce39cb71ac02d1e`, bound to SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e`.
 - The prior paid marker at comment `5603798466` was bound to old canonical main SHA `42d789efdb49725b1dd45b312ce39cb71ac02d1e` and MUST NOT be reused after PR #93 merges to `main`.
 - Any future paid probe requires a fresh explicit Owner authorization with a fresh exact marker bound to the new post-merge canonical main SHA.
@@ -327,7 +327,7 @@ Accepted preflight evidence:
   paid_live_dispatch = false
   ```
 
-Closure authorization: Issue *** comment `5601980565` (merged to main in PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`).
+Closure authorization: Issue #63 comment `5601980565` (merged to main in PR #90 commit `817539b619c4b28f22273ff01df733c612a2a386`).
 
 ---
 
