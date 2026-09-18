@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "orbis_user"
     POSTGRES_PASSWORD: str = ""
-    POSTGRES_DB: str = "orbis_db"
+    POSTGRES_DB: str = "orbis_studio"
 
     # Object Storage Settings (S3-compatible)
     OBJECT_STORAGE_ENDPOINT: Optional[str] = None
