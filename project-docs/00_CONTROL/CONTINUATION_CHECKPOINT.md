@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Gate C Infrastructure Readiness Verification (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1)
+> Updated: Gate C UAT Infrastructure Decision Preparation (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1-CLOSE)
 
 ---
 
@@ -10,16 +10,17 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `cb20631556bafdeaf17373fca3fd7ef8d9234c80`
-- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1`
+- **Canonical Base Main**: `71476a435013e78d0736cafc2af8c5cb6e27b5fe`
+- **Active Work Package**: `NONE`
 - **Active Execution Package**: `NONE`
-- **Current Gate**: Gate C UAT Infrastructure Decision Preparation
+- **Current Gate**: Gate C UAT Infrastructure Decision Preparation Closed
 - **Next Control Decision**: `OWNER UAT INFRASTRUCTURE PATH DECISION`
 - **Next Recommended Action**: `OWNER SELECTS PATH A (BIND EXISTING) OR PATH B (PROVISION NEW)`
 - **Future Provisioning**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
 - **Future Binding**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
-- **Gate C Status**: `VERIFIED / CLOSED / RESULT: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`
+- **Gate C Status**: `UAT INFRASTRUCTURE DECISION PREPARED / CLOSED / AWAITING OWNER PATH DECISION`
 - **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+- **Gate C UAT Infra Decision PR**: `PR #113 (Merged, commit 71476a435013e78d0736cafc2af8c5cb6e27b5fe, Final Review: 5242499165)`
 - **Gate C Verify Close PR**: `PR #112 (Merged, commit cb20631556bafdeaf17373fca3fd7ef8d9234c80, Final Review: 5237726029)`
 - **Gate C Verification PR**: `PR #111 (Merged, commit da39e32c35b689ba2d2852c7f9b5ca7961a1d92c, Final Review: 5236014614)`
 - **Gate C Preflight PR**: `PR #110 (Merged, commit ead14bf9d9b36958618d0f6d6531ff44b9506492)`
