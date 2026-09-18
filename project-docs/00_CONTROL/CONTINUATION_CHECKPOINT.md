@@ -10,15 +10,17 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `da39e32c35b689ba2d2852c7f9b5ca7961a1d92c`
-- **Active Work Package**: `NONE`
+- **Canonical Base Main**: `cb20631556bafdeaf17373fca3fd7ef8d9234c80`
+- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1`
 - **Active Execution Package**: `NONE`
-- **Current Gate**: Gate C Infrastructure Verification Closed / Result: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE
-- **Next Control Decision**: `OWNER UAT INFRASTRUCTURE TARGET & CREDENTIAL CONFIGURATION DECISION`
-- **Next Recommended Action**: `OWNER SPECIFIES EXISTING UAT TARGETS/CREDENTIALS OR AUTHORIZES PROVISIONING`
-- **Future Provisioning**: `NOT AUTHORIZED / PENDING OWNER DECISION`
+- **Current Gate**: Gate C UAT Infrastructure Decision Preparation
+- **Next Control Decision**: `OWNER UAT INFRASTRUCTURE PATH DECISION`
+- **Next Recommended Action**: `OWNER SELECTS PATH A (BIND EXISTING) OR PATH B (PROVISION NEW)`
+- **Future Provisioning**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
+- **Future Binding**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
 - **Gate C Status**: `VERIFIED / CLOSED / RESULT: BLOCKED_INFRA_CONFIGURATION_INCOMPLETE`
 - **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+- **Gate C Verify Close PR**: `PR #112 (Merged, commit cb20631556bafdeaf17373fca3fd7ef8d9234c80, Final Review: 5237726029)`
 - **Gate C Verification PR**: `PR #111 (Merged, commit da39e32c35b689ba2d2852c7f9b5ca7961a1d92c, Final Review: 5236014614)`
 - **Gate C Preflight PR**: `PR #110 (Merged, commit ead14bf9d9b36958618d0f6d6531ff44b9506492)`
 - **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)`
