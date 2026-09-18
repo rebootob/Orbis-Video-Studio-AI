@@ -1,127 +1,155 @@
-# Routed Continuation Checkpoint
+# Continuation Checkpoint: Orbis Video Studio AI
 
-> Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
->
-> Updated: Gate C Owner/Admin Infrastructure Input (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1)
-
----
-
-## 1. Work Package & Review Routing
-
-- **Project**: Orbis Video Studio AI
-- **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `92ce4665529cbe99ecb4c30cf28e59fd786b0599`
-- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1`
-- **Active Execution Package**: `NONE`
-- **Package Status**: `IN REVIEW / INPUT CAPTURE COMPLETE / NOT MERGED`
-- **Final Result**: `OWNER_ADMIN_INPUT_STILL_INCOMPLETE`
-- **Current Gate**: `Gate C Owner/Admin Infrastructure Input`
-- **Next Gate**: `INDEPENDENT CHATGPT REVIEW OF OWNER-ADMIN-INPUT1`
-- **Next Control Decision**: `OWNER / ADMIN INFRASTRUCTURE INPUT REQUIRED`
-- **Next Recommended Action**: `INDEPENDENT CHATGPT PR #117 REVIEW`
-- **Future Provisioning**: `NOT AUTHORIZED`
-- **Future Binding**: `NOT AUTHORIZED`
-- **Gate C Status**: `OWNER/ADMIN INFRASTRUCTURE INPUT IN REVIEW / STILL INCOMPLETE`
-- **DISCOVERY_RESULT**: `OWNER_ADMIN_INPUT_REQUIRED`
-- **BIND1_ELIGIBILITY**: `NOT YET PROVEN`
-- **BIND1_STATUS**: `NOT AUTHORIZED`
-- **PROVISION1_STATUS**: `NOT AUTHORIZED`
-- **PATH_A_STATUS**: `INPUT CAPTURE COMPLETE / OWNER-ADMIN INPUT STILL INCOMPLETE`
-- **PATH_B_STATUS**: `PROPOSED / NOT AUTHORIZED`
-- **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
-- **Owner Authorization Comment**: `5725424016`
-- **Target PR**: `117`
-- **Target Branch**: `ai/p4-wp020-rec1-gatec-infra-owner-admin-input1`
-- **Predecessor PR**: `116`
-- **Predecessor Merge Commit**: `92ce4665529cbe99ecb4c30cf28e59fd786b0599`
-- **Predecessor Reviewed Head**: `839fc5bf3f743c1c53db9f882e9f1ebaa1ff1e00`
-- **Predecessor Final Review**: `5244374032`
-- **Gate C Path A Discovery Close PR**: `PR #116 (Merged, commit 92ce4665529cbe99ecb4c30cf28e59fd786b0599, Reviewed Head: 839fc5bf3f743c1c53db9f882e9f1ebaa1ff1e00, Final Review: 5244374032)`
-- **Gate C Path A Discovery PR**: `PR #115 (Merged, commit 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7, Reviewed Head: 16563c6aba8415e707c6810d09cd41f41c718467, Final Review: 5244103387)`
-- **Gate C UAT Infra Decision Close PR**: `PR #114 (Merged, commit cefab1275bf8194f161f97b1a27f6bd50b129eee)`
-- **Gate C UAT Infra Decision PR**: `PR #113 (Merged, commit 71476a435013e78d0736cafc2af8c5cb6e27b5fe, Final Review: 5242499165)`
-- **Gate C Verify Close PR**: `PR #112 (Merged, commit cb20631556bafdeaf17373fca3fd7ef8d9234c80, Final Review: 5237726029)`
-- **Gate C Verification PR**: `PR #111 (Merged, commit da39e32c35b689ba2d2852c7f9b5ca7961a1d92c, Final Review: 5236014614)`
-- **Gate C Preflight PR**: `PR #110 (Merged, commit ead14bf9d9b36958618d0f6d6531ff44b9506492)`
-- **Gate B Status**: `PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)`
-- **Gate B Closeout PR**: `PR #109 (Merged, commit 79bf07cb7907b542d68871c7bc493e72d9562e8a)`
+> **Canonical File:** `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
+> **Repository:** `rebootob/Orbis-Video-Studio-AI`
+> **Canonical Base Main SHA:** `addf1db25bc8f197f215f24c937d89b66be08403`
+> **Updated:** Gate C Owner/Admin Infrastructure Input Post-Merge Closure (`P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1-CLOSE`)
 
 ---
 
-## 2. Reviews 5229784538 & 5229746282 Blocker Resolution Summary
+## 1. Executive Status & Positioning
 
-1. **Eliminate Mutable Test Deployment Override**:
-   - Completely eliminated `_TEST_DEPLOYMENT_RECORD` and `set_deployment_record_for_testing` from `backend/app/services/recovery_auth.py`.
-   - Replaced with `set_isolated_test_deployment_path()` which only accepts file paths and enforces full production security validation.
+```text
+PROJECT: Orbis Video Studio AI
+REPOSITORY: rebootob/Orbis-Video-Studio-AI
+CANONICAL_BRANCH: main
+CANONICAL_BASE_MAIN_SHA: addf1db25bc8f197f215f24c937d89b66be08403
 
-2. **Trusted File Security Policy & Atomic O_NOFOLLOW**:
-   - Enforced symlink rejection on both the file and its parent hierarchy.
-   - Atomic `os.open` with `O_RDONLY | O_NOFOLLOW` and descriptor `os.fstat` checks.
-   - Fail-closed mode verification rejecting world-writable and group-writable permissions on POSIX.
+ACTIVE_WORK_PACKAGE: NONE
+ACTIVE_EXECUTION_PACKAGE: NONE
+PACKAGE_STATUS: POST-MERGE CLOSED / COMPLETE
+FINAL_RESULT: OWNER_ADMIN_INPUT_STILL_INCOMPLETE
+DISCOVERY_RESULT: OWNER_ADMIN_INPUT_REQUIRED
+BIND1_ELIGIBILITY: NOT YET PROVEN
+BIND1_STATUS: NOT AUTHORIZED
+PROVISION1_STATUS: NOT AUTHORIZED
+PATH_A_STATUS: OWNER-ADMIN INPUT STILL INCOMPLETE / BIND1 ELIGIBILITY NOT PROVEN
+PATH_B_STATUS: PROPOSED / NOT AUTHORIZED
+REC1_RUN1_STATUS: BLOCKED / NOT AUTHORIZED / UNCONSUMED
 
-3. **Mandatory Ed25519 Cryptographic Signature & Topology Declaration**:
-   - Deployment record must be signed with Ed25519 using trusted public key.
-   - Mandatory `db_topology` and `storage_topology` sections; missing topologies fail closed.
-   - Physical DB and Storage connectivity probes fail closed and match observed identities against signed topology.
+CURRENT_GATE: Gate C Owner/Admin Infrastructure Input Required
+NEXT_GATE: OWNER / ADMIN INFRASTRUCTURE INPUT DECISION
+NEXT_CONTROL_DECISION: OWNER / ADMIN INFRASTRUCTURE INPUT REQUIRED
+NEXT_RECOMMENDED_ACTION: OWNER / ADMIN DECISION ON INFRASTRUCTURE METADATA INPUT
 
-4. **Scenario 43 & 44 Adversarial Security Suite**:
-   - Expanded adversarial test suite proving in-process caller cannot override production authority, forged JSON is rejected, symlinks are rejected, missing/corrupted signatures are rejected, probe-confirmed configured endpoint/bucket identity matches signed topology before provider I/O.
-   - Symmetrically enforced root UID 0 / GID 0 and parent directory hierarchy traversal on public keys and deployment records, verified zero provider calls before failure.
+WP020_STATUS: ACTIVE / NOT CLOSED
+CORE_V1_PROGRESS: 19 / 20 = 95%
+CORE_V1_RELEASE_DECLARED: FALSE
 
-5. **Truthful Status & Acceptance Matrix Markings**:
-   - **Scenario 44**: Marked `LOCAL TEST PASS / INDEPENDENT GATE B REVIEW ACCEPTED`.
-   - **Scenario 43**: Marked `LOCAL TEST PASS / INDEPENDENT GATE B REVIEW ACCEPTED`.
-   - **Scenario 42**: Kept `PARTIAL / NOT PROVEN`.
-   - **Scenario 35**: Kept `PARTIAL / NOT PROVEN`.
-   - **Scenario 40**: Kept `PARTIAL / NOT PROVEN`.
-   - **Scenario 41**: Kept `PARTIAL / NOT PROVEN`.
-   - **Scenario 25**: Kept `NOT PROVEN / DEFERRED TO GATE C`.
+OWNER_AUTHORIZATION_COMMENT: 5726622599 (Issue #63)
+TARGET_PR: TBD (Close PR)
+TARGET_BRANCH: ai/p4-wp020-rec1-gatec-infra-owner-admin-input1-close
 
----
+PREDECESSOR_PACKAGE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1
+PREDECESSOR_PR: 117
+PREDECESSOR_AUTHORIZATION_COMMENT: 5725424016
+PREDECESSOR_REVIEWED_HEAD: a42533ad87367e828632fb62df2d701461fcd668
+PREDECESSOR_FINAL_REVIEW: 5245180962
+PREDECESSOR_MERGE_COMMIT: addf1db25bc8f197f215f24c937d89b66be08403
+PREDECESSOR_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE
+PREDECESSOR_FINAL_RESULT: OWNER_ADMIN_INPUT_STILL_INCOMPLETE
 
-## 3. Strict Invariants & Audit Truth
-
-### CURRENT CORRECTIVE RUN COUNTERS:
-- `REAL PROVIDER STATUS GET = 0`
-- `REAL PROVIDER GENERATION POST = 0`
-- `PAID CALLS = 0`
-- `NEW PROVIDER JOBS = 0`
-- `MANUAL WORKFLOW DISPATCH / RERUN = 0`
-
-### HISTORICAL IMMUTABLE AUDIT TRUTH:
-- `Historical Generation POST = 1`
-- `Historical Run = 34569728383`
-- `Historical Provider Job = 995880130565918720`
-- `Status = PERMANENTLY CONSUMED / NEVER RERUN / NEVER REGENERATE`
-
-### GOVERNANCE & ASSET INVARIANTS:
-- `Retained recoverable URL/file = NOT PROVEN`
-- `Durable VIDEO Asset = NOT PROVEN`
-- `Provider credits reported = 30.0`
-- `Actual credits consumed = UNKNOWN / NOT CONFIRMED`
-- `USD = UNKNOWN / NOT CONVERTED`
-- `WP020 = ACTIVE / NOT CLOSED`
-- `Core V1 = 19/20 = 95%`
-- `Release = NOT DECLARED`
-- `Gate C / REC1-RUN1 = STRICTLY NOT AUTHORIZED / BLOCKED`
+CLOSE_MERGE_COMMIT: AUTHORITATIVE FROM GITHUB AFTER CLOSE PR MERGE
+```
 
 ---
 
-## 4. Test Verification Summary
+## 2. Gate Predecessor Chain (Sequential & Complete)
 
-### LATEST RECORDED PRE-CORRECTIVE CI EVIDENCE:
-- Recorded PR Head: `5301c80731a4433ea2d7ba1451c4be49b914c905`
-- Frontend Run: `35214227204` / **SUCCESS**
-- Backend Run: `35214227179` / **SUCCESS**
-  - `backend-tests` = **SUCCESS**
-  - `fresh-postgres-migrations (fresh-head)` = **SUCCESS**
-  - `fresh-postgres-migrations (from-revision-010)` = **SUCCESS**
-- Alembic Single Head: `022_provider_execution_fences_and_audits (head)`
-- *Note*: Exact-current-head CI is authoritative from GitHub Actions / independent review and is intentionally not hard-coded here because any documentation corrective commit advances the PR HEAD.
+```text
+LAST_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-OWNER-ADMIN-INPUT1
+LAST_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #117, merge commit addf1db25bc8f197f215f24c937d89b66be08403)
 
-### HISTORICAL GATE B CI EVIDENCE:
-- Backend Run: `35188302872` -> **SUCCESS** (`672 passed, 2 skipped`)
-- Frontend Run: `35188302878` -> **SUCCESS**
-- Local Evidence: `backend/tests/test_vidu_recovery_gate_b.py`: **47 passed**
-- Full backend suite (local): **674 passed**
-- Frontend suite (local): **52 passed**
+PREV_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PATHA-DISCOVERY1-CLOSE
+PREV_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #116, merge commit 92ce4665529cbe99ecb4c30cf28e59fd786b0599)
+
+PREV2_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PATHA-DISCOVERY1
+PREV2_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #115, merge commit 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7)
+
+PREV3_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1-CLOSE
+PREV3_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #114, merge commit cefab1275bf8194f161f97b1a27f6bd50b129eee)
+
+PREV4_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1
+PREV4_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #113, merge commit 71476a435013e78d0736cafc2af8c5cb6e27b5fe)
+
+PREV5_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1-CLOSE
+PREV5_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #112, merge commit cb20631556bafdeaf17373fca3fd7ef8d9234c80)
+
+PREV6_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-VERIFY1
+PREV6_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #111, merge commit da39e32c35b689ba2d2852c7f9b5ca7961a1d92c)
+
+PREV7_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PREFLIGHT1
+PREV7_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #110, merge commit ead14bf9d9b36958618d0f6d6531ff44b9506492)
+
+PREV8_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1-CLOSE
+PREV8_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #109, merge commit 79bf07cb7907b542d68871c7bc493e72d9562e8a)
+
+PREV9_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-HARNESS1
+PREV9_COMPLETED_STATUS: PASS / OWNER APPROVED / MERGED / COMPLETE (PR #108, merge commit b605a4d9928a7411a7f41cd7058d3a8fbceae581)
+
+PREV10_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-CONTRACT1-CLOSE
+PREV10_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #107, merge commit ed9f4baf1bfd73771ed6ba357dd1854a7d4ec0a7)
+
+PREV11_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-CONTRACT1
+PREV11_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #106, merge commit e09ee2127d0a20c01f6aad38eb759e5bfba7e248)
+
+PREV12_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-READY1
+PREV12_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #105, merge commit 0326def88915b25fbb4e2b7019753c2b3fedc0f7)
+
+PREV13_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-PREP-CLOSE
+PREV13_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #104, merge commit ea62dcb6db8c4a801429dd1d0cea8ad7fd13ae2c)
+
+PREV14_COMPLETED_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-PREP
+PREV14_COMPLETED_STATUS: PASS / MERGED / COMPLETE (PR #103, merge commit 7ff516f317f84278f6143f15cc58b91fd3fa34d5)
+```
+
+---
+
+## 3. Owner/Admin Infrastructure Input Request Status
+
+```text
+STATUS: INPUT CAPTURED / STILL INCOMPLETE / BIND1 ELIGIBILITY NOT PROVEN
+REASON: Owner / Admin infrastructure metadata has not yet been supplied. Work cannot advance to BIND1 until required non-secret metadata is formally provided.
+PROHIBITED REQUESTS: No passwords, no API keys, no secret values, no private credentials.
+```
+
+---
+
+## 4. Zero-Action Invariants
+
+```text
+APPLICATION_BINDING_ACTIONS = 0
+PROVISIONING_ACTIONS = 0
+
+CLOUD_RESOURCE_CREATIONS = 0
+CLOUD_RESOURCE_MUTATIONS = 0
+IAM_MUTATIONS = 0
+NETWORK_MUTATIONS = 0
+
+SECRET_VALUE_READS = 0
+SECRET_VALUE_PRINTS = 0
+SECRET_MUTATIONS = 0
+
+DATABASE_WRITES = 0
+OBJECT_WRITES = 0
+
+BACKUP_EXECUTIONS = 0
+RESTORE_EXECUTIONS = 0
+CONNECTIVITY_TESTS = 0
+
+REAL_VIDU_GET_CALLS = 0
+VIDU_GENERATION_POSTS = 0
+OPENAI_PROVIDER_CALLS = 0
+GEMINI_PROVIDER_CALLS = 0
+ELEVENLABS_PROVIDER_CALLS = 0
+REAL_AI_PROVIDER_CALLS = 0
+PAID_PROVIDER_CALLS = 0
+
+REC1_RUN1_DISPATCHES = 0
+
+DEPLOYMENTS = 0
+RELEASE_ACTIONS = 0
+
+HISTORICAL_JOB_995880130565918720_QUERIED = 0
+HISTORICAL_RUN_34569728383_RERUN = 0
+```
