@@ -12,7 +12,12 @@ OWNER_AUTHORIZATION = APPROVED IN CHAT 2026-09-18
 AUTHORIZED_BASE_MAIN = 8891efbbc2a60433db6c94d7c995d6be25263d94
 AUTHORIZATION_COMMENT_ID = 5730229950
 AUTHORIZATION_COMMENT_URL = https://github.com/rebootob/Orbis-Video-Studio-AI/issues/63#issuecomment-5730229950
+CLOSE_PACKAGE_OWNER_AUTHORIZATION_COMMENT = 5730229950
 AUTHORIZED_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-design1-close
+TARGET_PR = 120
+TARGET_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-design1-close
+IN_FLIGHT_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-design1-close
+CLOSURE_PR_STATUS = OPEN / IN REVIEW
 CLOSE_MERGE_COMMIT = AUTHORITATIVE FROM GITHUB AFTER CLOSE PR MERGE
 
 # PREDECESSOR TRUTH
@@ -99,7 +104,9 @@ Following independent ChatGPT review (`5247889521`) confirming:
 4. MinIO runtime verification is explicitly documented as `NOT EXECUTED / NOT PROVEN`.
 5. Zero mutations occurred across code, database, Docker runtime, or AI providers.
 
-The Project Owner formally approved the merge under comment `5730229950`, and PR #119 was merged into canonical `main` at commit `8891efbbc2a60433db6c94d7c995d6be25263d94`.
+PR #119 had already been Owner-approved and merged into canonical main at merge commit `8891efbbc2a60433db6c94d7c995d6be25263d94` after independent review 5247889521 of exact HEAD `9813a69f8535fb518a07afa68f30aab6d889dfbb`.
+
+Issue #63 comment 5730229950 separately authorizes this LOCALPC-DESIGN1-CLOSE post-merge control closure package only.
 
 This package (`P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-LOCALPC-DESIGN1-CLOSE`) establishes formal post-merge control synchronization across all repository control planes.
 
