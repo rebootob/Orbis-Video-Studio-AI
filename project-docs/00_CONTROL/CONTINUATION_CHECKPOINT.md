@@ -2,7 +2,7 @@
 
 > Canonical location: `project-docs/00_CONTROL/CONTINUATION_CHECKPOINT.md`
 >
-> Updated: Gate C UAT Infrastructure Decision Preparation (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-UAT-INFRA-DECISION1-CLOSE)
+> Updated: Gate C UAT Infrastructure Path A Read-Only Discovery (P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PATHA-DISCOVERY1)
 
 ---
 
@@ -10,16 +10,24 @@
 
 - **Project**: Orbis Video Studio AI
 - **Repository**: `rebootob/Orbis-Video-Studio-AI`
-- **Canonical Base Main**: `71476a435013e78d0736cafc2af8c5cb6e27b5fe`
-- **Active Work Package**: `NONE`
+- **Canonical Base Main**: `cefab1275bf8194f161f97b1a27f6bd50b129eee`
+- **Active Work Package**: `P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-PATHA-DISCOVERY1`
 - **Active Execution Package**: `NONE`
-- **Current Gate**: Gate C UAT Infrastructure Decision Preparation Closed
-- **Next Control Decision**: `OWNER UAT INFRASTRUCTURE PATH DECISION`
-- **Next Recommended Action**: `OWNER SELECTS PATH A (BIND EXISTING) OR PATH B (PROVISION NEW)`
+- **Package Status**: `IN REVIEW / NOT MERGED`
+- **Discovery Mode**: `READ-ONLY / NO-INFRA-MUTATION`
+- **Current Gate**: Gate C UAT Infrastructure Path A Read-Only Discovery
+- **Next Control Decision**: `INDEPENDENT CHATGPT REVIEW OF PATH A DISCOVERY EVIDENCE & OWNER REVIEW`
+- **Next Recommended Action**: `INDEPENDENT REVIEW OF PR & OWNER DECISION ON PATH A DISCOVERY EVIDENCE`
 - **Future Provisioning**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
 - **Future Binding**: `NOT AUTHORIZED / PROPOSED IN DECISION MATRIX ONLY`
-- **Gate C Status**: `UAT INFRASTRUCTURE DECISION PREPARED / CLOSED / AWAITING OWNER PATH DECISION`
+- **Gate C Status**: `UAT INFRASTRUCTURE PATH A READ-ONLY DISCOVERY COMPLETE / IN PR REVIEW`
+- **DISCOVERY_RESULT**: `OWNER_ADMIN_INPUT_REQUIRED`
+- **BIND1_ELIGIBILITY**: `NOT YET PROVEN`
+- **BIND1_STATUS**: `NOT AUTHORIZED`
+- **PATH_A_STATUS**: `PROPOSED / DISCOVERY COMPLETE / OWNER ADMIN INPUT REQUIRED`
+- **PATH_B_STATUS**: `PROPOSED / NOT AUTHORIZED`
 - **REC1_RUN1_STATUS**: `BLOCKED / NOT AUTHORIZED / UNCONSUMED`
+- **Gate C UAT Infra Decision Close PR**: `PR #114 (Merged, commit cefab1275bf8194f161f97b1a27f6bd50b129eee)`
 - **Gate C UAT Infra Decision PR**: `PR #113 (Merged, commit 71476a435013e78d0736cafc2af8c5cb6e27b5fe, Final Review: 5242499165)`
 - **Gate C Verify Close PR**: `PR #112 (Merged, commit cb20631556bafdeaf17373fca3fd7ef8d9234c80, Final Review: 5237726029)`
 - **Gate C Verification PR**: `PR #111 (Merged, commit da39e32c35b689ba2d2852c7f9b5ca7961a1d92c, Final Review: 5236014614)`
