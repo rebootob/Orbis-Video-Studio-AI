@@ -80,9 +80,12 @@ CURRENT_GATE: P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-LOCALPC-PROVISION1-CLOSE
 NEXT_GATE: OWNER DECISION REQUIRED / BIND1 ELIGIBLE BUT NOT AUTHORIZED
 
 AUTHORIZED_BASE_MAIN: b30ee034da3dba163ac9b07baf727b461a58e082
+TARGET_PR: 123
 TARGET_BRANCH: ai/p4-wp020-rec1-gatec-infra-localpc-provision1-close
 IN_FLIGHT_BRANCH: ai/p4-wp020-rec1-gatec-infra-localpc-provision1-close
-OWNER_AUTHORIZATION_COMMENT: 5731106521 (Issue #63)
+CLOSURE_PR_STATUS: OPEN / IN REVIEW
+OWNER_AUTHORIZATION: EXPLICIT OWNER APPROVAL IN CHAT
+PREDECESSOR_AUTHORIZATION_COMMENT: 5731106521 (Issue #63)
 
 LAST_COMPLETED_GATE = P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-LOCALPC-PROVISION1
 LAST_COMPLETED_STATUS = PASS / OWNER APPROVED / MERGED / COMPLETE (PR #122, merge commit b30ee034da3dba163ac9b07baf727b461a58e082)
@@ -745,11 +748,11 @@ No step auto-authorizes the next one. R4 is permanently consumed; R5 paid execut
 ### P4-WP020-LIVE-R5-VIDU2-REC1-GATEC-INFRA-LOCALPC-PROVISION1-CLOSE — Gate C Local PC Infrastructure Provisioning Post-Merge Control Closure
 
 - **Dedicated Branch**: `ai/p4-wp020-rec1-gatec-infra-localpc-provision1-close`
-- **Target PR**: Pending creation
+- **Target PR**: PR #123 (Open)
 - **Base Commit**: `b30ee034da3dba163ac9b07baf727b461a58e082` (Merged PR #122)
 - **Status**: `IN PROGRESS / DOCS-ONLY / WAITING FOR REVIEW`
 - **Deliverable**: `project-docs/40_DELIVERY/P4_WP020_LIVE_R5_VIDU2_REC1_GATEC_INFRA_LOCALPC_PROVISION1_CLOSE.md`
-- **Authorization**: Owner-approved ChatGPT Control Plane `CONTROL_EXECUTION_REQUEST`
+- **Authorization**: EXPLICIT OWNER APPROVAL IN CHAT (Predecessor authorization: 5731106521, Issue #63)
 - **Findings & Invariant Rules**:
   - `MODE = DOCS-ONLY POST-MERGE CONTROL CLOSURE`
   - `PR_122_STATUS = MERGED / CLOSED`
