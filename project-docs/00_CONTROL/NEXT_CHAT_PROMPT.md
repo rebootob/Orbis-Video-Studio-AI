@@ -10,7 +10,9 @@ RESPOND TO OWNER IN THAI.
 PROJECT
 - Repository: rebootob/Orbis-Video-Studio-AI
 - Canonical branch: main
-Canonical main SHA: fresh-fetch from GitHub repository truth (Post-Path-A-Discovery-Close canonical main: 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7)
+- Canonical main SHA: fresh-fetch from GitHub repository truth
+- PATHA-DISCOVERY1-CLOSE authorized base / predecessor merged main: 9b1cfe1ccff9c8b66be1b6c40fd3a64a7b971ad7
+- Post-PATHA-DISCOVERY1-CLOSE canonical main: AUTHORITATIVE FROM GITHUB AFTER PR #116 MERGE
 
 ROLE MODEL
 - Owner = final human authority / merge approval
