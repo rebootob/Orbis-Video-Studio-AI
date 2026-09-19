@@ -198,9 +198,34 @@ MINIO_RESTORE_INTEGRITY: PASS
 
 ### Evidence Source
 
-Local repository code + restored scratch DB state. No provider network I/O used.
+Empirical execution of production authorization and preflight code (`RecoveryAuthService.verify_phase_2_and_claim_fence`) inside `orbis_backend` against restored scratch runtime identity (`orbis_studio_rec1_restore_scratch` at migration head `022_provider_execution_fences_and_audits` and `orbis-assets-rec1-restore-scratch`).
+Temporary process-local environment used: `VIDU_RECOVERY_GET_ENABLED=false`, `VIDU_GENERATION_ENABLED=false`. No committed configs or .env modified. No live provider network I/O attempted.
 
-### Fence Mechanism (Repository Evidence)
+### Empirical Execution & Fail-Closed Evidence
+
+```yaml
+RESTORED_RUNTIME_TEST_EXECUTED: TRUE
+RESTORED_DATABASE_IDENTITY: orbis_studio_rec1_restore_scratch
+RESTORED_BUCKET_IDENTITY: orbis-assets-rec1-restore-scratch
+RESTORED_MIGRATION_HEAD: 022_provider_execution_fences_and_audits
+
+VIDU_RECOVERY_GET_ENABLED: FALSE
+VIDU_GENERATION_ENABLED: FALSE
+
+FAIL_CLOSED_EXCEPTION_CLASS: app.services.recovery_auth.RecoveryAuthError
+FAIL_CLOSED_EXCEPTION_MESSAGE: "Restored runtime safety check failed: VIDU_RECOVERY_GET_ENABLED is not explicitly True (fail-closed)"
+
+PROVIDER_CHECK_JOB_STATUS_INVOCATIONS: 0
+PROVIDER_NETWORK_IO_ATTEMPTED: FALSE
+REAL_VIDU_GET_CALLS: 0
+VIDU_GENERATION_POSTS: 0
+REC1_RUN1_DISPATCHES: 0
+
+RESTORED_RUNTIME_PROVIDER_ENABLED: FALSE
+RESTORED_RUNTIME_FAIL_CLOSED: PASS
+```
+
+### Static Fence Mechanisms (Defense-in-Depth)
 
 ```
 File: backend/app/cli/vidu_recovery_harness.py
@@ -208,24 +233,7 @@ Line 72: raise RuntimeError("POST / submit_generation_job is strictly forbidden 
 ```
 
 `submit_generation_job` raises `RuntimeError` unconditionally — generation POST is hardcoded forbidden at the harness level.
-
-### Fence Mechanism (DB Evidence — Scratch DB)
-
-```yaml
-provider_execution_fences_in_scratch_db: 0
-```
-
-Zero fence records means zero authorized dispatch tokens. The harness requires a valid pre-claimed fence record with `authorized_commit_sha` matching current HEAD before any provider GET is permitted. With 0 fence records, no provider interaction is possible.
-
-### Fail-Closed Verification
-
-```yaml
-RESTORED_RUNTIME_PROVIDER_ENABLED: FALSE
-RESTORED_RUNTIME_FAIL_CLOSED: PASS
-FENCE_RECORDS_IN_SCRATCH_DB: 0
-SUBMIT_GENERATION_JOB_GUARD: RuntimeError (hardcoded forbidden)
-PROVIDER_NETWORK_IO_ATTEMPTED: NONE
-```
+Zero fence records in scratch database ensures zero pre-claimed tokens.
 
 ---
 
@@ -345,6 +353,13 @@ MINIO_RESTORE_SCRATCH: PASS
 RESTORED_BUCKET_IDENTITY: orbis-assets-rec1-restore-scratch
 MINIO_RESTORE_INTEGRITY: PASS
 
+RESTORED_RUNTIME_TEST_EXECUTED: TRUE
+VIDU_RECOVERY_GET_ENABLED: FALSE
+VIDU_GENERATION_ENABLED: FALSE
+FAIL_CLOSED_EXCEPTION_CLASS: app.services.recovery_auth.RecoveryAuthError
+FAIL_CLOSED_EXCEPTION_MESSAGE: "Restored runtime safety check failed: VIDU_RECOVERY_GET_ENABLED is not explicitly True (fail-closed)"
+PROVIDER_CHECK_JOB_STATUS_INVOCATIONS: 0
+PROVIDER_NETWORK_IO_ATTEMPTED: FALSE
 RESTORED_RUNTIME_PROVIDER_ENABLED: FALSE
 RESTORED_RUNTIME_FAIL_CLOSED: PASS
 
