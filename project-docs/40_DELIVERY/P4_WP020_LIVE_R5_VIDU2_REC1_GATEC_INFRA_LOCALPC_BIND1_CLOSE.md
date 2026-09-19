@@ -13,7 +13,7 @@ AUTHORIZED_BASE_MAIN = 040fe22dd05fead8bbd4bdd1811bd935826ffdaf
 AUTHORIZED_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-bind1-close
 TARGET_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-bind1-close
 IN_FLIGHT_BRANCH = ai/p4-wp020-rec1-gatec-infra-localpc-bind1-close
-TARGET_PR = Pending Creation
+TARGET_PR = 125
 CLOSURE_PR_STATUS = OPEN / IN REVIEW
 CLOSE_MERGE_COMMIT = AUTHORITATIVE FROM GITHUB AFTER CLOSE PR MERGE
 
