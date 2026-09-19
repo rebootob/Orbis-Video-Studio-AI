@@ -6,7 +6,7 @@
 > **Owner Authorization:** EXPLICIT OWNER APPROVAL IN CHAT
 > **Authorized Base Main:** `17a0d2fa36e9dfe390c47fbc0e8666ab4bd15e51`
 > **Authorized Branch:** `ai/p4-wp020-rec1-gatec-infra-localpc-bind1`
-> **Target PR:** Pending Creation
+> **Target PR:** PR #124 (Open)
 > **PR Status:** `OPEN / IN REVIEW`
 > **Postgres Application Bind Result:** `POSTGRES_APPLICATION_BIND = PASS`
 > **MinIO Application Bind Result:** `MINIO_APPLICATION_BIND = PASS`
